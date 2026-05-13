@@ -79,7 +79,7 @@ function copyClean(tabId, allowed, uppercase) {
         node.childNodes.forEach(child => frag.appendChild(clean(child)));
 
         if (allowed.includes(node.tagName)) {
-          const el = document.createElement(node.tagName.toLowerCase());
+          const el = document.createElement(node.tagName === 'OL' ? 'ul' : node.tagName.toLowerCase());
           if (node.tagName === 'A') {
             const href = node.getAttribute('href');
             if (href) el.setAttribute('href', href);
