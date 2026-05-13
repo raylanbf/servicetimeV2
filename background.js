@@ -357,7 +357,7 @@ async function convertFormulaToLatex(info, tab) {
 
     if (!res.ok) throw new Error(`OpenRouter: erro ${res.status}`);
     const data  = await res.json();
-    const latex = data.choices[0].message.content.trim();
+    const latex = data.choices[0].message.content.trim().replace(/\\large\b/g, '\\Large');
 
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
