@@ -13,44 +13,84 @@ const APPS_SCRIPT =
   try {
     var dados = JSON.parse(e.postData.contents);
     var planilha = SpreadsheetApp.getActiveSpreadsheet();
-    var nomeAba  = dados.usuario || "Sem nome";
-    var cabecalho = ["Usuário","Data","Tipo de Serviço","Início","Fim","Duração","Pausas","URLs","Comentário"];
+    var aba = planilha.getSheets()[0];
 
-    var aba = planilha.getSheetByName(nomeAba);
-    if (!aba) {
-      aba = planilha.insertSheet(nomeAba);
-      aba.appendRow(cabecalho);
-      aba.getRange(1,1,1,9).setFontWeight("bold");
-    } else if (aba.getLastColumn() < 9) {
-      aba.getRange(1,1,1,9).setValues([cabecalho]).setFontWeight("bold");
+    var NOVOS_CABECALHOS = ["Data (AP)", "Início (AP)", "Fim (AP)", "Duração (AP)", "Pausas (AP)", "URLs (AP)", "Comentário (AP)"];
+
+    // Mapear cabeçalhos existentes (case-insensitive)
+    var ultimaColuna = aba.getLastColumn();
+    var headerRow = aba.getRange(1, 1, 1, ultimaColuna).getValues()[0];
+    var colMap = {};
+    for (var c = 0; c < headerRow.length; c++) {
+      var h = String(headerRow[c]).trim().toLowerCase();
+      if (h) colMap[h] = c + 1;
     }
 
+    // Criar novos cabeçalhos se não existirem
+    var proxCol = ultimaColuna + 1;
+    for (var nc = 0; nc < NOVOS_CABECALHOS.length; nc++) {
+      var chave = NOVOS_CABECALHOS[nc].toLowerCase();
+      if (!colMap[chave]) {
+        aba.getRange(1, proxCol).setValue(NOVOS_CABECALHOS[nc]).setFontWeight("bold");
+        colMap[chave] = proxCol;
+        proxCol++;
+      }
+    }
+
+    // Coluna "Id da tarefa"
+    var colIdTarefa = colMap["id da tarefa"];
+    if (!colIdTarefa) throw new Error('Coluna "Id da tarefa" não encontrada na planilha');
+
+    // Carregar IDs da coluna de uma vez
+    var lastRow = aba.getLastRow();
+    var idsArr = aba.getRange(2, colIdTarefa, lastRow - 1, 1).getValues();
+
     var registros = dados.registros || [];
-    var linhas = [];
+    var editados = 0;
+    var naoEncontrados = 0;
+
     for (var i = 0; i < registros.length; i++) {
       var r = registros[i];
+
+      // Extrair task ID de qualquer URL (ex: ?task=61101 ou &task=61101)
+      var taskId = null;
+      var allUrls = [r.url || ""].concat(r.links || []);
+      for (var u = 0; u < allUrls.length; u++) {
+        var m = String(allUrls[u]).match(/[?&]task=(\\d+)/);
+        if (m) { taskId = m[1]; break; }
+      }
+      if (!taskId) { naoEncontrados++; continue; }
+
+      // Buscar linha pelo ID
+      var rowIndex = -1;
+      for (var row = 0; row < idsArr.length; row++) {
+        if (String(idsArr[row][0]).trim() === taskId) {
+          rowIndex = row + 2;
+          break;
+        }
+      }
+      if (rowIndex === -1) { naoEncontrados++; continue; }
+
+      // Formatar pausas e URLs
       var pausas = (r.pausas || []).map(function(p) {
         return (p.pausa || "") + " → " + (p.retorno || "-");
       }).join("; ");
-      var allLinks = [r.url || ""].concat(r.links || []).filter(Boolean).join("\\n");
-      linhas.push([
-        r.usuario      || nomeAba,
-        r.data         || "",
-        r.tipo_servico || "",
-        r.inicio       || "",
-        r.fim          || "",
-        r.tempo_total  || "",
-        pausas,
-        allLinks,
-        r.comentario   || ""
-      ]);
+      var urls = allUrls.filter(Boolean).join("\\n");
+
+      // Preencher colunas novas na linha encontrada
+      aba.getRange(rowIndex, colMap["data (ap)"]).setValue(r.data || "");
+      aba.getRange(rowIndex, colMap["início (ap)"]).setValue(r.inicio || "");
+      aba.getRange(rowIndex, colMap["fim (ap)"]).setValue(r.fim || "");
+      aba.getRange(rowIndex, colMap["duração (ap)"]).setValue(r.tempo_total || "");
+      aba.getRange(rowIndex, colMap["pausas (ap)"]).setValue(pausas);
+      aba.getRange(rowIndex, colMap["urls (ap)"]).setValue(urls);
+      aba.getRange(rowIndex, colMap["comentário (ap)"]).setValue(r.comentario || "");
+
+      editados++;
     }
 
-    if (linhas.length > 0)
-      aba.getRange(aba.getLastRow()+1, 1, linhas.length, 9).setValues(linhas);
-
     return ContentService
-      .createTextOutput(JSON.stringify({ status: "ok", linhas: linhas.length }))
+      .createTextOutput(JSON.stringify({ status: "ok", editados: editados, nao_encontrados: naoEncontrados }))
       .setMimeType(ContentService.MimeType.JSON);
 
   } catch (err) {
@@ -307,7 +347,9 @@ async function doUpload() {
       pendentes.find(p => p === r) ? { ...r, enviado: true } : r);
     await persist({ registros });
     updateCount();
-    alert(`${json.linhas} registro(s) enviado(s) com sucesso!`);
+    let msg = `${json.editados} linha(s) atualizada(s) na planilha.`;
+    if (json.nao_encontrados) msg += `\n${json.nao_encontrados} registro(s) sem tarefa identificada.`;
+    alert(msg);
   } catch (err) {
     alert('Erro ao enviar: ' + err.message);
   }
