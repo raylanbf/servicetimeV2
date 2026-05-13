@@ -136,12 +136,7 @@ chrome.runtime.onInstalled.addListener(() => {
   });
   chrome.contextMenus.create({
     id: 'copy-clean',
-    title: 'Copiar texto limpo (negrito, itálico e links)',
-    contexts: ['selection'],
-  });
-  chrome.contextMenus.create({
-    id: 'copy-essential',
-    title: 'Copiar texto essencial (negrito, itálico e listas)',
+    title: 'Copiar texto limpo',
     contexts: ['selection'],
   });
   chrome.contextMenus.create({
@@ -162,10 +157,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     copyClean(tab.id, ['B', 'STRONG', 'I', 'EM', 'A'], true);
   }
   if (info.menuItemId === 'copy-clean') {
-    copyClean(tab.id, ['B', 'STRONG', 'I', 'EM', 'A'], false);
-  }
-  if (info.menuItemId === 'copy-essential') {
-    copyClean(tab.id, ['B', 'STRONG', 'I', 'EM', 'UL', 'OL', 'LI'], false);
+    copyClean(tab.id, ['B', 'STRONG', 'I', 'EM', 'A', 'UL', 'OL', 'LI'], false);
   }
   if (info.menuItemId === 'download-round') {
     (async () => {
