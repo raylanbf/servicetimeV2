@@ -153,14 +153,39 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: (w, h) => {
-          const iframes = document.querySelectorAll('iframe');
-          iframes.forEach(f => {
+          let count = 0;
+
+          // 1. Iframes renderizados no DOM
+          document.querySelectorAll('iframe').forEach(f => {
             f.setAttribute('width', w);
             f.setAttribute('height', h);
             f.style.width  = w + 'px';
             f.style.height = h + 'px';
+            count++;
           });
-          alert(`${iframes.length} vídeo(s) redimensionado(s) para ${w}×${h}.`);
+
+          // 2. Editor HTML (textarea com código-fonte, ex: Canvas HTML editor)
+          document.querySelectorAll('textarea').forEach(textarea => {
+            if (!/<iframe/i.test(textarea.value)) return;
+            const original = textarea.value;
+            const updated = original.replace(/<iframe[^>]+>/gi, tag => {
+              tag = tag.replace(/\bwidth=["']?\d+["']?/i, `width="${w}"`);
+              tag = tag.replace(/\bheight=["']?\d+["']?/i, `height="${h}"`);
+              return tag;
+            });
+            if (updated === original) return;
+            // Setter nativo para acionar reatividade de frameworks (React/Vue)
+            Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
+              .set.call(textarea, updated);
+            textarea.dispatchEvent(new Event('input',  { bubbles: true }));
+            textarea.dispatchEvent(new Event('change', { bubbles: true }));
+            count++;
+          });
+
+          alert(count
+            ? `${count} iframe(s) atualizado(s) para ${w}×${h}.`
+            : 'Nenhum iframe encontrado na página.'
+          );
         },
         args: [video_width, video_height],
       });
