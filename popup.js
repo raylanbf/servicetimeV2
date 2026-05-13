@@ -406,13 +406,17 @@ function buildEditTipos() {
 
 // ── Configurações ─────────────────────────────────────────────────────
 function buildSettings() {
-  $('settings-name').value = S.usuario;
-  $('settings-url').value  = S.webhook_url;
+  $('settings-name').value    = S.usuario;
+  $('settings-url').value     = S.webhook_url;
+  $('settings-video-w').value = S.video_width;
+  $('settings-video-h').value = S.video_height;
 
   $('btn-save-settings').onclick = async () => {
     const name = $('settings-name').value.trim();
     if (!name) return;
-    await persist({ usuario: name, webhook_url: $('settings-url').value.trim() });
+    const w = parseInt($('settings-video-w').value, 10) || 620;
+    const h = parseInt($('settings-video-h').value, 10) || 398;
+    await persist({ usuario: name, webhook_url: $('settings-url').value.trim(), video_width: w, video_height: h });
     $('user-label').textContent = '👤  ' + name;
     show('main');
   };
@@ -432,6 +436,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     accMs:         saved.accMs         || 0,
     currentRecord: saved.currentRecord || null,
     registros:     saved.registros     || [],
+    video_width:   saved.video_width   || 620,
+    video_height:  saved.video_height  || 398,
   };
 
   // Bindings estáticos

@@ -130,6 +130,11 @@ chrome.runtime.onInstalled.addListener(() => {
     title: 'Copiar texto essencial (negrito, itálico e listas)',
     contexts: ['selection'],
   });
+  chrome.contextMenus.create({
+    id: 'resize-videos',
+    title: 'Redimensionar vídeos da página',
+    contexts: ['page', 'frame'],
+  });
 });
 chrome.runtime.onStartup.addListener(refreshIcon);
 
@@ -142,6 +147,24 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
   if (info.menuItemId === 'copy-essential') {
     copyClean(tab.id, ['B', 'STRONG', 'I', 'EM', 'UL', 'OL', 'LI'], false);
+  }
+  if (info.menuItemId === 'resize-videos') {
+    chrome.storage.local.get({ video_width: 620, video_height: 398 }, ({ video_width, video_height }) => {
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (w, h) => {
+          const iframes = document.querySelectorAll('iframe');
+          iframes.forEach(f => {
+            f.setAttribute('width', w);
+            f.setAttribute('height', h);
+            f.style.width  = w + 'px';
+            f.style.height = h + 'px';
+          });
+          alert(`${iframes.length} vídeo(s) redimensionado(s) para ${w}×${h}.`);
+        },
+        args: [video_width, video_height],
+      });
+    });
   }
 });
 
