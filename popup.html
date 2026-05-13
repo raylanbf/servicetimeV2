@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+<!-- ── Setup ──────────────────────────────────────────────────────── -->
+<div id="view-setup" class="view active">
+  <p class="setup-title">⏱ Service Timer</p>
+  <p class="setup-sub">Informe seu nome para começar</p>
+  <input id="input-name" type="text" placeholder="Seu nome" autofocus>
+  <button id="btn-setup-save" class="btn btn-green btn-full mt10">Salvar e continuar</button>
+</div>
+
+<!-- ── Main ───────────────────────────────────────────────────────── -->
+<div id="view-main" class="view">
+  <div class="header">
+    <span id="user-label" class="muted small"></span>
+    <button id="btn-settings" class="btn-icon">⚙</button>
+  </div>
+  <div class="divider"></div>
+
+  <div class="row-between">
+    <span class="label">Tipo de serviço</span>
+    <button id="btn-edit-tipos" class="btn-icon">✎</button>
+  </div>
+  <select id="combo-tipo"></select>
+
+  <div class="timer-box">
+    <div id="timer" class="timer-display">00:00:00</div>
+    <div id="status" class="timer-status">Aguardando</div>
+  </div>
+
+  <div id="url-box" class="url-section" style="display:none">
+    <div class="url-header-row">
+      <span class="label">🔗 Links</span>
+      <button id="btn-add-link" class="btn-add-link">＋ Adicionar</button>
+    </div>
+    <div id="links-list" class="links-list"></div>
+  </div>
+
+  <div class="row-btns mt4">
+    <button id="btn-start" class="btn btn-green">▶  Iniciar</button>
+    <button id="btn-pause" class="btn btn-yellow" disabled>⏸  Pausar</button>
+  </div>
+  <button id="btn-stop" class="btn btn-red btn-full mt4" disabled>⏹  Finalizar serviço</button>
+
+  <div class="divider"></div>
+
+  <div class="row-btns">
+    <button id="btn-sheets" class="btn btn-blue" style="flex:1">📊  Enviar ao Google Sheets</button>
+    <button id="btn-sheets-help" class="btn btn-surface ml4" style="padding:6px 10px">?</button>
+  </div>
+
+  <div class="mt6">
+    <span id="count-label" class="small muted"></span>
+  </div>
+</div>
+
+<!-- ── Editar serviços ─────────────────────────────────────────────── -->
+<div id="view-edit-tipos" class="view">
+  <div class="view-header">
+    <button id="btn-back-tipos" class="btn-icon">←</button>
+    <span class="view-title">Editar Serviços</span>
+  </div>
+  <div id="tipos-list" class="tipos-list"></div>
+  <div class="row-btns mt4">
+    <input id="input-new-tipo" type="text" placeholder="Novo serviço..." style="flex:1;margin-right:4px">
+    <button id="btn-add-tipo" class="btn btn-green" style="padding:6px 14px">+</button>
+  </div>
+  <button id="btn-save-tipos" class="btn btn-green btn-full mt8">Salvar</button>
+</div>
+
+<!-- ── Configurações ──────────────────────────────────────────────── -->
+<div id="view-settings" class="view">
+  <div class="view-header">
+    <button id="btn-back-settings" class="btn-icon">←</button>
+    <span class="view-title">Configurações</span>
+  </div>
+  <label class="field-label">Nome do usuário</label>
+  <input id="settings-name" type="text">
+  <label class="field-label mt10">URL do Web App</label>
+  <input id="settings-url" type="text" placeholder="https://script.google.com/...">
+  <button id="btn-save-settings" class="btn btn-green btn-full mt12">Salvar</button>
+</div>
+
+<!-- ── Ajuda Google Sheets ────────────────────────────────────────── -->
+<div id="view-help" class="view">
+  <div class="view-header">
+    <button id="btn-back-help" class="btn-icon">←</button>
+    <span class="view-title">Configurar Google Sheets</span>
+  </div>
+  <ol class="help-steps">
+    <li>Abra sua planilha no Google Sheets</li>
+    <li>Clique em <b>Extensões › Apps Script</b></li>
+    <li>Apague o código existente e cole o script abaixo</li>
+    <li>Salve e clique em <b>Implantar › Nova implantação</b></li>
+    <li>Tipo: <b>App da Web</b> | Acesso: <b>Qualquer pessoa</b></li>
+    <li>Copie a URL e cole em <b>⚙ Configurações</b></li>
+  </ol>
+  <div class="divider"></div>
+  <pre id="script-box" class="script-box"></pre>
+  <button id="btn-copy-script" class="btn btn-green btn-full mt4">📋  Copiar script</button>
+</div>
+
+<!-- ── Modal de comentário ─────────────────────────────────────────── -->
+<div id="modal-comment" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <p class="modal-title">Adicionar comentário?</p>
+    <p class="modal-sub">Descreva o serviço realizado (opcional)</p>
+    <textarea id="comment-input" class="comment-textarea" placeholder="Escreva seu comentário..."></textarea>
+    <div class="modal-btns">
+      <button id="btn-comment-skip" class="btn btn-surface" style="flex:1">Pular</button>
+      <button id="btn-comment-save" class="btn btn-green" style="flex:1">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>
