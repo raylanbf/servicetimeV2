@@ -1,36 +1,42 @@
 'use strict';
 
-function makeIconData(state, size) {
-  const canvas = new OffscreenCanvas(size, size);
-  const ctx = canvas.getContext('2d');
+async function applyIcon(state) {
   const colors = { inactive: '#ef4444', running: '#4ade80', paused: '#f97316' };
-  const color = colors[state] || colors.inactive;
-  const r = size / 2;
+  const color  = colors[state] || colors.inactive;
+  const sizes  = [16, 32, 48, 128];
+  const imageData = {};
 
-  ctx.clearRect(0, 0, size, size);
-  ctx.beginPath();
-  ctx.arc(r, r, r - 1, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.fill();
+  for (const size of sizes) {
+    const canvas = new OffscreenCanvas(size, size);
+    const ctx    = canvas.getContext('2d');
 
-  ctx.fillStyle = state === 'running' ? '#000' : '#fff';
-  ctx.font = `bold ${Math.round(size * 0.55)}px Arial, sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('S', r, r + Math.round(size * 0.05));
+    // Desenha o logo GAV como base
+    const url    = chrome.runtime.getURL(`icons/icon${size}.png`);
+    const blob   = await fetch(url).then(r => r.blob());
+    const bitmap = await createImageBitmap(blob);
+    ctx.drawImage(bitmap, 0, 0, size, size);
 
-  return ctx.getImageData(0, 0, size, size);
-}
+    // Indicador de estado: círculo colorido no canto inferior direito
+    const r = Math.max(3, Math.round(size * 0.24));
+    const x = size - r - 1;
+    const y = size - r - 1;
 
-function applyIcon(state) {
-  chrome.action.setIcon({
-    imageData: {
-      16:  makeIconData(state, 16),
-      32:  makeIconData(state, 32),
-      48:  makeIconData(state, 48),
-      128: makeIconData(state, 128),
-    }
-  });
+    // Borda branca para destacar sobre o logo
+    ctx.beginPath();
+    ctx.arc(x, y, r + 1, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+
+    // Círculo colorido
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+
+    imageData[size] = ctx.getImageData(0, 0, size, size);
+  }
+
+  chrome.action.setIcon({ imageData });
 }
 
 function refreshIcon() {
