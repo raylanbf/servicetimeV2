@@ -135,6 +135,11 @@ chrome.runtime.onInstalled.addListener(() => {
     title: 'Redimensionar vídeos da página',
     contexts: ['page', 'frame'],
   });
+  chrome.contextMenus.create({
+    id: 'download-round',
+    title: 'Baixar imagem redonda',
+    contexts: ['image'],
+  });
 });
 chrome.runtime.onStartup.addListener(refreshIcon);
 
@@ -148,6 +153,49 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'copy-essential') {
     copyClean(tab.id, ['B', 'STRONG', 'I', 'EM', 'UL', 'OL', 'LI'], false);
   }
+  if (info.menuItemId === 'download-round') {
+    (async () => {
+      try {
+        const response = await fetch(info.srcUrl);
+        const blob     = await response.blob();
+        const bitmap   = await createImageBitmap(blob);
+
+        // Recorta quadrado central e aplica clip circular
+        const size   = Math.min(bitmap.width, bitmap.height);
+        const canvas = new OffscreenCanvas(size, size);
+        const ctx    = canvas.getContext('2d');
+
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+        ctx.clip();
+
+        const sx = (bitmap.width  - size) / 2;
+        const sy = (bitmap.height - size) / 2;
+        ctx.drawImage(bitmap, sx, sy, size, size, 0, 0, size, size);
+
+        const png    = await canvas.convertToBlob({ type: 'image/png' });
+        const buffer = await png.arrayBuffer();
+        const bytes  = new Uint8Array(buffer);
+
+        // Converte para base64 em chunks para evitar estouro de pilha
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 8192) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+        }
+
+        // Extrai nome do arquivo da URL original
+        const srcName = (info.srcUrl.split('/').pop().split('?')[0] || 'imagem').replace(/\.[^.]+$/, '');
+
+        chrome.downloads.download({
+          url:      `data:image/png;base64,${btoa(binary)}`,
+          filename: `${srcName}-redondo.png`,
+        });
+      } catch (err) {
+        console.error('Erro ao gerar imagem redonda:', err);
+      }
+    })();
+  }
+
   if (info.menuItemId === 'resize-videos') {
     chrome.storage.local.get({ video_width: 620, video_height: 398 }, ({ video_width, video_height }) => {
       chrome.scripting.executeScript({
