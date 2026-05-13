@@ -239,15 +239,24 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         func: (w, h) => {
           let count = 0;
 
-          // Substitui width/height apenas em tags <iframe> com allowfullscreen e dimensões numéricas
+          // Substitui dimensões em <iframe> com allowfullscreen (atributos e/ou style inline)
           function patchHtml(html) {
             return html.replace(/<iframe[^>]+>/gi, tag => {
-              if (!/allowfullscreen/i.test(tag))         return tag;
-              if (!/\bwidth=["']?\d+["']?/i.test(tag))  return tag;
-              if (!/\bheight=["']?\d+["']?/i.test(tag)) return tag;
-              const patched = tag
-                .replace(/\bwidth=["']?\d+["']?/i,  `width="${w}"`)
-                .replace(/\bheight=["']?\d+["']?/i, `height="${h}"`);
+              if (!/allowfullscreen/i.test(tag)) return tag;
+              const hasAttr  = /\bwidth=["']?\d+["']?/i.test(tag) && /\bheight=["']?\d+["']?/i.test(tag);
+              const hasStyle = /width\s*:\s*\d+px/i.test(tag) && /height\s*:\s*\d+px/i.test(tag);
+              if (!hasAttr && !hasStyle) return tag;
+              let patched = tag;
+              if (hasAttr) {
+                patched = patched
+                  .replace(/\bwidth=["']?\d+["']?/i,  `width="${w}"`)
+                  .replace(/\bheight=["']?\d+["']?/i, `height="${h}"`);
+              }
+              if (hasStyle) {
+                patched = patched
+                  .replace(/width\s*:\s*\d+px/i,  `width: ${w}px`)
+                  .replace(/height\s*:\s*\d+px/i, `height: ${h}px`);
+              }
               count++;
               return patched;
             });
