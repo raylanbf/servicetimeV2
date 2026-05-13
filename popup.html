@@ -45,7 +45,17 @@
     <button id="btn-start" class="btn btn-green">▶  Iniciar</button>
     <button id="btn-pause" class="btn btn-yellow" disabled>⏸  Pausar</button>
   </div>
-  <button id="btn-stop" class="btn btn-red btn-full mt4" disabled>⏹  Finalizar serviço</button>
+  <div class="row-btns mt4">
+    <button id="btn-stop" class="btn btn-red" disabled>⏹  Finalizar</button>
+    <button id="btn-suspend" class="btn btn-surface" disabled>📌  Suspender</button>
+  </div>
+
+  <!-- Cards suspensos -->
+  <div id="suspended-box" style="display:none">
+    <div class="divider"></div>
+    <span class="label">📋  Cards suspensos</span>
+    <div id="suspended-list" class="suspended-list mt4"></div>
+  </div>
 
   <div class="divider"></div>
 

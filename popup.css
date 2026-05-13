@@ -256,3 +256,17 @@ input[type=text]:focus { border-color: #60a5fa; }
   white-space: pre;
   margin-bottom: 6px;
 }
+
+/* ── Cards suspensos ────────────────────────────────────────────── */
+.suspended-list { display: flex; flex-direction: column; gap: 3px; }
+.suspended-item {
+  background: #2a2a3e;
+  border-radius: 4px;
+  padding: 5px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.suspended-info  { flex: 1; min-width: 0; }
+.suspended-task  { font-size: 11px; font-weight: bold; color: #60a5fa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.suspended-meta  { font-size: 10px; color: #64748b; margin-top: 1px; }

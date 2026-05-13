@@ -101,6 +101,11 @@ const APPS_SCRIPT =
 let S = {};
 let ticker = null;
 
+function extractTaskId(url) {
+  const m = (url || '').match(/[?&]task=(\d+)/);
+  return m ? `Task #${m[1]}` : null;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
@@ -159,9 +164,10 @@ function syncMain() {
   });
   if (S.currentRecord) combo.value = S.currentRecord.tipo_servico;
 
-  $('btn-start').disabled    = S.running;
-  $('btn-pause').disabled    = !S.running;
-  $('btn-stop').disabled     = !S.running;
+  $('btn-start').disabled   = S.running;
+  $('btn-pause').disabled   = !S.running;
+  $('btn-stop').disabled    = !S.running;
+  $('btn-suspend').disabled = !S.running;
 
   if (S.running && S.paused) {
     $('btn-pause').textContent  = '▶  Retomar';
@@ -185,6 +191,33 @@ function syncMain() {
 
   $('timer').textContent = fmt(elapsedMs());
   updateCount();
+
+  // Cards suspensos
+  const suspBox = $('suspended-box');
+  const suspended = S.suspended || [];
+  if (suspended.length > 0) {
+    suspBox.style.display = 'block';
+    const list = $('suspended-list');
+    list.innerHTML = '';
+    suspended.forEach((entry, i) => {
+      const label = extractTaskId(entry.record.url) || entry.record.tipo_servico;
+      const div = document.createElement('div');
+      div.className = 'suspended-item';
+      div.innerHTML =
+        `<div class="suspended-info">
+           <div class="suspended-task">${label}</div>
+           <div class="suspended-meta">${entry.record.tipo_servico} · ${fmt(entry.accMs)} acumulado</div>
+         </div>
+         <button class="btn btn-green" style="font-size:10px;padding:3px 8px;flex-shrink:0" data-i="${i}">▶ Retomar</button>`;
+      list.appendChild(div);
+    });
+    list.onclick = e => {
+      const btn = e.target.closest('[data-i]');
+      if (btn) doResumeSuspended(+btn.dataset.i);
+    };
+  } else {
+    suspBox.style.display = 'none';
+  }
 
   const urlBox = $('url-box');
   if (S.running && S.currentRecord && S.currentRecord.url) {
@@ -320,6 +353,49 @@ async function doStop() {
   alert(`Serviço finalizado!\n\nTipo: ${record.tipo_servico}\nDuração: ${dur}`);
 }
 
+// ── Suspender / Retomar card ──────────────────────────────────────────
+async function doSuspend() {
+  if (!S.running) return;
+  const ms = elapsedMs();
+  stopTick();
+
+  // Fecha pausa aberta se existir
+  const pausas = S.currentRecord.pausas.map((p, i, arr) =>
+    i === arr.length - 1 && !p.retorno ? { ...p, retorno: nowHMS() } : p
+  );
+
+  const entry = { record: { ...S.currentRecord, pausas }, accMs: ms };
+  const suspended = [...(S.suspended || []), entry];
+
+  await persist({ running: false, paused: false, startTs: null, accMs: 0, currentRecord: null, suspended });
+  syncMain();
+}
+
+async function doResumeSuspended(i) {
+  if (S.running) {
+    alert('Finalize ou suspenda o card atual antes de retomar outro.');
+    return;
+  }
+  const entry     = S.suspended[i];
+  const suspended = (S.suspended || []).filter((_, idx) => idx !== i);
+
+  // Registra retorno da pausa no histórico do card suspenso
+  const pausas = entry.record.pausas.map((p, idx, arr) =>
+    idx === arr.length - 1 && !p.retorno ? { ...p, retorno: nowHMS() } : p
+  );
+
+  await persist({
+    running:       true,
+    paused:        false,
+    startTs:       Date.now(),
+    accMs:         entry.accMs,
+    currentRecord: { ...entry.record, pausas },
+    suspended,
+  });
+  syncMain();
+  startTick();
+}
+
 // ── Google Sheets ─────────────────────────────────────────────────────
 async function doUpload() {
   if (!S.webhook_url) {
@@ -433,14 +509,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     accMs:         saved.accMs         || 0,
     currentRecord: saved.currentRecord || null,
     registros:     saved.registros     || [],
+    suspended:     saved.suspended     || [],
     video_width:   saved.video_width   || 620,
     video_height:  saved.video_height  || 398,
   };
 
   // Bindings estáticos
-  $('btn-start').addEventListener('click', doStart);
-  $('btn-pause').addEventListener('click', doPause);
-  $('btn-stop').addEventListener('click',  doStop);
+  $('btn-start').addEventListener('click',   doStart);
+  $('btn-pause').addEventListener('click',   doPause);
+  $('btn-stop').addEventListener('click',    doStop);
+  $('btn-suspend').addEventListener('click', doSuspend);
   $('combo-tipo').addEventListener('change', async () => {
     if (!S.running || !S.currentRecord) return;
     await persist({ currentRecord: { ...S.currentRecord, tipo_servico: $('combo-tipo').value } });
