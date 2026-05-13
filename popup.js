@@ -427,7 +427,7 @@ async function doUpload() {
   const pendentes = S.registros.filter(r => !r.enviado);
   if (!pendentes.length) { alert('Todos os registros já foram enviados.'); return; }
 
-  await persist({ uploading: true, uploadResult: null });
+  await persist({ uploading: true, uploadResult: null, uploadStartTs: Date.now() });
   setUploadingUI(true);
   chrome.runtime.sendMessage({ action: 'upload', webhookUrl: S.webhook_url, usuario: S.usuario, registros: pendentes });
 }
@@ -589,7 +589,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Restaura estado de upload ao reabrir popup
   if (S.uploading) {
-    setUploadingUI(true);
+    const elapsed = Date.now() - (S.uploadStartTs || 0);
+    if (elapsed > 60000) {
+      // Service worker foi encerrado antes de salvar o resultado — reseta
+      await chrome.storage.local.set({ uploading: false, uploadStartTs: null });
+      S.uploading = false;
+    } else {
+      setUploadingUI(true);
+    }
   } else if (S.uploadResult) {
     showUploadResult(S.uploadResult);
     S.uploadResult = null;
