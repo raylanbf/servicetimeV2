@@ -333,7 +333,11 @@ async function convertFormulaToLatex(info, tab) {
 
     const { base64, mimeType } = await fetchImageAsBase64(info.srcUrl);
 
-    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const endpoint = openrouter_key.startsWith('sk-or-')
+      ? 'https://openrouter.ai/api/v1/chat/completions'
+      : 'https://api.openai.com/v1/chat/completions';
+
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type':  'application/json',
