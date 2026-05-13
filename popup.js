@@ -407,6 +407,11 @@ async function doUpload() {
   const pendentes = S.registros.filter(r => !r.enviado);
   if (!pendentes.length) { alert('Todos os registros já foram enviados.'); return; }
 
+  const btn = $('btn-sheets');
+  const originalHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Enviando...';
+
   try {
     const res = await fetch(S.webhook_url, {
       method:  'POST',
@@ -425,6 +430,9 @@ async function doUpload() {
     alert(msg);
   } catch (err) {
     alert('Erro ao enviar: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHTML;
   }
 }
 
