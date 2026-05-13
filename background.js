@@ -298,40 +298,20 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 async function handleUpload({ webhookUrl, usuario, registros }) {
   try {
-    const res  = await fetch(webhookUrl, {
+    await fetch(webhookUrl, {
       method:  'POST',
       headers: { 'Content-Type': 'text/plain' },
       body:    JSON.stringify({ usuario, registros }),
     });
-    let json = {};
-    try { json = await res.json(); } catch (_) {}
 
-    const saved = await chrome.storage.local.get(['registros']);
-    let updatedRegistros;
+    const saved   = await chrome.storage.local.get(['registros']);
+    const sentIds = new Set(registros.map(r => r._id).filter(Boolean));
+    const updated = (saved.registros || []).map(r =>
+      (r._id && sentIds.has(r._id)) ? { ...r, enviado: true } : r
+    );
 
-    if (Array.isArray(json.escritos)) {
-      // Script novo: marca apenas os que foram gravados (por _id)
-      const escritos = new Set(json.escritos);
-      updatedRegistros = (saved.registros || []).map(r =>
-        r._id && escritos.has(r._id) ? { ...r, enviado: true } : r
-      );
-    } else {
-      // Script antigo ou sem retorno estruturado: marca todos os enviados
-      const sentIds = new Set(registros.map(r => r._id).filter(Boolean));
-      updatedRegistros = (saved.registros || []).map(r =>
-        r._id && sentIds.has(r._id) ? { ...r, enviado: true } : r
-      );
-    }
-
-    await chrome.storage.local.set({
-      uploading:    false,
-      uploadResult: { ok: true, editados: json.editados || registros.length, naoEncontrados: json.nao_encontrados || 0 },
-      registros:    updatedRegistros,
-    });
+    await chrome.storage.local.set({ uploading: false, uploadResult: { ok: true }, registros: updated });
   } catch (err) {
-    await chrome.storage.local.set({
-      uploading:    false,
-      uploadResult: { ok: false, erro: err.message },
-    });
+    await chrome.storage.local.set({ uploading: false, uploadResult: { ok: false, erro: err.message } });
   }
 }

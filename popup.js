@@ -415,9 +415,7 @@ function setUploadingUI(loading) {
 function showUploadResult(result) {
   if (!result) return;
   if (result.ok) {
-    let msg = `${result.editados} registro(s) gravado(s) na planilha.`;
-    if (result.naoEncontrados) msg += `\n\n⚠ ${result.naoEncontrados} não encontrado(s) — tarefa ainda não está na planilha. Ficam pendentes para reenvio.`;
-    alert(msg);
+    alert('Registros enviados com sucesso!');
   } else {
     alert('Erro ao enviar: ' + result.erro);
   }
