@@ -203,12 +203,13 @@ function syncMain() {
       const label = extractTaskId(entry.record.url) || entry.record.tipo_servico;
       const div = document.createElement('div');
       div.className = 'suspended-item';
+      const disabled = S.running ? 'disabled title="Finalize ou suspenda o card atual primeiro"' : '';
       div.innerHTML =
         `<div class="suspended-info">
            <div class="suspended-task">${label}</div>
            <div class="suspended-meta">${entry.record.tipo_servico} · ${fmt(entry.accMs)} acumulado</div>
          </div>
-         <button class="btn btn-green" style="font-size:10px;padding:3px 8px;flex-shrink:0" data-i="${i}">▶ Retomar</button>`;
+         <button class="btn btn-green" style="font-size:10px;padding:3px 8px;flex-shrink:0" data-i="${i}" ${disabled}>▶ Retomar</button>`;
       list.appendChild(div);
     });
     list.onclick = e => {
