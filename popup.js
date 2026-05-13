@@ -346,7 +346,10 @@ async function doStop() {
   const pausas = S.currentRecord.pausas.map((p, i, arr) =>
     i === arr.length - 1 && !p.retorno ? { ...p, retorno: fimHMS } : p);
 
-  const comentario = await askComment();
+  const comentarioRaw = await askComment();
+  const comentario = S.currentRecord.foiSuspenso
+    ? `CARD SUSPENSO${comentarioRaw ? ' - ' + comentarioRaw : ''}`
+    : comentarioRaw;
 
   const record    = { ...S.currentRecord, pausas, fim: fimHMS, tempo_total: dur, tempo_total_segundos: sec, comentario };
   const registros = [...S.registros, record];
@@ -393,7 +396,7 @@ async function doResumeSuspended(i) {
     paused:        false,
     startTs:       Date.now(),
     accMs:         entry.accMs,
-    currentRecord: { ...entry.record, pausas },
+    currentRecord: { ...entry.record, pausas, foiSuspenso: true },
     suspended,
   });
   syncMain();
