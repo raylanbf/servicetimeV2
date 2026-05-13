@@ -51,10 +51,13 @@ function copyClean(tabId, allowed, uppercase) {
       const sel = window.getSelection();
       if (!sel || !sel.rangeCount || sel.isCollapsed) return;
 
+      // Elementos de bloco que geram quebra de parágrafo ao serem limpos
+      const BLOCK = new Set(['P','DIV','H1','H2','H3','H4','H5','H6',
+        'LI','BLOCKQUOTE','PRE','SECTION','ARTICLE','HEADER','FOOTER','MAIN','TR']);
+
       function clean(node) {
         if (node.nodeType === 3) {
           const t = node.cloneNode();
-          // U+00A0 (&nbsp;) → espaço normal; espaços múltiplos → um único espaço
           t.textContent = t.textContent
             .replace(/ /g, ' ')
             .replace(/ {2,}/g, ' ');
@@ -62,6 +65,9 @@ function copyClean(tabId, allowed, uppercase) {
           return t;
         }
         if (node.nodeType !== 1) return document.createDocumentFragment();
+
+        // <br> preservado sempre para manter quebras simples de linha
+        if (node.tagName === 'BR') return document.createElement('br');
 
         const frag = document.createDocumentFragment();
         node.childNodes.forEach(child => frag.appendChild(clean(child)));
@@ -75,6 +81,14 @@ function copyClean(tabId, allowed, uppercase) {
           el.appendChild(frag);
           return el;
         }
+
+        // Elementos de bloco viram <p> para preservar as quebras de linha
+        if (BLOCK.has(node.tagName)) {
+          const p = document.createElement('p');
+          p.appendChild(frag);
+          return p;
+        }
+
         return frag;
       }
 
