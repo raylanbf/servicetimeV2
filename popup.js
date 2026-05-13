@@ -2,10 +2,7 @@
 
 // ── Constantes ────────────────────────────────────────────────────────
 const DEFAULT_TIPOS = [
-  'Atendimento ao Telefone',
-  'Resolução de CSC',
   'Cards Deduca',
-  'Resolução de Emails',
 ];
 
 const APPS_SCRIPT =
