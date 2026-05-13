@@ -155,8 +155,20 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         func: (w, h) => {
           let count = 0;
 
+          // Considera vídeo apenas iframes com allowfullscreen E dimensões numéricas
+          function isVideoIframe(widthAttr, heightAttr, hasAllowFullscreen) {
+            return hasAllowFullscreen
+              && widthAttr  && /^\d+$/.test(widthAttr.trim())
+              && heightAttr && /^\d+$/.test(heightAttr.trim());
+          }
+
           // 1. Iframes renderizados no DOM
           document.querySelectorAll('iframe').forEach(f => {
+            if (!isVideoIframe(
+              f.getAttribute('width'),
+              f.getAttribute('height'),
+              f.hasAttribute('allowfullscreen')
+            )) return;
             f.setAttribute('width', w);
             f.setAttribute('height', h);
             f.style.width  = w + 'px';
@@ -164,17 +176,20 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
             count++;
           });
 
-          // 2. Editor HTML (textarea com código-fonte, ex: Canvas HTML editor)
+          // 2. Editor HTML bruto (textarea do Canvas)
           document.querySelectorAll('textarea').forEach(textarea => {
             if (!/<iframe/i.test(textarea.value)) return;
             const original = textarea.value;
+            // Só altera iframes que tenham allowfullscreen e width/height numéricos
             const updated = original.replace(/<iframe[^>]+>/gi, tag => {
-              tag = tag.replace(/\bwidth=["']?\d+["']?/i, `width="${w}"`);
+              if (!/allowfullscreen/i.test(tag))    return tag;
+              if (!/\bwidth=["']?\d+["']?/i.test(tag))  return tag;
+              if (!/\bheight=["']?\d+["']?/i.test(tag)) return tag;
+              tag = tag.replace(/\bwidth=["']?\d+["']?/i,  `width="${w}"`);
               tag = tag.replace(/\bheight=["']?\d+["']?/i, `height="${h}"`);
               return tag;
             });
             if (updated === original) return;
-            // Setter nativo para acionar reatividade de frameworks (React/Vue)
             Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
               .set.call(textarea, updated);
             textarea.dispatchEvent(new Event('input',  { bubbles: true }));
@@ -183,8 +198,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
           });
 
           alert(count
-            ? `${count} iframe(s) atualizado(s) para ${w}×${h}.`
-            : 'Nenhum iframe encontrado na página.'
+            ? `${count} vídeo(s) redimensionado(s) para ${w}×${h}.`
+            : 'Nenhum vídeo encontrado na página.'
           );
         },
         args: [video_width, video_height],
