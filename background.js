@@ -275,3 +275,44 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if ('running' in changes || 'paused' in changes) refreshIcon();
 });
+
+// ── Upload delegado pelo popup ────────────────────────────────────────
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.action === 'upload') {
+    handleUpload(msg).catch(console.error);
+  }
+});
+
+async function handleUpload({ webhookUrl, usuario, registros }) {
+  try {
+    const res = await fetch(webhookUrl, {
+      method:  'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body:    JSON.stringify({ usuario, registros }),
+    });
+    const json = await res.json();
+    if (json.status !== 'ok') throw new Error(json.erro || 'Erro desconhecido');
+
+    const saved = await chrome.storage.local.get(['registros']);
+    const sentIds = new Set(registros.map(r => r._id).filter(Boolean));
+    const updatedRegistros = (saved.registros || []).map(r => {
+      if (r._id && sentIds.has(r._id)) return { ...r, enviado: true };
+      if (!r._id && registros.some(s =>
+        s.data === r.data && s.inicio === r.inicio &&
+        s.usuario === r.usuario && s.tipo_servico === r.tipo_servico
+      )) return { ...r, enviado: true };
+      return r;
+    });
+
+    await chrome.storage.local.set({
+      uploading:    false,
+      uploadResult: { ok: true, editados: json.editados, naoEncontrados: json.nao_encontrados || 0 },
+      registros:    updatedRegistros,
+    });
+  } catch (err) {
+    await chrome.storage.local.set({
+      uploading:    false,
+      uploadResult: { ok: false, erro: err.message },
+    });
+  }
+}

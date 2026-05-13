@@ -295,6 +295,7 @@ async function doStart() {
   const url = tabs[0].url;
 
   const record = {
+    _id:                  `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
     usuario:              S.usuario,
     tipo_servico:         $('combo-tipo').value,
     data:                 nowDate(),
@@ -397,6 +398,25 @@ async function doResumeSuspended(i) {
 }
 
 // ── Google Sheets ─────────────────────────────────────────────────────
+function setUploadingUI(loading) {
+  const btn = $('btn-sheets');
+  btn.disabled = loading;
+  btn.innerHTML = loading
+    ? '<span class="spinner"></span>Enviando...'
+    : '📊  Enviar ao Google Sheets';
+}
+
+function showUploadResult(result) {
+  if (!result) return;
+  if (result.ok) {
+    let msg = `${result.editados} linha(s) atualizada(s) na planilha.`;
+    if (result.naoEncontrados) msg += `\n${result.naoEncontrados} registro(s) sem tarefa identificada.`;
+    alert(msg);
+  } else {
+    alert('Erro ao enviar: ' + result.erro);
+  }
+}
+
 async function doUpload() {
   if (!S.webhook_url) {
     const url = prompt('Cole a URL do Web App (Google Apps Script):');
@@ -407,33 +427,9 @@ async function doUpload() {
   const pendentes = S.registros.filter(r => !r.enviado);
   if (!pendentes.length) { alert('Todos os registros já foram enviados.'); return; }
 
-  const btn = $('btn-sheets');
-  const originalHTML = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Enviando...';
-
-  try {
-    const res = await fetch(S.webhook_url, {
-      method:  'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body:    JSON.stringify({ usuario: S.usuario, registros: pendentes }),
-    });
-    const json = await res.json();
-    if (json.status !== 'ok') throw new Error(json.erro || 'Erro desconhecido');
-
-    const registros = S.registros.map(r =>
-      pendentes.find(p => p === r) ? { ...r, enviado: true } : r);
-    await persist({ registros });
-    updateCount();
-    let msg = `${json.editados} linha(s) atualizada(s) na planilha.`;
-    if (json.nao_encontrados) msg += `\n${json.nao_encontrados} registro(s) sem tarefa identificada.`;
-    alert(msg);
-  } catch (err) {
-    alert('Erro ao enviar: ' + err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = originalHTML;
-  }
+  await persist({ uploading: true, uploadResult: null });
+  setUploadingUI(true);
+  chrome.runtime.sendMessage({ action: 'upload', webhookUrl: S.webhook_url, usuario: S.usuario, registros: pendentes });
 }
 
 // ── Editor de serviços ────────────────────────────────────────────────
@@ -501,6 +497,15 @@ function buildSettings() {
     $('user-label').textContent = '👤  ' + name;
     show('main');
   };
+  $('btn-clear-registros').onclick = async () => {
+    const count = S.registros.length;
+    if (!count) { alert('Não há registros para limpar.'); return; }
+    if (!confirm(`Apagar todos os ${count} registro(s)?\nEsta ação não pode ser desfeita.`)) return;
+    await persist({ registros: [] });
+    updateCount();
+    alert('Registros apagados.');
+  };
+
   $('btn-back-settings').onclick = () => show('main');
 }
 
@@ -520,6 +525,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     suspended:     saved.suspended     || [],
     video_width:   saved.video_width   || 620,
     video_height:  saved.video_height  || 398,
+    uploading:     saved.uploading     || false,
+    uploadResult:  saved.uploadResult  || null,
   };
 
   // Bindings estáticos
@@ -557,9 +564,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(() => { $('btn-copy-script').textContent = '📋  Copiar script'; }, 2000);
   });
 
+  // Listener: upload concluído pelo service worker enquanto popup está aberto
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if ('uploading' in changes && changes.uploading.newValue === false) {
+      S.uploading = false;
+      setUploadingUI(false);
+      chrome.storage.local.get(['registros', 'uploadResult'], data => {
+        S.registros = data.registros || [];
+        updateCount();
+        if (data.uploadResult) {
+          showUploadResult(data.uploadResult);
+          chrome.storage.local.remove(['uploadResult']);
+        }
+      });
+    }
+  });
+
   if (!S.usuario) { show('setup'); return; }
 
   syncMain();
   show('main');
   if (S.running && !S.paused) startTick();
+
+  // Restaura estado de upload ao reabrir popup
+  if (S.uploading) {
+    setUploadingUI(true);
+  } else if (S.uploadResult) {
+    showUploadResult(S.uploadResult);
+    S.uploadResult = null;
+    chrome.storage.local.remove(['uploadResult']);
+  }
 });
