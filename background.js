@@ -292,19 +292,13 @@ async function handleUpload({ webhookUrl, usuario, registros }) {
     });
     const json = await res.json();
 
-    // Índices dos registros que foram gravados na planilha
+    // IDs dos registros gravados na planilha
     const escritos = new Set(json.escritos || []);
 
     const saved = await chrome.storage.local.get(['registros']);
-    const updatedRegistros = (saved.registros || []).map(r => {
-      const idx = registros.findIndex(s =>
-        (r._id && s._id === r._id) ||
-        (!r._id && s.data === r.data && s.inicio === r.inicio &&
-         s.usuario === r.usuario && s.tipo_servico === r.tipo_servico)
-      );
-      if (idx !== -1 && escritos.has(idx)) return { ...r, enviado: true };
-      return r;
-    });
+    const updatedRegistros = (saved.registros || []).map(r =>
+      r._id && escritos.has(r._id) ? { ...r, enviado: true } : r
+    );
 
     await chrome.storage.local.set({
       uploading:    false,

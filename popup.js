@@ -85,7 +85,7 @@ const APPS_SCRIPT =
       aba.getRange(rowIndex, colMap["comentário (ap)"]).setValue(r.comentario || "");
 
       editados++;
-      escritos.push(i);
+      escritos.push(r._id || String(i));
     }
 
     return ContentService
@@ -430,7 +430,18 @@ async function doUpload() {
     await persist({ webhook_url: url.trim() });
   }
 
-  const pendentes = S.registros.filter(r => !r.enviado);
+  // Garante que todos os pendentes têm _id (registros antigos podem não ter)
+  let registrosAtualizados = false;
+  const registros = S.registros.map(r => {
+    if (r._id || r.enviado) return r;
+    registrosAtualizados = true;
+    return { ...r, _id: `${r.data}-${r.inicio}-${(r.usuario||'').replace(/\s/g,'')}-${r.tipo_servico||''}` };
+  });
+  if (registrosAtualizados) {
+    await persist({ registros });
+  }
+
+  const pendentes = registros.filter(r => !r.enviado);
   if (!pendentes.length) { alert('Todos os registros já foram enviados.'); return; }
 
   await persist({ uploading: true, uploadResult: null, uploadStartTs: Date.now() });
