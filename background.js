@@ -17,7 +17,7 @@ async function applyIcon(state) {
     ctx.drawImage(bitmap, 0, 0, size, size);
 
     // Indicador de estado: círculo colorido no canto inferior direito
-    const r = Math.max(3, Math.round(size * 0.24));
+    const r = Math.max(2, Math.round(size * 0.14));
     const x = size - r - 1;
     const y = size - r - 1;
 
