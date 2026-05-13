@@ -158,6 +158,26 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 chrome.runtime.onStartup.addListener(refreshIcon);
 
+// Pausa automaticamente quando todas as janelas do Chrome são fechadas
+chrome.windows.onRemoved.addListener(async () => {
+  const windows = await chrome.windows.getAll({ windowTypes: ['normal', 'popup'] });
+  if (windows.length > 0) return;
+
+  const data = await chrome.storage.local.get(['running', 'paused', 'accMs', 'startTs', 'currentRecord']);
+  if (!data.running || data.paused) return;
+
+  const newAcc   = (data.accMs || 0) + (Date.now() - (data.startTs || Date.now()));
+  const pausaHMS = new Date().toTimeString().slice(0, 8);
+  const pausas   = [...(data.currentRecord?.pausas || []), { pausa: pausaHMS }];
+
+  await chrome.storage.local.set({
+    paused:        true,
+    accMs:         newAcc,
+    startTs:       null,
+    currentRecord: { ...data.currentRecord, pausas },
+  });
+});
+
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'uppercase-selection') {
     copyClean(tab.id, ['B', 'STRONG', 'I', 'EM', 'A'], true);
