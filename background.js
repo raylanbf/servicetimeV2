@@ -131,22 +131,22 @@ chrome.runtime.onInstalled.addListener(() => {
   refreshIcon();
   chrome.contextMenus.create({
     id: 'uppercase-selection',
-    title: 'Copiar em CAIXA ALTA',
+    title: '🔠 Copiar em CAIXA ALTA',
     contexts: ['selection'],
   });
   chrome.contextMenus.create({
     id: 'copy-clean',
-    title: 'Copiar texto limpo',
+    title: '🧹 Copiar texto limpo',
     contexts: ['selection'],
   });
   chrome.contextMenus.create({
     id: 'resize-videos',
-    title: 'Redimensionar vídeos da página',
+    title: '📐 Redimensionar vídeos da página',
     contexts: ['page', 'frame'],
   });
   chrome.contextMenus.create({
     id: 'download-round',
-    title: 'Baixar imagem redonda',
+    title: '⭕ Baixar imagem redonda',
     contexts: ['image'],
   });
 });
