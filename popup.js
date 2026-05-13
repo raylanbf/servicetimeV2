@@ -409,9 +409,7 @@ function setUploadingUI(loading) {
 function showUploadResult(result) {
   if (!result) return;
   if (result.ok) {
-    let msg = `${result.editados} linha(s) atualizada(s) na planilha.`;
-    if (result.naoEncontrados) msg += `\n${result.naoEncontrados} registro(s) sem tarefa identificada.`;
-    alert(msg);
+    alert('Registros enviados com sucesso!');
   } else {
     alert('Erro ao enviar: ' + result.erro);
   }

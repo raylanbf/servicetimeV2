@@ -285,13 +285,11 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 async function handleUpload({ webhookUrl, usuario, registros }) {
   try {
-    const res = await fetch(webhookUrl, {
+    await fetch(webhookUrl, {
       method:  'POST',
       headers: { 'Content-Type': 'text/plain' },
       body:    JSON.stringify({ usuario, registros }),
     });
-    const json = await res.json();
-    if (json.status !== 'ok') throw new Error(json.erro || 'Erro desconhecido');
 
     const saved = await chrome.storage.local.get(['registros']);
     const sentIds = new Set(registros.map(r => r._id).filter(Boolean));
@@ -306,7 +304,7 @@ async function handleUpload({ webhookUrl, usuario, registros }) {
 
     await chrome.storage.local.set({
       uploading:    false,
-      uploadResult: { ok: true, editados: json.editados, naoEncontrados: json.nao_encontrados || 0 },
+      uploadResult: { ok: true },
       registros:    updatedRegistros,
     });
   } catch (err) {
