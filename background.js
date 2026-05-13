@@ -285,26 +285,30 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 async function handleUpload({ webhookUrl, usuario, registros }) {
   try {
-    await fetch(webhookUrl, {
+    const res  = await fetch(webhookUrl, {
       method:  'POST',
       headers: { 'Content-Type': 'text/plain' },
       body:    JSON.stringify({ usuario, registros }),
     });
+    const json = await res.json();
+
+    // Índices dos registros que foram gravados na planilha
+    const escritos = new Set(json.escritos || []);
 
     const saved = await chrome.storage.local.get(['registros']);
-    const sentIds = new Set(registros.map(r => r._id).filter(Boolean));
     const updatedRegistros = (saved.registros || []).map(r => {
-      if (r._id && sentIds.has(r._id)) return { ...r, enviado: true };
-      if (!r._id && registros.some(s =>
-        s.data === r.data && s.inicio === r.inicio &&
-        s.usuario === r.usuario && s.tipo_servico === r.tipo_servico
-      )) return { ...r, enviado: true };
+      const idx = registros.findIndex(s =>
+        (r._id && s._id === r._id) ||
+        (!r._id && s.data === r.data && s.inicio === r.inicio &&
+         s.usuario === r.usuario && s.tipo_servico === r.tipo_servico)
+      );
+      if (idx !== -1 && escritos.has(idx)) return { ...r, enviado: true };
       return r;
     });
 
     await chrome.storage.local.set({
       uploading:    false,
-      uploadResult: { ok: true },
+      uploadResult: { ok: true, editados: json.editados || 0, naoEncontrados: json.nao_encontrados || 0 },
       registros:    updatedRegistros,
     });
   } catch (err) {

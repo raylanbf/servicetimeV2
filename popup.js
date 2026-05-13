@@ -45,6 +45,7 @@ const APPS_SCRIPT =
     var registros = dados.registros || [];
     var editados = 0;
     var naoEncontrados = 0;
+    var escritos = [];
 
     for (var i = 0; i < registros.length; i++) {
       var r = registros[i];
@@ -84,10 +85,11 @@ const APPS_SCRIPT =
       aba.getRange(rowIndex, colMap["comentário (ap)"]).setValue(r.comentario || "");
 
       editados++;
+      escritos.push(i);
     }
 
     return ContentService
-      .createTextOutput(JSON.stringify({ status: "ok", editados: editados, nao_encontrados: naoEncontrados }))
+      .createTextOutput(JSON.stringify({ status: "ok", editados: editados, nao_encontrados: naoEncontrados, escritos: escritos }))
       .setMimeType(ContentService.MimeType.JSON);
 
   } catch (err) {
@@ -410,7 +412,9 @@ function setUploadingUI(loading) {
 function showUploadResult(result) {
   if (!result) return;
   if (result.ok) {
-    alert('Registros enviados com sucesso!');
+    let msg = `${result.editados} registro(s) gravado(s) na planilha.`;
+    if (result.naoEncontrados) msg += `\n\n⚠ ${result.naoEncontrados} não encontrado(s) — tarefa ainda não está na planilha. Ficam pendentes para reenvio.`;
+    alert(msg);
   } else {
     alert('Erro ao enviar: ' + result.erro);
   }
