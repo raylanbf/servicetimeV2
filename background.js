@@ -54,6 +54,10 @@ function copyClean(tabId, allowed, uppercase) {
       function clean(node) {
         if (node.nodeType === 3) {
           const t = node.cloneNode();
+          // U+00A0 (&nbsp;) → espaço normal; espaços múltiplos → um único espaço
+          t.textContent = t.textContent
+            .replace(/ /g, ' ')
+            .replace(/ {2,}/g, ' ');
           if (uppercase) t.textContent = t.textContent.toUpperCase();
           return t;
         }
@@ -78,7 +82,15 @@ function copyClean(tabId, allowed, uppercase) {
       const wrapper = document.createElement('div');
       fragment.childNodes.forEach(child => wrapper.appendChild(clean(child)));
 
-      const cleanHtml = wrapper.innerHTML;
+      // Correções aplicadas APENAS no texto entre tags — nunca dentro de atributos
+      let cleanHtml = wrapper.innerHTML.replace(/>([^<]+)</g, (_, text) => {
+        text = text.replace(/ /g, ' ');
+        // Espaço após pontuação colada diretamente antes de letra ou dígito
+        text = text.replace(/([,;:.!?])([^\s])/g, '$1 $2');
+        text = text.replace(/ {2,}/g, ' ');
+        return `>${text}<`;
+      });
+
       const plainText = uppercase ? sel.toString().toUpperCase() : sel.toString();
 
       const el = document.createElement('textarea');
