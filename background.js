@@ -41,8 +41,33 @@ function refreshIcon() {
   });
 }
 
-chrome.runtime.onInstalled.addListener(refreshIcon);
+chrome.runtime.onInstalled.addListener(() => {
+  refreshIcon();
+  chrome.contextMenus.create({
+    id: 'uppercase-selection',
+    title: 'Colocar em CAIXA ALTA',
+    contexts: ['selection'],
+  });
+});
 chrome.runtime.onStartup.addListener(refreshIcon);
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== 'uppercase-selection') return;
+  const upper = (info.selectionText || '').toUpperCase();
+  chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: (text) => {
+      const el = document.createElement('textarea');
+      el.value = text;
+      el.style.cssText = 'position:fixed;top:-9999px;opacity:0';
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      el.remove();
+    },
+    args: [upper],
+  });
+});
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
