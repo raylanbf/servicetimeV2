@@ -294,19 +294,29 @@ async function handleUpload({ webhookUrl, usuario, registros }) {
       headers: { 'Content-Type': 'text/plain' },
       body:    JSON.stringify({ usuario, registros }),
     });
-    const json = await res.json();
-
-    // IDs dos registros gravados na planilha
-    const escritos = new Set(json.escritos || []);
+    let json = {};
+    try { json = await res.json(); } catch (_) {}
 
     const saved = await chrome.storage.local.get(['registros']);
-    const updatedRegistros = (saved.registros || []).map(r =>
-      r._id && escritos.has(r._id) ? { ...r, enviado: true } : r
-    );
+    let updatedRegistros;
+
+    if (Array.isArray(json.escritos)) {
+      // Script novo: marca apenas os que foram gravados (por _id)
+      const escritos = new Set(json.escritos);
+      updatedRegistros = (saved.registros || []).map(r =>
+        r._id && escritos.has(r._id) ? { ...r, enviado: true } : r
+      );
+    } else {
+      // Script antigo ou sem retorno estruturado: marca todos os enviados
+      const sentIds = new Set(registros.map(r => r._id).filter(Boolean));
+      updatedRegistros = (saved.registros || []).map(r =>
+        r._id && sentIds.has(r._id) ? { ...r, enviado: true } : r
+      );
+    }
 
     await chrome.storage.local.set({
       uploading:    false,
-      uploadResult: { ok: true, editados: json.editados || 0, naoEncontrados: json.nao_encontrados || 0 },
+      uploadResult: { ok: true, editados: json.editados || registros.length, naoEncontrados: json.nao_encontrados || 0 },
       registros:    updatedRegistros,
     });
   } catch (err) {
