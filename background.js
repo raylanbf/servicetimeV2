@@ -155,6 +155,11 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ['page', 'frame'],
   });
   chrome.contextMenus.create({
+    id: 'convert-formula',
+    title: '🔢 Converter fórmula para LaTeX',
+    contexts: ['image'],
+  });
+  chrome.contextMenus.create({
     id: 'download-round',
     title: '⭕ Baixar imagem redonda',
     contexts: ['image'],
@@ -183,6 +188,9 @@ chrome.windows.onRemoved.addListener(async () => {
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === 'convert-formula') {
+    convertFormulaToLatex(info, tab).catch(console.error);
+  }
   if (info.menuItemId === 'uppercase-selection') {
     copyClean(tab.id, ['B', 'STRONG', 'I', 'EM', 'A'], true);
   }
@@ -314,4 +322,82 @@ async function handleUpload({ webhookUrl, usuario, registros }) {
   } catch (err) {
     await chrome.storage.local.set({ uploading: false, uploadResult: { ok: false, erro: err.message } });
   }
+}
+
+// ── Conversor de fórmula para LaTeX ──────────────────────────────────
+async function convertFormulaToLatex(info, tab) {
+  showFormulaToast(tab.id, 'info', '⏳ Processando fórmula...');
+  try {
+    const { openrouter_key } = await chrome.storage.local.get(['openrouter_key']);
+    if (!openrouter_key) throw new Error('Configure a chave API OpenRouter em ⚙ Configurações');
+
+    const { base64, mimeType } = await fetchImageAsBase64(info.srcUrl);
+
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${openrouter_key}`,
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-4o',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Analise esta imagem de fórmula matemática e retorne APENAS o código LaTeX, sem explicações, sem marcação de código, sem delimitadores.' },
+            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+          ],
+        }],
+      }),
+    });
+
+    if (!res.ok) throw new Error(`OpenRouter: erro ${res.status}`);
+    const data  = await res.json();
+    const latex = data.choices[0].message.content.trim();
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func:   (text) => navigator.clipboard.writeText(text),
+      args:   [latex],
+    });
+
+    showFormulaToast(tab.id, 'success', '✓ LaTeX copiado!');
+  } catch (err) {
+    showFormulaToast(tab.id, 'error', '✗ ' + err.message);
+  }
+}
+
+function showFormulaToast(tabId, type, message) {
+  const bg = { info: '#1e1e2e', success: '#166534', error: '#7f1d1d' };
+  chrome.scripting.executeScript({
+    target: { tabId },
+    func: (msg, color) => {
+      document.getElementById('__svc-toast__')?.remove();
+      const el = document.createElement('div');
+      el.id = '__svc-toast__';
+      el.textContent = msg;
+      Object.assign(el.style, {
+        position: 'fixed', bottom: '24px', right: '24px',
+        background: color, color: '#e2e8f0',
+        padding: '10px 16px', borderRadius: '6px',
+        fontFamily: 'system-ui', fontSize: '13px',
+        zIndex: '2147483647', boxShadow: '0 2px 8px rgba(0,0,0,.4)',
+      });
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 4000);
+    },
+    args: [message, bg[type] || bg.info],
+  });
+}
+
+async function fetchImageAsBase64(url) {
+  const response = await fetch(url);
+  const blob     = await response.blob();
+  const mimeType = blob.type || 'image/png';
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve({ base64: reader.result.split(',')[1], mimeType });
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }

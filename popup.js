@@ -498,17 +498,19 @@ function buildEditTipos() {
 
 // ── Configurações ─────────────────────────────────────────────────────
 function buildSettings() {
-  $('settings-name').value    = S.usuario;
-  $('settings-url').value     = S.webhook_url;
-  $('settings-video-w').value = S.video_width;
-  $('settings-video-h').value = S.video_height;
+  $('settings-name').value      = S.usuario;
+  $('settings-url').value       = S.webhook_url;
+  $('settings-video-w').value   = S.video_width;
+  $('settings-video-h').value   = S.video_height;
+  $('settings-openrouter').value = S.openrouter_key || '';
 
   $('btn-save-settings').onclick = async () => {
     const name = $('settings-name').value.trim();
     if (!name) return;
-    const w = parseInt($('settings-video-w').value, 10) || 620;
-    const h = parseInt($('settings-video-h').value, 10) || 398;
-    await persist({ usuario: name, webhook_url: $('settings-url').value.trim(), video_width: w, video_height: h });
+    const w   = parseInt($('settings-video-w').value, 10) || 620;
+    const h   = parseInt($('settings-video-h').value, 10) || 398;
+    const key = $('settings-openrouter').value.trim();
+    await persist({ usuario: name, webhook_url: $('settings-url').value.trim(), video_width: w, video_height: h, openrouter_key: key });
     $('user-label').textContent = '👤  ' + name;
     show('main');
   };
@@ -538,9 +540,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentRecord: saved.currentRecord || null,
     registros:     saved.registros     || [],
     suspended:     saved.suspended     || [],
-    video_width:   saved.video_width   || 620,
-    video_height:  saved.video_height  || 398,
-    uploading:     saved.uploading     || false,
+    video_width:    saved.video_width    || 620,
+    video_height:   saved.video_height   || 398,
+    openrouter_key: saved.openrouter_key || '',
+    uploading:      saved.uploading      || false,
     uploadResult:  saved.uploadResult  || null,
   };
 
