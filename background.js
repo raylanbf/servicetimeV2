@@ -105,9 +105,13 @@ function copyClean(tabId, allowed, uppercase) {
       // Correções aplicadas APENAS no texto entre tags — nunca dentro de atributos
       let cleanHtml = wrapper.innerHTML.replace(/>([^<]+)</g, (_, text) => {
         text = text.replace(/ /g, ' ');
-        // Espaço após pontuação colada diretamente antes de letra ou dígito
-        text = text.replace(/([,;:.!?])([^\s])/g, '$1 $2');
-        text = text.replace(/ {2,}/g, ' ');
+        // Espaço após vírgula, ponto-e-vírgula, !, ?
+        text = text.replace(/([,;!?])([^\s])/g, "$1 $2");
+        // Dois-pontos: só adiciona espaço se NÃO for :// (URL)
+        text = text.replace(/:(?!\/\/)([^\s])/g, ": $1");
+        // Ponto: só antes de maiúscula (início de frase, não domínio)
+        text = text.replace(/\.([A-ZÁÉÍÓÚÀÂÊÔÃÕÜ])/g, ". $1");
+        text = text.replace(/ {2,}/g, " ");
         return `>${text}<`;
       });
 
