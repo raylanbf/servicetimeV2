@@ -496,6 +496,67 @@ function buildEditTipos() {
   $('btn-back-tipos').onclick = () => show('main');
 }
 
+// ── Links salvos / Starters ───────────────────────────────────────────
+async function doOpenStarters() {
+  const starters = (S.savedLinks || []).filter(l => l.starter);
+  if (!starters.length) { alert('Nenhum link marcado como starter.'); return; }
+  for (const l of starters) {
+    await chrome.tabs.create({ url: l.url, active: false });
+  }
+}
+
+function buildLinks() {
+  const list = $('links-saved-list');
+
+  function render() {
+    list.innerHTML = '';
+    (S.savedLinks || []).forEach((l, i) => {
+      const div = document.createElement('div');
+      div.className = 'saved-link-item';
+      div.innerHTML =
+        `<div class="saved-link-info">
+           <div class="saved-link-label">${l.label}</div>
+           <div class="saved-link-url">${l.url}</div>
+         </div>
+         <button class="star-btn ${l.starter ? 'active' : ''}" data-a="star" data-i="${i}" title="Starter">⭐</button>
+         <button class="btn-rm-link" data-a="rm" data-i="${i}">✕</button>`;
+      list.appendChild(div);
+    });
+  }
+  render();
+
+  list.onclick = async e => {
+    const btn = e.target.closest('[data-a]');
+    if (!btn) return;
+    const i = +btn.dataset.i;
+    const links = [...(S.savedLinks || [])];
+    if (btn.dataset.a === 'star') {
+      links[i] = { ...links[i], starter: !links[i].starter };
+    } else if (btn.dataset.a === 'rm') {
+      links.splice(i, 1);
+    }
+    await persist({ savedLinks: links });
+    render();
+  };
+
+  $('input-link-label').value     = '';
+  $('input-link-url').value       = '';
+  $('input-link-starter').checked = false;
+
+  $('btn-add-saved-link').onclick = async () => {
+    const label   = $('input-link-label').value.trim();
+    const url     = $('input-link-url').value.trim();
+    const starter = $('input-link-starter').checked;
+    if (!label || !url) return;
+    const links = [...(S.savedLinks || []), { label, url, starter }];
+    await persist({ savedLinks: links });
+    $('input-link-label').value     = '';
+    $('input-link-url').value       = '';
+    $('input-link-starter').checked = false;
+    render();
+  };
+}
+
 // ── Configurações ─────────────────────────────────────────────────────
 function buildSettings() {
   $('settings-name').value      = S.usuario;
@@ -545,6 +606,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     openrouter_key: saved.openrouter_key || '',
     uploading:      saved.uploading      || false,
     uploadResult:  saved.uploadResult  || null,
+    savedLinks:    saved.savedLinks    || [],
   };
 
   // Bindings estáticos
@@ -562,6 +624,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-edit-tipos').addEventListener('click', () => { buildEditTipos(); show('edit-tipos'); });
   $('btn-settings').addEventListener('click',   () => { buildSettings();  show('settings');  });
   $('btn-back-help').addEventListener('click',  () => show('main'));
+  $('btn-starters').addEventListener('click', doOpenStarters);
+  $('btn-links').addEventListener('click', () => { buildLinks(); show('links'); });
+  $('btn-back-links').addEventListener('click', () => show('settings'));
 
   $('btn-setup-save').addEventListener('click', async () => {
     const name = $('input-name').value.trim();

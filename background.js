@@ -164,6 +164,11 @@ chrome.runtime.onInstalled.addListener(() => {
     title: '⭕ Baixar imagem redonda',
     contexts: ['image'],
   });
+  chrome.contextMenus.create({
+    id: 'find-replace',
+    title: '🔍 Localizar e substituir',
+    contexts: ['page', 'frame', 'editable'],
+  });
 });
 chrome.runtime.onStartup.addListener(refreshIcon);
 
@@ -238,6 +243,165 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         console.error('Erro ao gerar imagem redonda:', err);
       }
     })();
+  }
+
+  if (info.menuItemId === 'find-replace') {
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        document.getElementById('__svc-fr__')?.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = '__svc-fr__';
+        Object.assign(overlay.style, {
+          position: 'fixed', inset: '0',
+          background: 'rgba(0,0,0,0.55)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: '2147483647', fontFamily: 'system-ui, sans-serif',
+        });
+
+        const box = document.createElement('div');
+        Object.assign(box.style, {
+          background: '#1e1e2e', color: '#e2e8f0',
+          padding: '18px 20px', borderRadius: '8px',
+          width: '340px', boxShadow: '0 4px 24px rgba(0,0,0,.7)',
+        });
+
+        function mkLabel(text) {
+          const el = document.createElement('label');
+          el.textContent = text;
+          Object.assign(el.style, {
+            display: 'block', fontSize: '11px', fontWeight: 'bold',
+            color: '#94a3b8', marginBottom: '4px',
+          });
+          return el;
+        }
+
+        function mkInput() {
+          const el = document.createElement('input');
+          Object.assign(el.style, {
+            display: 'block', width: '100%', padding: '6px 8px',
+            borderRadius: '4px', border: '1px solid #3a3a5e',
+            background: '#2a2a3e', color: '#e2e8f0', fontSize: '13px',
+            marginBottom: '10px', boxSizing: 'border-box', outline: 'none',
+          });
+          return el;
+        }
+
+        const title = document.createElement('p');
+        title.textContent = '🔍 Localizar e substituir';
+        Object.assign(title.style, { fontWeight: 'bold', fontSize: '14px', marginBottom: '14px' });
+
+        const inputFind    = mkInput();
+        const inputReplace = mkInput();
+        inputReplace.style.marginBottom = '10px';
+
+        const modeRow = document.createElement('div');
+        Object.assign(modeRow.style, {
+          display: 'flex', gap: '16px', marginBottom: '14px',
+          fontSize: '12px', color: '#cbd5e1', alignItems: 'center',
+        });
+
+        function mkRadio(labelText, val, checked) {
+          const wrap = document.createElement('label');
+          Object.assign(wrap.style, { display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' });
+          const r = document.createElement('input');
+          r.type = 'radio'; r.name = '__svc-mode__'; r.value = val; r.checked = checked;
+          Object.assign(r.style, { accentColor: '#4ade80', cursor: 'pointer' });
+          wrap.appendChild(r);
+          wrap.appendChild(document.createTextNode(labelText));
+          return { wrap, radio: r };
+        }
+
+        const { wrap: wAll,   radio: rAll }  = mkRadio('Substituir todos',   'all',   true);
+        const { wrap: wFirst, radio: rFirst } = mkRadio('Apenas o primeiro', 'first', false);
+        modeRow.appendChild(wAll);
+        modeRow.appendChild(wFirst);
+
+        const result = document.createElement('p');
+        Object.assign(result.style, {
+          fontSize: '11px', minHeight: '15px', marginBottom: '12px', color: '#94a3b8',
+        });
+
+        const btnRow = document.createElement('div');
+        Object.assign(btnRow.style, { display: 'flex', gap: '8px' });
+
+        const btnCancel = document.createElement('button');
+        btnCancel.textContent = 'Cancelar';
+        Object.assign(btnCancel.style, {
+          flex: '1', padding: '7px', borderRadius: '4px', border: 'none',
+          background: '#2a2a3e', color: '#e2e8f0', cursor: 'pointer', fontSize: '13px',
+        });
+
+        const btnDo = document.createElement('button');
+        btnDo.textContent = 'Substituir';
+        Object.assign(btnDo.style, {
+          flex: '1', padding: '7px', borderRadius: '4px', border: 'none',
+          background: '#4ade80', color: '#0f172a', cursor: 'pointer',
+          fontSize: '13px', fontWeight: 'bold',
+        });
+
+        btnCancel.onclick = () => overlay.remove();
+        overlay.onclick   = (e) => { if (e.target === overlay) overlay.remove(); };
+
+        btnDo.onclick = () => {
+          const find    = inputFind.value;
+          const replace = inputReplace.value;
+          if (!find) {
+            result.textContent = 'Informe o texto a localizar.';
+            result.style.color = '#f87171';
+            return;
+          }
+          const replaceAll = rAll.checked;
+          let totalReplaced = 0;
+
+          document.querySelectorAll('textarea').forEach(ta => {
+            if (!ta.value.includes(find)) return;
+            let updated;
+            if (replaceAll) {
+              let count = 0, pos = 0;
+              while ((pos = ta.value.indexOf(find, pos)) !== -1) { count++; pos += find.length; }
+              totalReplaced += count;
+              updated = ta.value.split(find).join(replace);
+            } else {
+              const idx = ta.value.indexOf(find);
+              if (idx === -1) return;
+              totalReplaced += 1;
+              updated = ta.value.slice(0, idx) + replace + ta.value.slice(idx + find.length);
+            }
+            Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(ta, updated);
+            ta.dispatchEvent(new Event('input',  { bubbles: true }));
+            ta.dispatchEvent(new Event('change', { bubbles: true }));
+          });
+
+          if (totalReplaced > 0) {
+            result.style.color = '#4ade80';
+            result.textContent = `✓ ${totalReplaced} substituição(ões) feita(s).`;
+          } else {
+            result.style.color = '#f87171';
+            result.textContent = 'Texto não encontrado em nenhuma textarea.';
+          }
+        };
+
+        [inputFind, inputReplace].forEach(el => {
+          el.addEventListener('keydown', e => { if (e.key === 'Enter') btnDo.click(); });
+        });
+
+        btnRow.appendChild(btnCancel);
+        btnRow.appendChild(btnDo);
+        box.appendChild(title);
+        box.appendChild(mkLabel('Localizar'));
+        box.appendChild(inputFind);
+        box.appendChild(mkLabel('Substituir por'));
+        box.appendChild(inputReplace);
+        box.appendChild(modeRow);
+        box.appendChild(result);
+        box.appendChild(btnRow);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        inputFind.focus();
+      },
+    });
   }
 
   if (info.menuItemId === 'resize-videos') {
