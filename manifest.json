@@ -4,7 +4,6 @@
   "version": "1.0",
   "description": "Controle de tempo por tipo de serviço",
   "action": {
-    "default_popup": "popup.html",
     "default_title": "Service Timer",
     "default_icon": {
       "16":  "icons/icon16.png",
@@ -12,6 +11,9 @@
       "48":  "icons/icon48.png",
       "128": "icons/icon128.png"
     }
+  },
+  "side_panel": {
+    "default_path": "popup.html"
   },
   "icons": {
     "16":  "icons/icon16.png",
@@ -22,6 +24,6 @@
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["storage", "tabs", "contextMenus", "scripting", "downloads", "windows", "clipboardWrite"],
+  "permissions": ["storage", "tabs", "contextMenus", "scripting", "downloads", "windows", "clipboardWrite", "sidePanel"],
   "host_permissions": ["https://script.google.com/*", "<all_urls>"]
 }

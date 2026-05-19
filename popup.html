@@ -55,13 +55,23 @@
   <!-- Cards suspensos -->
   <div id="suspended-box" style="display:none">
     <div class="divider"></div>
-    <span class="label">📋  Cards suspensos</span>
+    <span class="label">📌  Cards suspensos</span>
     <div id="suspended-list" class="suspended-list mt4"></div>
+  </div>
+
+  <!-- Últimos registros -->
+  <div id="recent-box" style="display:none">
+    <div class="divider"></div>
+    <div class="row-between">
+      <span class="label">🕓  Últimos registros</span>
+      <button id="btn-all-records" class="btn-link-sm">Ver todos</button>
+    </div>
+    <div id="recent-list" class="record-list mt4"></div>
   </div>
 
   <div class="divider"></div>
 
-  <div class="row-btns">
+  <div class="row-btns" style="display:none">
     <button id="btn-sheets" class="btn btn-blue" style="flex:1">📊  Enviar ao Google Sheets</button>
     <button id="btn-sheets-help" class="btn btn-surface ml4" style="padding:6px 10px">?</button>
   </div>
@@ -145,6 +155,42 @@
   <div class="divider"></div>
   <pre id="script-box" class="script-box"></pre>
   <button id="btn-copy-script" class="btn btn-green btn-full mt4">📋  Copiar script</button>
+</div>
+
+<!-- ── Todos os registros ──────────────────────────────────────────── -->
+<div id="view-records" class="view">
+  <div class="view-header">
+    <button id="btn-back-records" class="btn-icon">←</button>
+    <span class="view-title">Registros</span>
+  </div>
+  <div id="all-records-list" class="record-list record-list-full"></div>
+</div>
+
+<!-- ── Detalhe do registro ─────────────────────────────────────────── -->
+<div id="view-record-detail" class="view">
+  <div class="view-header">
+    <button id="btn-back-record-detail" class="btn-icon">←</button>
+    <span class="view-title">Detalhe</span>
+  </div>
+  <div id="record-detail-body" class="detail-body"></div>
+</div>
+
+<!-- ── Modal de resumo ────────────────────────────────────────────── -->
+<div id="modal-summary" class="modal-overlay" style="display:none">
+  <div class="modal-box summary-box">
+    <p class="modal-title">✅ Serviço finalizado</p>
+    <p id="summary-tipo" class="summary-tipo"></p>
+    <div class="summary-timer-wrap">
+      <div id="summary-dur" class="timer-display summary-dur"></div>
+      <div class="timer-status">tempo total</div>
+    </div>
+    <div class="summary-meta">
+      <div class="summary-row"><span class="muted small">Início</span><span id="summary-inicio" class="small"></span></div>
+      <div class="summary-row"><span class="muted small">Fim</span><span id="summary-fim" class="small"></span></div>
+      <div id="summary-pausas-row" class="summary-row" style="display:none"><span class="muted small">Pausas</span><span id="summary-pausas" class="small"></span></div>
+    </div>
+    <button id="btn-summary-close" class="btn btn-green btn-full mt10">Fechar</button>
+  </div>
 </div>
 
 <!-- ── Modal de comentário ─────────────────────────────────────────── -->

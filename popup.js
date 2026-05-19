@@ -148,9 +148,7 @@ function stopTick() {
 }
 
 function updateCount() {
-  const pending = S.registros.filter(r => !r.enviado).length;
-  $('count-label').textContent =
-    `${S.registros.length} registro(s)` + (pending ? `  •  ${pending} pendente(s)` : '');
+  $('count-label').textContent = `${S.registros.length} registro(s)`;
 }
 
 // ── Sincroniza UI com estado ──────────────────────────────────────────
@@ -222,6 +220,9 @@ function syncMain() {
     suspBox.style.display = 'none';
   }
 
+  // Últimos registros
+  buildRecentRecords();
+
   const urlBox = $('url-box');
   if (S.running && S.currentRecord && S.currentRecord.url) {
     urlBox.style.display = 'block';
@@ -254,6 +255,110 @@ function syncMain() {
   }
 }
 
+// ── Registros ─────────────────────────────────────────────────────
+function recordItem(r) {
+  const div = document.createElement('div');
+  div.className = 'record-item';
+  div.style.cursor = 'pointer';
+  div.innerHTML =
+    `<div class="record-info">
+       <div class="record-tipo">${r.tipo_servico}</div>
+       <div class="record-meta">${r.data || ''} · ${r.inicio || ''}–${r.fim || ''}</div>
+     </div>
+     <div class="record-dur">${r.tempo_total || ''}</div>`;
+  div.addEventListener('click', () => showRecordDetail(r, div.closest('#all-records-list') ? 'records' : 'main'));
+  return div;
+}
+
+function showRecordDetail(r, from = 'main') {
+  $('btn-back-record-detail').dataset.from = from;
+  function pauseDurLabel(p) {
+    if (!p.pausa || !p.retorno) return '';
+    const toMin = s => { const [h, m, sec] = s.split(':').map(Number); return h * 60 + m + (sec || 0) / 60; };
+    const diff = Math.round(toMin(p.retorno) - toMin(p.pausa));
+    return diff > 0 ? `${diff} min` : '';
+  }
+
+  const allLinks = [r.url, ...(r.links || [])].filter(Boolean);
+  const pausas   = (r.pausas || []).filter(p => p.pausa);
+
+  let html = `
+    <div class="detail-tipo">${r.tipo_servico}</div>
+
+    <div class="detail-dur-box">
+      <div class="detail-dur">${r.tempo_total || '—'}</div>
+      <div class="detail-dur-label">duração total</div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">📅 Período</div>
+      <div class="detail-row"><span class="detail-row-label">Data</span><span class="detail-row-value">${r.data || '—'}</span></div>
+      <div class="detail-row"><span class="detail-row-label">Início</span><span class="detail-row-value">${r.inicio || '—'}</span></div>
+      <div class="detail-row"><span class="detail-row-label">Fim</span><span class="detail-row-value">${r.fim || '—'}</span></div>
+    </div>`;
+
+  if (allLinks.length) {
+    html += `<div class="detail-section">
+      <div class="detail-section-title">🔗 Links (${allLinks.length})</div>
+      ${allLinks.map(l => `<div class="detail-link" title="${l}">${l}</div>`).join('')}
+    </div>`;
+  }
+
+  if (pausas.length) {
+    html += `<div class="detail-section">
+      <div class="detail-section-title">⏸ Pausas (${pausas.length})</div>
+      ${pausas.map((p, i) => {
+        const dur = pauseDurLabel(p);
+        return `<div class="detail-pause-item">
+          <span class="detail-pause-time">${p.pausa}</span>
+          <span class="detail-pause-arrow">→</span>
+          <span class="detail-pause-time">${p.retorno || '—'}</span>
+          ${dur ? `<span class="detail-pause-dur">${dur}</span>` : ''}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  if (r.comentario) {
+    html += `<div class="detail-section">
+      <div class="detail-section-title">💬 Comentário</div>
+      <div class="detail-comment">${r.comentario}</div>
+    </div>`;
+  }
+
+  const tags = [];
+  if (r.enviado)      tags.push(`<span class="detail-tag detail-tag-green">✅ Enviado</span>`);
+  if (r.foiSuspenso)  tags.push(`<span class="detail-tag detail-tag-yellow">📌 Suspenso</span>`);
+  if (r.usuario)      tags.push(`<span class="detail-tag detail-tag-blue">👤 ${r.usuario}</span>`);
+  if (tags.length) {
+    html += `<div class="detail-tags">${tags.join('')}</div>`;
+  }
+
+  $('record-detail-body').innerHTML = html;
+  show('record-detail');
+}
+
+function buildRecentRecords() {
+  const box = $('recent-box');
+  const registros = S.registros || [];
+  if (registros.length === 0) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  const list = $('recent-list');
+  list.innerHTML = '';
+  [...registros].reverse().slice(0, 3).forEach(r => list.appendChild(recordItem(r)));
+}
+
+function buildAllRecords() {
+  const list = $('all-records-list');
+  list.innerHTML = '';
+  const registros = [...(S.registros || [])].reverse();
+  if (registros.length === 0) {
+    list.innerHTML = '<p class="muted small" style="text-align:center;margin-top:20px">Nenhum registro ainda.</p>';
+    return;
+  }
+  registros.forEach(r => list.appendChild(recordItem(r)));
+}
+
 // ── Links adicionais ──────────────────────────────────────────────
 async function doAddLink() {
   if (!S.running || !S.currentRecord) return;
@@ -264,6 +369,18 @@ async function doAddLink() {
   if (url === S.currentRecord.url || links.includes(url)) return;
   await persist({ currentRecord: { ...S.currentRecord, links: [...links, url] } });
   syncMain();
+}
+
+// ── Modal de resumo ───────────────────────────────────────────────
+function showSummary(record) {
+  $('summary-tipo').textContent = record.tipo_servico;
+  $('summary-dur').textContent  = record.tempo_total;
+  $('summary-inicio').textContent = record.inicio;
+  $('summary-fim').textContent    = record.fim;
+  const pausaCount = (record.pausas || []).filter(p => p.pausa).length;
+  $('summary-pausas-row').style.display = pausaCount > 0 ? 'flex' : 'none';
+  if (pausaCount > 0) $('summary-pausas').textContent = `${pausaCount}`;
+  $('modal-summary').style.display = 'flex';
 }
 
 // ── Modal de comentário ───────────────────────────────────────────
@@ -356,8 +473,7 @@ async function doStop() {
 
   await persist({ running: false, paused: false, startTs: null, accMs: 0, currentRecord: null, registros });
   syncMain();
-
-  alert(`Serviço finalizado!\n\nTipo: ${record.tipo_servico}\nDuração: ${dur}`);
+  showSummary(record);
 }
 
 // ── Suspender / Retomar card ──────────────────────────────────────────
@@ -581,6 +697,7 @@ function buildSettings() {
     if (!confirm(`Apagar todos os ${count} registro(s)?\nEsta ação não pode ser desfeita.`)) return;
     await persist({ registros: [] });
     updateCount();
+    buildRecentRecords();
     alert('Registros apagados.');
   };
 
@@ -610,6 +727,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   // Bindings estáticos
+  $('btn-summary-close').addEventListener('click', () => { $('modal-summary').style.display = 'none'; });
+
   $('btn-start').addEventListener('click',   doStart);
   $('btn-pause').addEventListener('click',   doPause);
   $('btn-stop').addEventListener('click',    doStop);
@@ -627,6 +746,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-starters').addEventListener('click', doOpenStarters);
   $('btn-links').addEventListener('click', () => { buildLinks(); show('links'); });
   $('btn-back-links').addEventListener('click', () => show('settings'));
+  $('btn-all-records').addEventListener('click', () => { buildAllRecords(); show('records'); });
+  $('btn-back-records').addEventListener('click', () => show('main'));
+  $('btn-back-record-detail').addEventListener('click', () => {
+    const from = $('btn-back-record-detail').dataset.from || 'main';
+    show(from);
+  });
 
   $('btn-setup-save').addEventListener('click', async () => {
     const name = $('input-name').value.trim();

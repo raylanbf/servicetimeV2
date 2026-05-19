@@ -138,6 +138,7 @@ function copyClean(tabId, allowed, uppercase) {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   refreshIcon();
   chrome.contextMenus.create({
     id: 'uppercase-selection',
