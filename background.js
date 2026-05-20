@@ -210,18 +210,19 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         const blob     = await response.blob();
         const bitmap   = await createImageBitmap(blob);
 
-        // Recorta quadrado central e aplica clip circular
-        const size   = Math.min(bitmap.width, bitmap.height);
-        const canvas = new OffscreenCanvas(size, size);
-        const ctx    = canvas.getContext('2d');
+        // Recorta quadrado central e aplica clip circular em 200x200
+        const srcSize = Math.min(bitmap.width, bitmap.height);
+        const outSize = 200;
+        const canvas  = new OffscreenCanvas(outSize, outSize);
+        const ctx     = canvas.getContext('2d');
 
         ctx.beginPath();
-        ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+        ctx.arc(outSize / 2, outSize / 2, outSize / 2, 0, Math.PI * 2);
         ctx.clip();
 
-        const sx = (bitmap.width  - size) / 2;
-        const sy = (bitmap.height - size) / 2;
-        ctx.drawImage(bitmap, sx, sy, size, size, 0, 0, size, size);
+        const sx = (bitmap.width  - srcSize) / 2;
+        const sy = (bitmap.height - srcSize) / 2;
+        ctx.drawImage(bitmap, sx, sy, srcSize, srcSize, 0, 0, outSize, outSize);
 
         const png    = await canvas.convertToBlob({ type: 'image/png' });
         const buffer = await png.arrayBuffer();
