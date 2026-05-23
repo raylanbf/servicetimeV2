@@ -28,7 +28,7 @@
   "host_permissions": ["https://script.google.com/*", "<all_urls>"],
   "web_accessible_resources": [
     {
-      "resources": ["test-clipboard.html", "test-clipboard.js"],
+      "resources": ["test-clipboard.html", "test-clipboard.js", "manual.html", "manual.js"],
       "matches": ["<all_urls>"]
     }
   ]

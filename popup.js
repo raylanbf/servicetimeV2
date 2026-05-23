@@ -722,13 +722,21 @@ function buildSettings() {
     setTimeout(() => { $('btn-settings-copy-script').textContent = '📋  Copiar script'; }, 2000);
   };
 
+  $('settings-canvas-exceptions').value = (S.canvasExceptions || []).join('\n');
+
   $('btn-save-settings').onclick = async () => {
     const name = $('settings-name').value.trim();
     if (!name) return;
-    const w   = parseInt($('settings-video-w').value, 10) || 620;
-    const h   = parseInt($('settings-video-h').value, 10) || 398;
-    const key = $('settings-openrouter').value.trim();
-    await persist({ usuario: name, webhook_url: $('settings-url').value.trim(), video_width: w, video_height: h, openrouter_key: key });
+    const w          = parseInt($('settings-video-w').value, 10) || 620;
+    const h          = parseInt($('settings-video-h').value, 10) || 398;
+    const key        = $('settings-openrouter').value.trim();
+    const exceptions = $('settings-canvas-exceptions').value
+      .split('\n').map(s => s.trim()).filter(Boolean);
+    await persist({
+      usuario: name, webhook_url: $('settings-url').value.trim(),
+      video_width: w, video_height: h, openrouter_key: key,
+      canvasExceptions: exceptions,
+    });
     $('user-label').textContent = '👤  ' + name;
     show('main');
   };
@@ -746,6 +754,108 @@ function buildSettings() {
   $('btn-test-clipboard').onclick = () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('test-clipboard.html') });
   };
+  $('btn-manual').onclick = () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('manual.html') });
+  };
+}
+
+// ── Canvas LMS ────────────────────────────────────────────────────────
+async function getCanvasCourseId() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const url  = tabs[0]?.url || '';
+  const m    = url.match(/\/courses\/(\d+)/);
+  return m ? m[1] : null;
+}
+
+async function syncCanvasTools() {
+  const courseId = await getCanvasCourseId();
+  $('canvas-tools-box').style.display = courseId ? 'block' : 'none';
+  if (courseId) $('canvas-course-label').textContent = `curso #${courseId}`;
+}
+
+async function doApplyIndent() {
+  const courseId   = await getCanvasCourseId();
+  if (!courseId) return;
+  const exceptions = S.canvasExceptions || [];
+  const btn        = $('btn-canvas-indent');
+  const statusEl   = $('canvas-indent-status');
+
+  btn.disabled    = true;
+  btn.innerHTML   = '<span class="spinner"></span>Aplicando...';
+  statusEl.style.display = 'none';
+
+  try {
+    const tabs    = await chrome.tabs.query({ active: true, currentWindow: true });
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      func: async (courseId, exceptions) => {
+        async function fetchAll(url) {
+          const out = [];
+          let next  = url;
+          while (next) {
+            const res  = await fetch(next);
+            const data = await res.json();
+            if (Array.isArray(data)) out.push(...data);
+            const link = res.headers.get('Link') || '';
+            const m    = link.match(/<([^>]+)>;\s*rel="next"/);
+            next = m ? m[1] : null;
+          }
+          return out;
+        }
+
+        const csrf = document.querySelector('meta[name="csrf-token"]')
+          ?.getAttribute('content') || '';
+
+        const modules = await fetchAll(
+          `/api/v1/courses/${courseId}/modules?per_page=100`
+        );
+
+        let adjusted = 0, total = 0;
+
+        for (const mod of modules) {
+          const items = await fetchAll(
+            `/api/v1/courses/${courseId}/modules/${mod.id}/items?per_page=100`
+          );
+          for (const item of items) {
+            const exclude = exceptions.some(exc =>
+              item.title.toLowerCase().includes(exc.toLowerCase().trim())
+            );
+            const target = exclude ? 0 : 1;
+            if (item.indent !== target) {
+              await fetch(
+                `/api/v1/courses/${courseId}/modules/${mod.id}/items/${item.id}`,
+                {
+                  method:  'PUT',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrf,
+                  },
+                  body: JSON.stringify({ module_item: { indent: target } }),
+                }
+              );
+              adjusted++;
+            }
+            total++;
+          }
+        }
+        return { adjusted, total, modules: modules.length };
+      },
+      args: [courseId, exceptions],
+    });
+
+    const r = results[0]?.result;
+    if (r) {
+      statusEl.textContent  = `✅ ${r.adjusted} item(s) ajustado(s) em ${r.modules} módulo(s) · ${r.total} total`;
+      statusEl.style.color  = '#4ade80';
+    }
+  } catch (err) {
+    statusEl.textContent = '✗ Erro: ' + err.message;
+    statusEl.style.color = '#f87171';
+  }
+
+  btn.disabled   = false;
+  btn.textContent = '🔧  Aplicar recuo nos módulos';
+  statusEl.style.display = 'block';
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────
@@ -768,7 +878,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     uploading:      saved.uploading      || false,
     uploadResult:  saved.uploadResult  || null,
     savedLinks:    saved.savedLinks    || [],
-    sheetsEnabled: saved.sheetsEnabled || false,
+    sheetsEnabled:      saved.sheetsEnabled      || false,
+    canvasExceptions:   saved.canvasExceptions   || [],
   };
 
   // Bindings estáticos
@@ -807,6 +918,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-back-links').addEventListener('click', () => show('settings'));
   $('btn-all-records').addEventListener('click', () => { buildAllRecords(); show('records'); });
   $('btn-back-records').addEventListener('click', () => show('main'));
+  $('btn-canvas-indent').addEventListener('click', doApplyIndent);
   $('btn-back-record-detail').addEventListener('click', () => {
     const from = $('btn-back-record-detail').dataset.from || 'main';
     show(from);
@@ -851,6 +963,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!S.usuario) { show('setup'); return; }
 
   syncMain();
+  syncCanvasTools();
   show('main');
   if (S.running && !S.paused) startTick();
 

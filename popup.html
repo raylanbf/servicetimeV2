@@ -89,6 +89,17 @@
     <div id="recent-list" class="record-list mt4"></div>
   </div>
 
+  <!-- Canvas LMS tools -->
+  <div id="canvas-tools-box" style="display:none">
+    <div class="divider"></div>
+    <div class="row-between">
+      <span class="label">🎓  Canvas LMS</span>
+      <span id="canvas-course-label" class="small muted"></span>
+    </div>
+    <button id="btn-canvas-indent" class="btn btn-surface btn-full mt4">🔧  Aplicar recuo nos módulos</button>
+    <span id="canvas-indent-status" class="small mt4" style="display:none"></span>
+  </div>
+
   <div class="divider"></div>
 
   <div class="mt6">
@@ -116,30 +127,60 @@
     <button id="btn-back-settings" class="btn-icon">←</button>
     <span class="view-title">Configurações</span>
   </div>
-  <label class="field-label">Nome do usuário</label>
-  <input id="settings-name" type="text">
-  <label class="field-label mt10">URL do Web App</label>
-  <input id="settings-url" type="text" placeholder="https://script.google.com/...">
-  <button id="btn-settings-sheets" class="btn btn-blue btn-full mt6" style="display:none">📊  Enviar ao Google Sheets</button>
-  <button id="btn-settings-toggle-script" class="btn btn-surface btn-full mt4" style="font-size:10px">📄  Ver script do Apps Script</button>
-  <div id="settings-script-wrap" style="display:none;margin-top:6px">
-    <pre id="settings-script-box" class="script-box"></pre>
-    <button id="btn-settings-copy-script" class="btn btn-green btn-full mt4">📋  Copiar script</button>
+
+  <div class="cfg-section">
+    <div class="cfg-section-title">Integrações</div>
+    <div class="cfg-group">
+      <label class="cfg-label">Nome do usuário</label>
+      <input id="settings-name" type="text">
+    </div>
+    <div class="cfg-group">
+      <label class="cfg-label">URL do Web App</label>
+      <input id="settings-url" type="text" placeholder="https://script.google.com/...">
+      <button id="btn-settings-sheets" class="btn btn-blue btn-full cfg-mt8" style="display:none">📊  Enviar ao Google Sheets</button>
+    </div>
+    <div class="cfg-group">
+      <label class="cfg-label">Chave API OpenRouter (LaTeX)</label>
+      <input id="settings-openrouter" type="password" placeholder="sk-or-... ou sk-...">
+    </div>
   </div>
-  <label class="field-label mt10">Dimensões padrão dos vídeos</label>
-  <div style="display:flex;align-items:center;gap:6px">
-    <input id="settings-video-w" type="number" placeholder="620" style="width:72px;text-align:center;padding:4px 6px">
-    <span class="muted" style="flex-shrink:0">×</span>
-    <input id="settings-video-h" type="number" placeholder="398" style="width:72px;text-align:center;padding:4px 6px">
+
+  <div class="cfg-section">
+    <div class="cfg-section-title">Preferências</div>
+    <div class="cfg-group">
+      <label class="cfg-label">Dimensões padrão dos vídeos</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input id="settings-video-w" type="number" placeholder="620" style="text-align:center;width:90px;flex:none">
+        <span class="muted" style="flex-shrink:0">×</span>
+        <input id="settings-video-h" type="number" placeholder="398" style="text-align:center;width:90px;flex:none">
+      </div>
+    </div>
   </div>
-  <label class="field-label mt10">Chave API OpenRouter (LaTeX)</label>
-  <input id="settings-openrouter" type="password" placeholder="sk-or-... (OpenRouter) ou sk-... (OpenAI)">
-  <button id="btn-save-settings" class="btn btn-green btn-full mt12">Salvar</button>
-  <button id="btn-links" class="btn btn-surface btn-full mt6">🔗  Links salvos</button>
-  <div class="divider mt10"></div>
-  <button id="btn-clear-registros" class="btn btn-red btn-full mt6">🗑  Limpar todos os registros</button>
-  <div class="divider mt10"></div>
-  <button id="btn-test-clipboard" class="btn btn-surface btn-full mt6">🧪  Teste de Clipboard</button>
+
+  <button id="btn-save-settings" class="btn btn-green btn-full cfg-save-btn">Salvar Configurações</button>
+
+  <div class="cfg-section">
+    <div class="cfg-section-title">Ferramentas</div>
+    <button id="btn-links" class="btn btn-surface btn-full cfg-tool-btn">🔗  Links salvos</button>
+    <button id="btn-settings-toggle-script" class="btn btn-surface btn-full cfg-tool-btn">📄  Ver script do Apps Script</button>
+    <div id="settings-script-wrap" style="display:none;margin-top:6px">
+      <pre id="settings-script-box" class="script-box"></pre>
+      <button id="btn-settings-copy-script" class="btn btn-green btn-full cfg-tool-btn">📋  Copiar script</button>
+    </div>
+    <button id="btn-test-clipboard" class="btn btn-surface btn-full cfg-tool-btn">🧪  Teste de Clipboard</button>
+    <button id="btn-manual" class="btn btn-surface btn-full cfg-tool-btn">📖  Manual</button>
+  </div>
+
+  <div class="cfg-section">
+    <div class="cfg-section-title">Canvas LMS</div>
+    <div class="cfg-group">
+      <label class="cfg-label">Páginas sem recuo (uma por linha, nome parcial)</label>
+      <textarea id="settings-canvas-exceptions" class="comment-textarea" placeholder="Orientação do professor&#10;Material complementar&#10;Apresentação" style="min-height:88px;font-size:11px;margin-bottom:4px"></textarea>
+      <span class="small muted">Ex: "Orientação" cobre "Unidade 1 Orientação do professor"</span>
+    </div>
+  </div>
+
+  <button id="btn-clear-registros" class="btn btn-red btn-full">🗑  Limpar todos os registros</button>
 </div>
 
 <!-- ── Links salvos ────────────────────────────────────────────────── -->

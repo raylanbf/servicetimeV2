@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Service Timer — Manual</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      position: fixed;
+      top: 0; left: 0;
+      width: 220px;
+      height: 100vh;
+      background: #1e1e2e;
+      border-right: 1px solid #2a2a3e;
+      overflow-y: auto;
+      padding: 20px 0;
+      z-index: 10;
+    }
+    .sidebar-logo {
+      font-size: 15px;
+      font-weight: 700;
+      color: #4ade80;
+      padding: 0 18px 16px;
+      border-bottom: 1px solid #2a2a3e;
+      margin-bottom: 12px;
+    }
+    .sidebar-logo span { color: #94a3b8; font-size: 11px; font-weight: 400; display: block; margin-top: 2px; }
+    .nav-item {
+      display: block;
+      padding: 7px 18px;
+      font-size: 12px;
+      color: #94a3b8;
+      text-decoration: none;
+      border-left: 3px solid transparent;
+      transition: all .15s;
+    }
+    .nav-item:hover { color: #e2e8f0; background: #2a2a3e; }
+    .nav-item.active { color: #4ade80; border-left-color: #4ade80; background: #1a2a1a; }
+    .nav-section {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: #475569;
+      padding: 14px 18px 4px;
+    }
+
+    /* ── Content ── */
+    .content {
+      margin-left: 220px;
+      padding: 40px 48px;
+      max-width: 860px;
+    }
+
+    h1 { font-size: 28px; font-weight: 700; color: #f8fafc; margin-bottom: 6px; }
+    h1 .badge { font-size: 12px; font-weight: 600; background: #4ade80; color: #000; padding: 2px 10px; border-radius: 20px; vertical-align: middle; margin-left: 10px; }
+    .subtitle { color: #64748b; font-size: 14px; margin-bottom: 40px; }
+
+    section { margin-bottom: 52px; scroll-margin-top: 24px; }
+
+    h2 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #f1f5f9;
+      border-bottom: 1px solid #2a2a3e;
+      padding-bottom: 8px;
+      margin-bottom: 18px;
+    }
+    h2 .icon { margin-right: 8px; }
+
+    h3 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #cbd5e1;
+      margin: 20px 0 10px;
+    }
+
+    p { color: #94a3b8; margin-bottom: 12px; }
+    p strong { color: #e2e8f0; }
+
+    ul, ol { padding-left: 20px; color: #94a3b8; margin-bottom: 12px; }
+    li { margin-bottom: 5px; }
+    li strong { color: #e2e8f0; }
+
+    /* ── Cards de funcionalidade ── */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .feature-card {
+      background: #1e1e2e;
+      border: 1px solid #2a2a3e;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .feature-card .title { font-size: 13px; font-weight: 700; color: #e2e8f0; margin-bottom: 6px; }
+    .feature-card .desc  { font-size: 12px; color: #64748b; line-height: 1.5; }
+
+    /* ── Tabelas ── */
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 13px; }
+    th {
+      text-align: left;
+      padding: 8px 12px;
+      background: #1e1e2e;
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      border-bottom: 1px solid #2a2a3e;
+    }
+    td {
+      padding: 9px 12px;
+      border-bottom: 1px solid #1e1e2e;
+      color: #94a3b8;
+      vertical-align: top;
+    }
+    td:first-child { color: #e2e8f0; font-weight: 500; white-space: nowrap; }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: #1a1a2e; }
+
+    /* ── Code ── */
+    pre {
+      background: #0d1117;
+      border: 1px solid #2a2a3e;
+      border-radius: 6px;
+      padding: 16px;
+      overflow-x: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      color: #c9d1d9;
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+    code {
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      background: #1e1e2e;
+      color: #4ade80;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    /* ── Callouts ── */
+    .callout {
+      border-left: 3px solid #4ade80;
+      background: #0f2a1a;
+      padding: 12px 16px;
+      border-radius: 0 6px 6px 0;
+      margin-bottom: 16px;
+      font-size: 13px;
+      color: #86efac;
+    }
+    .callout.blue  { border-color: #3b82f6; background: #0f1f3a; color: #93c5fd; }
+    .callout.yellow{ border-color: #fbbf24; background: #2a1f00; color: #fcd34d; }
+
+    /* ── Steps ── */
+    .steps { counter-reset: step; list-style: none; padding: 0; }
+    .steps li {
+      counter-increment: step;
+      display: flex;
+      gap: 14px;
+      margin-bottom: 12px;
+      color: #94a3b8;
+    }
+    .steps li::before {
+      content: counter(step);
+      min-width: 26px; height: 26px;
+      background: #4ade80; color: #000;
+      border-radius: 50%;
+      font-size: 12px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    /* ── Badge de tag de menu ── */
+    .menu-tag {
+      display: inline-block;
+      background: #1e1e2e;
+      border: 1px solid #3a3a4e;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 12px;
+      color: #e2e8f0;
+      margin-bottom: 6px;
+    }
+
+    /* ── Contexto chips ── */
+    .chip {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 7px;
+      border-radius: 10px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .chip-text   { background: #1e3a5f; color: #60a5fa; }
+    .chip-image  { background: #2d1b4e; color: #c084fc; }
+    .chip-page   { background: #1c2a1c; color: #4ade80; }
+
+    /* ── Topo sticky ── */
+    .topbar {
+      position: sticky;
+      top: 0;
+      background: rgba(15,23,42,.92);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid #1e1e2e;
+      padding: 10px 48px;
+      font-size: 12px;
+      color: #475569;
+      z-index: 5;
+      margin-left: 220px;
+    }
+    .topbar strong { color: #94a3b8; }
+  </style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    ⏱ Service Timer
+    <span>Manual de uso</span>
+  </div>
+
+  <div class="nav-section">Básico</div>
+  <a class="nav-item" href="#cronometro">Cronômetro</a>
+  <a class="nav-item" href="#registros">Registros</a>
+  <a class="nav-item" href="#tipos">Tipos de serviço</a>
+  <a class="nav-item" href="#links">Links</a>
+
+  <div class="nav-section">Integrações</div>
+  <a class="nav-item" href="#sheets">Google Sheets</a>
+  <a class="nav-item" href="#canvas">Canvas LMS</a>
+
+  <div class="nav-section">Ferramentas</div>
+  <a class="nav-item" href="#contexto">Menu de contexto</a>
+  <a class="nav-item" href="#copia-inteligente">Copia Inteligente</a>
+  <a class="nav-item" href="#clipboard-test">Teste de Clipboard</a>
+
+  <div class="nav-section">Configuração</div>
+  <a class="nav-item" href="#configuracoes">Configurações</a>
+  <a class="nav-item" href="#instalacao">Instalação</a>
+</nav>
+
+<!-- ── Topbar ── -->
+<div class="topbar">
+  <strong>Service Timer</strong> — Extensão Chrome MV3
+</div>
+
+<!-- ── Content ── -->
+<div class="content">
+
+  <h1>Service Timer <span class="badge">MV3</span></h1>
+  <p class="subtitle">Extensão Chrome para controle de tempo por serviço, com ferramentas de produtividade para edição de conteúdo em plataformas LMS e rich text editors.</p>
+
+  <!-- ── Cronômetro ── -->
+  <section id="cronometro">
+    <h2><span class="icon">⏱</span>Cronômetro</h2>
+    <p>O painel lateral fica sempre visível enquanto você trabalha em outras abas, permitindo controlar o tempo sem interromper o fluxo de trabalho.</p>
+
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="title">▶ Iniciar</div>
+        <div class="desc">Captura a URL da aba ativa e inicia o contador. O ícone da extensão fica verde.</div>
+      </div>
+      <div class="feature-card">
+        <div class="title">⏸ Pausar / Retomar</div>
+        <div class="desc">Registra o horário de pausa e retorno automaticamente. O ícone fica laranja durante a pausa.</div>
+      </div>
+      <div class="feature-card">
+        <div class="title">⏹ Finalizar</div>
+        <div class="desc">Abre o modal de comentário, salva o registro e exibe o resumo com duração total.</div>
+      </div>
+      <div class="feature-card">
+        <div class="title">📌 Suspender</div>
+        <div class="desc">Pausa sem finalizar. O card fica na lista de suspensos e pode ser retomado a qualquer momento.</div>
+      </div>
+    </div>
+
+    <div class="callout blue">
+      Múltiplos cards podem ficar suspensos simultaneamente. Para retomar um card suspenso, o atendimento atual deve estar finalizado ou suspenso primeiro.
+    </div>
+
+    <p>O cronômetro também <strong>pausa automaticamente</strong> quando todas as janelas do Chrome são fechadas, registrando o horário de pausa no histórico do card.</p>
+  </section>
+
+  <!-- ── Registros ── -->
+  <section id="registros">
+    <h2><span class="icon">🕓</span>Registros</h2>
+    <p>Cada atendimento finalizado gera um registro completo:</p>
+
+    <table>
+      <thead><tr><th>Campo</th><th>Conteúdo</th></tr></thead>
+      <tbody>
+        <tr><td>Tipo de serviço</td><td>Tipo selecionado no combo</td></tr>
+        <tr><td>Usuário</td><td>Nome configurado na extensão</td></tr>
+        <tr><td>Data</td><td>Data do atendimento (YYYY-MM-DD)</td></tr>
+        <tr><td>Início / Fim</td><td>Horários no formato HH:MM:SS</td></tr>
+        <tr><td>Duração</td><td>Tempo total acumulado (exclui pausas)</td></tr>
+        <tr><td>Pausas</td><td>Lista de entradas e retornos de pausa</td></tr>
+        <tr><td>URL</td><td>URL capturada ao iniciar + links adicionados</td></tr>
+        <tr><td>Comentário</td><td>Texto digitado no modal ao finalizar (opcional)</td></tr>
+      </tbody>
+    </table>
+
+    <p>Os <strong>últimos 3 registros</strong> aparecem direto na tela principal. O histórico completo fica em <strong>Ver todos</strong>, onde é possível deletar registros individualmente.</p>
+  </section>
+
+  <!-- ── Tipos ── -->
+  <section id="tipos">
+    <h2><span class="icon">🏷</span>Tipos de serviço</h2>
+    <p>A lista de tipos é totalmente editável. Acesse pelo botão <strong>✎</strong> ao lado do combo.</p>
+    <ul>
+      <li>Adicionar novos tipos pelo campo de texto inferior</li>
+      <li>Reordenar com as setas ↑ ↓</li>
+      <li>Remover com o botão ✕</li>
+      <li>O tipo pode ser alterado enquanto o cronômetro está rodando</li>
+    </ul>
+  </section>
+
+  <!-- ── Links ── -->
+  <section id="links">
+    <h2><span class="icon">🔗</span>Links</h2>
+    <h3>Links do atendimento</h3>
+    <p>A URL da aba ativa é capturada automaticamente ao iniciar. Links extras podem ser adicionados durante o atendimento com o botão <strong>＋ Adicionar</strong>.</p>
+
+    <h3>Links salvos</h3>
+    <p>Favoritos com rótulo e URL, acessíveis em <strong>Configurações → Links salvos</strong>. Clique no link para abrir em nova aba.</p>
+
+    <h3>Starters</h3>
+    <p>Links marcados com ⭐ como <em>starter</em> podem ser abertos todos de uma vez pelo botão <strong>🚀 Abrir links do dia</strong> na tela principal — útil para abrir todas as ferramentas de trabalho com um clique.</p>
+  </section>
+
+  <!-- ── Google Sheets ── -->
+  <section id="sheets">
+    <h2><span class="icon">📊</span>Google Sheets</h2>
+
+    <h3>Ativar a integração</h3>
+    <p>Use o <strong>toggle Google Sheets</strong> na tela principal para habilitar a seção:</p>
+    <ul>
+      <li>Sem URL configurada → aparece um campo para digitar e salvar a URL diretamente na tela principal</li>
+      <li>Com URL configurada → aparece o botão <strong>📊 Enviar ao Google Sheets</strong></li>
+    </ul>
+
+    <h3>Como funciona o envio</h3>
+    <p>Os registros pendentes são enviados para o Google Apps Script, que:</p>
+    <ol>
+      <li>Busca ou <strong>cria automaticamente</strong> uma aba chamada <strong>"Service Timer"</strong> na planilha</li>
+      <li>Cria cabeçalhos com fundo verde e linha congelada na primeira execução</li>
+      <li>Verifica os IDs já existentes para <strong>evitar duplicatas</strong></li>
+      <li>Adiciona os registros novos como novas linhas</li>
+    </ol>
+
+    <table>
+      <thead><tr><th>Coluna na planilha</th><th>Conteúdo</th></tr></thead>
+      <tbody>
+        <tr><td>ID</td><td>Identificador único do registro</td></tr>
+        <tr><td>Usuário</td><td>Nome configurado na extensão</td></tr>
+        <tr><td>Tipo de Serviço</td><td>Tipo selecionado no cronômetro</td></tr>
+        <tr><td>Data</td><td>Data do atendimento</td></tr>
+        <tr><td>Início / Fim</td><td>Horários de início e término</td></tr>
+        <tr><td>Duração</td><td>Tempo total formatado</td></tr>
+        <tr><td>Duração (s)</td><td>Duração em segundos (para cálculos)</td></tr>
+        <tr><td>Pausas</td><td>Lista: entrada → retorno</td></tr>
+        <tr><td>URLs</td><td>URL principal + links adicionais</td></tr>
+        <tr><td>Comentário</td><td>Comentário inserido ao finalizar</td></tr>
+        <tr><td>Suspenso</td><td>Sim / Não</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Configurar o Apps Script</h3>
+    <ol class="steps">
+      <li>Abra a planilha desejada no Google Sheets</li>
+      <li>Clique em <strong>Extensões › Apps Script</strong></li>
+      <li>Apague o código existente e cole o script de <strong>Configurações → Ver script do Apps Script</strong></li>
+      <li>Salve e clique em <strong>Implantar › Nova implantação</strong></li>
+      <li>Tipo: <strong>App da Web</strong> · Acesso: <strong>Qualquer pessoa</strong></li>
+      <li>Copie a URL gerada e cole em Configurações ou diretamente na tela principal</li>
+    </ol>
+  </section>
+
+  <!-- ── Canvas LMS ── -->
+  <section id="canvas">
+    <h2><span class="icon">🎓</span>Canvas LMS</h2>
+    <p>Quando o painel lateral está aberto em uma aba de curso do Canvas (<code>/courses/XXXX/</code>), a seção <strong>🎓 Canvas LMS</strong> aparece automaticamente com o ID do curso detectado.</p>
+
+    <div class="callout blue">
+      Funciona com a sessão ativa do Canvas — não requer token de API. A autenticação é feita pelos cookies de sessão do navegador.
+    </div>
+
+    <h3>Aplicar recuo nos módulos</h3>
+    <p>O botão <strong>🔧 Aplicar recuo nos módulos</strong> percorre todos os módulos do curso e aplica a indentação automaticamente:</p>
+
+    <table>
+      <thead><tr><th>Item</th><th>Recuo aplicado</th></tr></thead>
+      <tbody>
+        <tr><td>Nome contém algum termo da lista de exceções</td><td><code>indent: 0</code> — fica como cabeçalho</td></tr>
+        <tr><td>Todos os demais itens</td><td><code>indent: 1</code> — recuado</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Configurar as exceções</h3>
+    <p>Em <strong>Configurações → Canvas LMS → Páginas sem recuo</strong>, adicione um nome parcial por linha:</p>
+
+    <pre>Orientação do professor
+Material complementar
+Apresentação
+Objetivos</pre>
+
+    <p>A comparação é <strong>parcial e sem diferenciação de maiúsculas</strong>. Ao digitar <code>Orientação do professor</code>, a extensão reconhece automaticamente:</p>
+    <ul>
+      <li>Unidade 1 Orientação do professor</li>
+      <li>Unidade 2 Orientação do professor</li>
+      <li>Unidade 3 Orientação do professor</li>
+    </ul>
+
+    <p>A função só faz chamadas PUT nos itens que precisam ser alterados. Ao concluir:</p>
+    <div class="callout">✅ 34 item(s) ajustado(s) em 5 módulo(s) · 60 total</div>
+  </section>
+
+  <!-- ── Menu de contexto ── -->
+  <section id="contexto">
+    <h2><span class="icon">🖱</span>Menu de contexto</h2>
+    <p>Clique com o <strong>botão direito</strong> em qualquer página para acessar as ferramentas:</p>
+
+    <h3>Sobre texto selecionado <span class="chip chip-text">seleção</span></h3>
+    <table>
+      <thead><tr><th>Opção</th><th>Descrição</th></tr></thead>
+      <tbody>
+        <tr><td>🔠 Copiar em CAIXA ALTA</td><td>Converte o texto selecionado para maiúsculas, mantendo negrito e itálico</td></tr>
+        <tr><td>🧹 Copiar texto limpo</td><td>Remove atributos e estilos, mantém negrito, itálico e listas</td></tr>
+        <tr><td>✨ Copia Inteligente</td><td>Cópia avançada para editores rich text — veja seção dedicada abaixo</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Sobre imagens <span class="chip chip-image">imagem</span></h3>
+    <table>
+      <thead><tr><th>Opção</th><th>Descrição</th></tr></thead>
+      <tbody>
+        <tr><td>🔢 Converter fórmula para LaTeX</td><td>Envia a imagem para a API OpenRouter/OpenAI e copia o código LaTeX gerado</td></tr>
+        <tr><td>⭕ Baixar imagem redonda</td><td>Recorta e baixa a imagem em círculo com 200×200 px em PNG</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Sobre a página <span class="chip chip-page">página</span></h3>
+    <table>
+      <thead><tr><th>Opção</th><th>Descrição</th></tr></thead>
+      <tbody>
+        <tr><td>📐 Redimensionar vídeos</td><td>Ajusta iframes de vídeo às dimensões configuradas (padrão 620×398)</td></tr>
+        <tr><td>🔍 Localizar e substituir</td><td>Abre painel flutuante para busca e substituição em campos de texto da página</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ── Copia Inteligente ── -->
+  <section id="copia-inteligente">
+    <h2><span class="icon">✨</span>Copia Inteligente</h2>
+    <p>Ferramenta de cópia avançada para colar conteúdo em editores rich text como <strong>Canvas LMS, TinyMCE, CKEditor, Moodle e Bubble.io</strong> sem deixar lixo de HTML.</p>
+
+    <h3>O que ela faz</h3>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="title">🔤 Corrige mojibake</div>
+        <div class="desc">Detecta e corrige textos com encoding quebrado: <code>JoÃ£o</code> → <code>João</code></div>
+      </div>
+      <div class="feature-card">
+        <div class="title">🧹 Remove lixo HTML</div>
+        <div class="desc">Elimina <code>class</code>, <code>id</code>, <code>style</code>, <code>data-*</code>, scripts, iframes e tags vazias</div>
+      </div>
+      <div class="feature-card">
+        <div class="title">🎨 Cor padronizada</div>
+        <div class="desc">Força <code>#333333</code> em todos os parágrafos e listas, independente da cor original</div>
+      </div>
+      <div class="feature-card">
+        <div class="title">📋 Lista unificada</div>
+        <div class="desc">Converte listas numeradas <code>&lt;ol&gt;</code> em listas com bullets <code>&lt;ul&gt;</code></div>
+      </div>
+      <div class="feature-card">
+        <div class="title">👁 Remove ocultos</div>
+        <div class="desc">Ignora elementos com <code>display:none</code> ou <code>visibility:hidden</code></div>
+      </div>
+      <div class="feature-card">
+        <div class="title">📝 Tags essenciais</div>
+        <div class="desc">Mantém apenas: <code>&lt;p&gt;</code> <code>&lt;br&gt;</code> <code>&lt;strong&gt;</code> <code>&lt;em&gt;</code> <code>&lt;ul&gt;</code> <code>&lt;li&gt;</code></div>
+      </div>
+    </div>
+
+    <h3>HTML gerado</h3>
+    <p>Ao clicar em "Ver HTML" no editor após colar, o código estará assim:</p>
+    <pre>&lt;p style="color:#333333;"&gt;Texto com &lt;strong&gt;negrito&lt;/strong&gt; e &lt;em&gt;itálico&lt;/em&gt;.&lt;/p&gt;
+
+&lt;ul style="color:#333333;"&gt;
+&lt;li&gt;Primeiro item&lt;/li&gt;
+&lt;li&gt;Segundo item&lt;/li&gt;
+&lt;/ul&gt;</pre>
+
+    <div class="callout yellow">
+      Ao copiar, nenhum HTML fica visível. O conteúdo entra no clipboard nos dois formatos: <code>text/html</code> (para editores rich text) e <code>text/plain</code> (para campos de texto simples).
+    </div>
+
+    <h3>Como usar</h3>
+    <ol class="steps">
+      <li>Selecione o texto na página</li>
+      <li>Clique com o botão direito</li>
+      <li>Escolha <strong>✨ Copia Inteligente (para editores)</strong></li>
+      <li>Cole normalmente no editor com <strong>Ctrl+V</strong></li>
+    </ol>
+  </section>
+
+  <!-- ── Teste de Clipboard ── -->
+  <section id="clipboard-test">
+    <h2><span class="icon">🧪</span>Teste de Clipboard</h2>
+    <p>Acessível em <strong>Configurações → Ferramentas → Teste de Clipboard</strong>. Abre uma página de diagnóstico com dois painéis:</p>
+
+    <table>
+      <thead><tr><th>Painel</th><th>Função</th></tr></thead>
+      <tbody>
+        <tr><td>Esquerda — Renderizado</td><td>Área de colagem com fundo branco e texto <code>#333333</code>, simulando como o conteúdo aparecerá num editor real. Texto justificado.</td></tr>
+        <tr><td>Direita — HTML resultante</td><td>Exibe em tempo real o código HTML bruto que chegou no clipboard, para verificar se está limpo e sem lixo</td></tr>
+      </tbody>
+    </table>
+
+    <p>Use para validar o resultado da <strong>Copia Inteligente</strong> antes de colar no Canvas ou outro editor.</p>
+  </section>
+
+  <!-- ── Configurações ── -->
+  <section id="configuracoes">
+    <h2><span class="icon">⚙</span>Configurações</h2>
+    <p>Acessível pelo botão <strong>⚙</strong> no topo do painel lateral.</p>
+
+    <h3>Integrações</h3>
+    <table>
+      <thead><tr><th>Campo</th><th>Descrição</th></tr></thead>
+      <tbody>
+        <tr><td>Nome do usuário</td><td>Identificação salva em cada registro</td></tr>
+        <tr><td>URL do Web App</td><td>Endpoint do Google Apps Script para envio ao Sheets</td></tr>
+        <tr><td>Chave API</td><td>OpenRouter (<code>sk-or-...</code>) ou OpenAI (<code>sk-...</code>) — usada na conversão de fórmulas para LaTeX</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Preferências</h3>
+    <table>
+      <thead><tr><th>Campo</th><th>Descrição</th></tr></thead>
+      <tbody>
+        <tr><td>Dimensões dos vídeos</td><td>Largura × altura usadas pelo redimensionador (padrão: 620×398)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Canvas LMS</h3>
+    <table>
+      <thead><tr><th>Campo</th><th>Descrição</th></tr></thead>
+      <tbody>
+        <tr><td>Páginas sem recuo</td><td>Nomes parciais (um por linha) das páginas que não devem receber indentação ao aplicar o recuo nos módulos</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Ferramentas</h3>
+    <table>
+      <thead><tr><th>Botão</th><th>Ação</th></tr></thead>
+      <tbody>
+        <tr><td>🔗 Links salvos</td><td>Gerenciar favoritos e starters</td></tr>
+        <tr><td>📄 Ver script do Apps Script</td><td>Exibe e copia o código para configurar o Google Sheets</td></tr>
+        <tr><td>🧪 Teste de Clipboard</td><td>Abre a página de diagnóstico de clipboard em nova aba</td></tr>
+        <tr><td>📖 Manual</td><td>Abre este manual</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ── Instalação ── -->
+  <section id="instalacao">
+    <h2><span class="icon">📦</span>Instalação</h2>
+    <ol class="steps">
+      <li>Clone ou baixe o repositório</li>
+      <li>Abra o Chrome e acesse <code>chrome://extensions</code></li>
+      <li>Ative o <strong>Modo do desenvolvedor</strong> (canto superior direito)</li>
+      <li>Clique em <strong>Carregar sem compactação</strong> e selecione a pasta do projeto</li>
+      <li>Clique no ícone da extensão → <strong>Abrir painel lateral</strong></li>
+    </ol>
+  </section>
+
+</div>
+
+<script src="manual.js"></script>
+</body>
+</html>
