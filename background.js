@@ -137,6 +137,172 @@ function copyClean(tabId, allowed, uppercase) {
   });
 }
 
+// ── Copia Inteligente ─────────────────────────────────────────────────
+function copySmartClean(tabId) {
+  chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+
+      // Corrige mojibake (UTF-8 interpretado como Latin-1): JoÃ£o → João
+      function fixMojibake(str) {
+        if (!/[\xC0-\xFF]/.test(str)) return str;
+        if ([...str].some(c => c.charCodeAt(0) > 0xFF)) return str;
+        try {
+          const bytes = new Uint8Array([...str].map(c => c.charCodeAt(0)));
+          return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        } catch { return str; }
+      }
+
+      const INLINE = new Set(['STRONG', 'B', 'EM', 'I']);
+      const BLOCK  = new Set(['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+                              'BLOCKQUOTE', 'PRE', 'SECTION', 'ARTICLE',
+                              'HEADER', 'FOOTER', 'MAIN', 'TD', 'TH', 'TR']);
+      const STRIP  = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG',
+                              'IFRAME', 'OBJECT', 'EMBED', 'FORM', 'INPUT',
+                              'BUTTON', 'SELECT', 'TEXTAREA', 'NAV', 'ASIDE']);
+      const COLOR  = '#333333';
+
+      function cleanNode(node) {
+        if (node.nodeType === 3) {
+          let text = node.textContent
+            .replace(/ /g, ' ')
+            .replace(/[​‌‍﻿]/g, '')
+            .replace(/ {2,}/g, ' ');
+          text = fixMojibake(text);
+          return text ? document.createTextNode(text) : null;
+        }
+        if (node.nodeType !== 1) return null;
+
+        const tag = node.tagName;
+        if (STRIP.has(tag)) return null;
+
+        try {
+          const cs = window.getComputedStyle(node);
+          if (cs.display === 'none' || cs.visibility === 'hidden') return null;
+        } catch {}
+
+        const frag = document.createDocumentFragment();
+        node.childNodes.forEach(child => {
+          const c = cleanNode(child);
+          if (c) frag.appendChild(c);
+        });
+
+        if (tag === 'BR') return document.createElement('br');
+
+        if (tag === 'OL' || tag === 'UL') {
+          const ul = document.createElement('ul');
+          ul.setAttribute('style', `color:${COLOR}`);
+          ul.appendChild(frag);
+          return ul;
+        }
+        if (tag === 'LI') {
+          const li = document.createElement('li');
+          li.appendChild(frag);
+          return li;
+        }
+        if (INLINE.has(tag)) {
+          const el = document.createElement(tag.toLowerCase());
+          el.appendChild(frag);
+          return el;
+        }
+        if (BLOCK.has(tag)) {
+          const p = document.createElement('p');
+          p.setAttribute('style', `color:${COLOR}`);
+          p.appendChild(frag);
+          return p;
+        }
+        return frag;
+      }
+
+      const cloned  = sel.getRangeAt(0).cloneContents();
+      const wrapper = document.createElement('div');
+      cloned.childNodes.forEach(child => {
+        const c = cleanNode(child);
+        if (c) wrapper.appendChild(c);
+      });
+
+      // Envolve nós inline e texto do topo em <p>
+      const out = document.createElement('div');
+      let buf   = [];
+      const INLINE_NAMES = new Set(['BR', 'STRONG', 'B', 'EM', 'I']);
+
+      function flushBuf() {
+        if (!buf.length) return;
+        const hasText = buf.some(n => n.nodeType === 3 && n.textContent.trim());
+        if (hasText) {
+          const p = document.createElement('p');
+          p.setAttribute('style', `color:${COLOR}`);
+          buf.forEach(n => p.appendChild(n));
+          out.appendChild(p);
+        }
+        buf = [];
+      }
+
+      wrapper.childNodes.forEach(child => {
+        if (child.nodeType === 3 || INLINE_NAMES.has(child.nodeName)) {
+          buf.push(child.cloneNode(true));
+        } else {
+          flushBuf();
+          out.appendChild(child.cloneNode(true));
+        }
+      });
+      flushBuf();
+
+      // Remove <p> vazios
+      out.querySelectorAll('p').forEach(p => {
+        if (!p.textContent.trim() && !p.querySelector('br')) p.remove();
+      });
+
+      const cleanHtml = out.innerHTML
+        .replace(/<\/p>/g, '</p>\n')
+        .replace(/<ul/g, '\n<ul')
+        .replace(/<\/ul>/g, '</ul>\n')
+        .replace(/<li>/g, '\n<li>')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+      const plainText = out.textContent
+        .replace(/ {2,}/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+      if (!cleanHtml && !plainText) return;
+
+      const ta = document.createElement('textarea');
+      ta.value = plainText;
+      ta.style.cssText = 'position:fixed;top:-9999px;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+
+      document.addEventListener('copy', function h(e) {
+        e.preventDefault();
+        e.clipboardData.setData('text/html',  cleanHtml);
+        e.clipboardData.setData('text/plain', plainText);
+        document.removeEventListener('copy', h, true);
+      }, true);
+
+      document.execCommand('copy');
+      ta.remove();
+
+      document.getElementById('__svc-toast__')?.remove();
+      const toast = document.createElement('div');
+      toast.id    = '__svc-toast__';
+      toast.textContent = '✨ Cópia inteligente realizada!';
+      Object.assign(toast.style, {
+        position: 'fixed', bottom: '24px', right: '24px',
+        background: '#1d4ed8', color: '#fff',
+        padding: '10px 16px', borderRadius: '6px',
+        fontFamily: 'system-ui', fontSize: '13px',
+        zIndex: '2147483647', boxShadow: '0 2px 8px rgba(0,0,0,.4)',
+      });
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    },
+  });
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   refreshIcon();
@@ -148,6 +314,11 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: 'copy-clean',
     title: '🧹 Copiar texto limpo',
+    contexts: ['selection'],
+  });
+  chrome.contextMenus.create({
+    id: 'smart-copy',
+    title: '✨ Copia Inteligente (para editores)',
     contexts: ['selection'],
   });
   chrome.contextMenus.create({
@@ -202,6 +373,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
   if (info.menuItemId === 'copy-clean') {
     copyClean(tab.id, ['B', 'STRONG', 'I', 'EM', 'A', 'UL', 'OL', 'LI'], false);
+  }
+  if (info.menuItemId === 'smart-copy') {
+    copySmartClean(tab.id);
   }
   if (info.menuItemId === 'download-round') {
     (async () => {
@@ -472,11 +646,12 @@ chrome.runtime.onMessage.addListener((msg) => {
 
 async function handleUpload({ webhookUrl, usuario, registros }) {
   try {
-    await fetch(webhookUrl, {
+    const res     = await fetch(webhookUrl, {
       method:  'POST',
       headers: { 'Content-Type': 'text/plain' },
       body:    JSON.stringify({ usuario, registros }),
     });
+    const resData = await res.json().catch(() => ({}));
 
     const saved   = await chrome.storage.local.get(['registros']);
     const sentIds = new Set(registros.map(r => r._id).filter(Boolean));
@@ -484,7 +659,11 @@ async function handleUpload({ webhookUrl, usuario, registros }) {
       (r._id && sentIds.has(r._id)) ? { ...r, enviado: true } : r
     );
 
-    await chrome.storage.local.set({ uploading: false, uploadResult: { ok: true }, registros: updated });
+    await chrome.storage.local.set({
+      uploading:    false,
+      uploadResult: { ok: true, adicionados: resData.adicionados ?? registros.length },
+      registros:    updated,
+    });
   } catch (err) {
     await chrome.storage.local.set({ uploading: false, uploadResult: { ok: false, erro: err.message } });
   }

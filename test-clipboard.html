@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Teste de Clipboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    h1 { font-size: 18px; color: #94a3b8; font-weight: 600; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      flex: 1;
+    }
+    .panel { display: flex; flex-direction: column; gap: 8px; }
+    .panel-title {
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: #64748b;
+    }
+    #paste-area {
+      flex: 1;
+      min-height: 400px;
+      background: #ffffff;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 14px 16px;
+      font-size: 14px;
+      color: #333333;
+      outline: none;
+      overflow-y: auto;
+      line-height: 1.6;
+      text-align: justify;
+    }
+    #paste-area:focus { border-color: #3b82f6; }
+    #paste-area p      { margin: 0 0 6px; }
+    #paste-area ul     { padding-left: 20px; margin: 0 0 6px; }
+    #paste-area li     { margin: 2px 0; }
+    #paste-area strong,
+    #paste-area b      { font-weight: bold; }
+    #paste-area em,
+    #paste-area i      { font-style: italic; }
+
+    #html-output {
+      flex: 1;
+      min-height: 400px;
+      background: #0d1117;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 14px 16px;
+      font-size: 12px;
+      font-family: 'Courier New', monospace;
+      color: #c9d1d9;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.6;
+    }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    button {
+      padding: 5px 14px;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    button:hover { opacity: .8; }
+    .btn-clear { background: #374151; color: #e2e8f0; }
+    .btn-copy  { background: #1d4ed8; color: #fff; }
+    .badge {
+      font-size: 10px;
+      background: #334155;
+      color: #94a3b8;
+      border-radius: 4px;
+      padding: 2px 8px;
+      margin-left: auto;
+    }
+    .hint { font-size: 11px; color: #475569; }
+  </style>
+</head>
+<body>
+
+<h1>🧪 Teste de Clipboard — Cole aqui e veja o HTML gerado</h1>
+
+<div class="grid">
+
+  <div class="panel">
+    <div class="panel-title">Área de colagem (renderizado)</div>
+    <div class="toolbar">
+      <button id="btn-clear" class="btn-clear">Limpar</button>
+      <span class="hint">Cole com Ctrl+V aqui ↓</span>
+    </div>
+    <div id="paste-area" contenteditable="true" spellcheck="false">
+      <p style="color:#64748b;font-style:italic">Cole aqui o conteúdo copiado com a extensão...</p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">HTML resultante</div>
+    <div class="toolbar">
+      <button id="btn-copy" class="btn-copy">Copiar HTML</button>
+      <span id="badge" class="badge">aguardando...</span>
+    </div>
+    <div id="html-output"></div>
+  </div>
+
+</div>
+
+<script src="test-clipboard.js"></script>
+</body>
+</html>

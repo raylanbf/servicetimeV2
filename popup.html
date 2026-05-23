@@ -51,6 +51,26 @@
     <button id="btn-stop" class="btn btn-red" disabled>⏹  Finalizar</button>
     <button id="btn-suspend" class="btn btn-surface" disabled>📌  Suspender</button>
   </div>
+  <div class="row-between mt4">
+    <span class="small muted">Google Sheets</span>
+    <label class="toggle">
+      <input type="checkbox" id="toggle-sheets">
+      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+    </label>
+  </div>
+  <div id="sheets-panel" style="display:none">
+    <div id="sheets-row" class="row-btns mt4">
+      <button id="btn-sheets" class="btn btn-blue" style="flex:1">📊  Enviar ao Google Sheets</button>
+      <button id="btn-sheets-help" class="btn btn-surface ml4" style="padding:6px 10px">?</button>
+    </div>
+    <div id="webhook-setup-box" style="display:none">
+      <span class="field-label mt4">URL do Web App (Google Apps Script)</span>
+      <div class="row-btns mt4">
+        <input id="input-main-webhook" type="text" placeholder="https://script.google.com/..." style="flex:1;font-size:11px">
+        <button id="btn-save-webhook" class="btn btn-green ml4" style="padding:6px 12px;white-space:nowrap">Salvar</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Cards suspensos -->
   <div id="suspended-box" style="display:none">
@@ -70,11 +90,6 @@
   </div>
 
   <div class="divider"></div>
-
-  <div class="row-btns" style="display:none">
-    <button id="btn-sheets" class="btn btn-blue" style="flex:1">📊  Enviar ao Google Sheets</button>
-    <button id="btn-sheets-help" class="btn btn-surface ml4" style="padding:6px 10px">?</button>
-  </div>
 
   <div class="mt6">
     <span id="count-label" class="small muted"></span>
@@ -105,6 +120,12 @@
   <input id="settings-name" type="text">
   <label class="field-label mt10">URL do Web App</label>
   <input id="settings-url" type="text" placeholder="https://script.google.com/...">
+  <button id="btn-settings-sheets" class="btn btn-blue btn-full mt6" style="display:none">📊  Enviar ao Google Sheets</button>
+  <button id="btn-settings-toggle-script" class="btn btn-surface btn-full mt4" style="font-size:10px">📄  Ver script do Apps Script</button>
+  <div id="settings-script-wrap" style="display:none;margin-top:6px">
+    <pre id="settings-script-box" class="script-box"></pre>
+    <button id="btn-settings-copy-script" class="btn btn-green btn-full mt4">📋  Copiar script</button>
+  </div>
   <label class="field-label mt10">Dimensões padrão dos vídeos</label>
   <div style="display:flex;align-items:center;gap:6px">
     <input id="settings-video-w" type="number" placeholder="620" style="width:72px;text-align:center;padding:4px 6px">
@@ -117,6 +138,8 @@
   <button id="btn-links" class="btn btn-surface btn-full mt6">🔗  Links salvos</button>
   <div class="divider mt10"></div>
   <button id="btn-clear-registros" class="btn btn-red btn-full mt6">🗑  Limpar todos os registros</button>
+  <div class="divider mt10"></div>
+  <button id="btn-test-clipboard" class="btn btn-surface btn-full mt6">🧪  Teste de Clipboard</button>
 </div>
 
 <!-- ── Links salvos ────────────────────────────────────────────────── -->

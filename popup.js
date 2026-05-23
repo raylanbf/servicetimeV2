@@ -10,86 +10,75 @@ const APPS_SCRIPT =
   try {
     var dados = JSON.parse(e.postData.contents);
     var planilha = SpreadsheetApp.getActiveSpreadsheet();
-    var aba = planilha.getSheets()[0];
 
-    var NOVOS_CABECALHOS = ["Data (AP)", "Início (AP)", "Fim (AP)", "Duração (AP)", "Pausas (AP)", "URLs (AP)", "Comentário (AP)"];
-
-    // Mapear cabeçalhos existentes (case-insensitive)
-    var ultimaColuna = aba.getLastColumn();
-    var headerRow = aba.getRange(1, 1, 1, ultimaColuna).getValues()[0];
-    var colMap = {};
-    for (var c = 0; c < headerRow.length; c++) {
-      var h = String(headerRow[c]).trim().toLowerCase();
-      if (h) colMap[h] = c + 1;
+    // Busca ou cria a aba "Service Timer"
+    var aba = planilha.getSheetByName("Service Timer");
+    if (!aba) {
+      aba = planilha.insertSheet("Service Timer");
     }
 
-    // Criar novos cabeçalhos se não existirem
-    var proxCol = ultimaColuna + 1;
-    for (var nc = 0; nc < NOVOS_CABECALHOS.length; nc++) {
-      var chave = NOVOS_CABECALHOS[nc].toLowerCase();
-      if (!colMap[chave]) {
-        aba.getRange(1, proxCol).setValue(NOVOS_CABECALHOS[nc]).setFontWeight("bold");
-        colMap[chave] = proxCol;
-        proxCol++;
+    var CABECALHOS = [
+      "ID", "Usuário", "Tipo de Serviço", "Data",
+      "Início", "Fim", "Duração", "Duração (s)",
+      "Pausas", "URLs", "Comentário", "Suspenso"
+    ];
+
+    // Cria cabeçalhos se a aba estiver vazia
+    if (aba.getLastRow() === 0) {
+      var hr = aba.getRange(1, 1, 1, CABECALHOS.length);
+      hr.setValues([CABECALHOS]);
+      hr.setFontWeight("bold");
+      hr.setBackground("#4ade80");
+      aba.setFrozenRows(1);
+    }
+
+    // Carrega IDs já registrados para evitar duplicatas
+    var idsExistentes = {};
+    var ultimaLinha = aba.getLastRow();
+    if (ultimaLinha > 1) {
+      var idsArr = aba.getRange(2, 1, ultimaLinha - 1, 1).getValues();
+      for (var k = 0; k < idsArr.length; k++) {
+        if (idsArr[k][0]) idsExistentes[String(idsArr[k][0])] = true;
       }
     }
 
-    // Coluna "Id da tarefa"
-    var colIdTarefa = colMap["id da tarefa"];
-    if (!colIdTarefa) throw new Error('Coluna "Id da tarefa" não encontrada na planilha');
-
-    // Carregar IDs da coluna de uma vez
-    var lastRow = aba.getLastRow();
-    var idsArr = aba.getRange(2, colIdTarefa, lastRow - 1, 1).getValues();
-
     var registros = dados.registros || [];
-    var editados = 0;
-    var naoEncontrados = 0;
-    var escritos = [];
+    var novasLinhas = [];
 
     for (var i = 0; i < registros.length; i++) {
       var r = registros[i];
+      var id = r._id || "";
+      if (id && idsExistentes[id]) continue;
 
-      // Extrair task ID de qualquer URL (ex: ?task=61101 ou &task=61101)
-      var taskId = null;
-      var allUrls = [r.url || ""].concat(r.links || []);
-      for (var u = 0; u < allUrls.length; u++) {
-        var m = String(allUrls[u]).match(/[?&]task=(\\d+)/);
-        if (m) { taskId = m[1]; break; }
-      }
-      if (!taskId) { naoEncontrados++; continue; }
+      var pausas = (r.pausas || []).filter(function(p) { return p.pausa; })
+        .map(function(p) { return p.pausa + " → " + (p.retorno || "-"); })
+        .join("; ");
 
-      // Buscar linha pelo ID
-      var rowIndex = -1;
-      for (var row = 0; row < idsArr.length; row++) {
-        if (String(idsArr[row][0]).trim() === taskId) {
-          rowIndex = row + 2;
-          break;
-        }
-      }
-      if (rowIndex === -1) { naoEncontrados++; continue; }
+      var allUrls = [r.url || ""].concat(r.links || []).filter(Boolean);
 
-      // Formatar pausas e URLs
-      var pausas = (r.pausas || []).map(function(p) {
-        return (p.pausa || "") + " → " + (p.retorno || "-");
-      }).join("; ");
-      var urls = allUrls.filter(Boolean).join("\\n");
+      novasLinhas.push([
+        id,
+        r.usuario || dados.usuario || "",
+        r.tipo_servico || "",
+        r.data || "",
+        r.inicio || "",
+        r.fim || "",
+        r.tempo_total || "",
+        r.tempo_total_segundos || 0,
+        pausas,
+        allUrls.join("\\n"),
+        r.comentario || "",
+        r.foiSuspenso ? "Sim" : "Não"
+      ]);
+    }
 
-      // Preencher colunas novas na linha encontrada
-      aba.getRange(rowIndex, colMap["data (ap)"]).setValue(r.data || "");
-      aba.getRange(rowIndex, colMap["início (ap)"]).setValue(r.inicio || "");
-      aba.getRange(rowIndex, colMap["fim (ap)"]).setValue(r.fim || "");
-      aba.getRange(rowIndex, colMap["duração (ap)"]).setValue(r.tempo_total || "");
-      aba.getRange(rowIndex, colMap["pausas (ap)"]).setValue(pausas);
-      aba.getRange(rowIndex, colMap["urls (ap)"]).setValue(urls);
-      aba.getRange(rowIndex, colMap["comentário (ap)"]).setValue(r.comentario || "");
-
-      editados++;
-      escritos.push(r._id || String(i));
+    if (novasLinhas.length > 0) {
+      aba.getRange(aba.getLastRow() + 1, 1, novasLinhas.length, CABECALHOS.length)
+        .setValues(novasLinhas);
     }
 
     return ContentService
-      .createTextOutput(JSON.stringify({ status: "ok", editados: editados, nao_encontrados: naoEncontrados, escritos: escritos }))
+      .createTextOutput(JSON.stringify({ status: "ok", adicionados: novasLinhas.length }))
       .setMimeType(ContentService.MimeType.JSON);
 
   } catch (err) {
@@ -191,6 +180,12 @@ function syncMain() {
 
   $('timer').textContent = fmt(elapsedMs());
   updateCount();
+
+  // Toggle e painel do Google Sheets
+  $('toggle-sheets').checked          = S.sheetsEnabled;
+  $('sheets-panel').style.display     = S.sheetsEnabled ? 'block' : 'none';
+  $('sheets-row').style.display       = S.sheetsEnabled && S.webhook_url ? 'flex' : 'none';
+  $('webhook-setup-box').style.display = S.sheetsEnabled && !S.webhook_url ? 'block' : 'none';
 
   // Cards suspensos
   const suspBox = $('suspended-box');
@@ -356,7 +351,23 @@ function buildAllRecords() {
     list.innerHTML = '<p class="muted small" style="text-align:center;margin-top:20px">Nenhum registro ainda.</p>';
     return;
   }
-  registros.forEach(r => list.appendChild(recordItem(r)));
+  registros.forEach(r => {
+    const div = recordItem(r);
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn-rm-record';
+    delBtn.textContent = '🗑';
+    delBtn.title = 'Deletar registro';
+    delBtn.addEventListener('click', async e => {
+      e.stopPropagation();
+      if (!confirm(`Deletar este registro?\n${r.tipo_servico} · ${r.data} · ${r.tempo_total || ''}`)) return;
+      S.registros = S.registros.filter(x => x._id !== r._id);
+      await chrome.storage.local.set({ registros: S.registros });
+      buildRecentRecords();
+      buildAllRecords();
+    });
+    div.appendChild(delBtn);
+    list.appendChild(div);
+  });
 }
 
 // ── Links adicionais ──────────────────────────────────────────────
@@ -531,7 +542,10 @@ function setUploadingUI(loading) {
 function showUploadResult(result) {
   if (!result) return;
   if (result.ok) {
-    alert('Registros enviados com sucesso!');
+    const n = result.adicionados;
+    alert(n > 0
+      ? `✅ ${n} registro(s) adicionado(s) na aba "Service Timer"!`
+      : '⚠️ Nenhum registro novo — todos já haviam sido enviados.');
   } else {
     alert('Erro ao enviar: ' + result.erro);
   }
@@ -630,7 +644,7 @@ function buildLinks() {
       const div = document.createElement('div');
       div.className = 'saved-link-item';
       div.innerHTML =
-        `<div class="saved-link-info">
+        `<div class="saved-link-info" data-a="open" data-i="${i}" style="cursor:pointer">
            <div class="saved-link-label">${l.label}</div>
            <div class="saved-link-url">${l.url}</div>
          </div>
@@ -646,7 +660,10 @@ function buildLinks() {
     if (!btn) return;
     const i = +btn.dataset.i;
     const links = [...(S.savedLinks || [])];
-    if (btn.dataset.a === 'star') {
+    if (btn.dataset.a === 'open') {
+      chrome.tabs.create({ url: links[i].url, active: true });
+      return;
+    } else if (btn.dataset.a === 'star') {
       links[i] = { ...links[i], starter: !links[i].starter };
     } else if (btn.dataset.a === 'rm') {
       links.splice(i, 1);
@@ -675,11 +692,35 @@ function buildLinks() {
 
 // ── Configurações ─────────────────────────────────────────────────────
 function buildSettings() {
-  $('settings-name').value      = S.usuario;
-  $('settings-url').value       = S.webhook_url;
-  $('settings-video-w').value   = S.video_width;
-  $('settings-video-h').value   = S.video_height;
+  $('settings-name').value       = S.usuario;
+  $('settings-url').value        = S.webhook_url;
+  $('settings-video-w').value    = S.video_width;
+  $('settings-video-h').value    = S.video_height;
   $('settings-openrouter').value = S.openrouter_key || '';
+
+  // Botão de envio: visível só quando há URL
+  function syncSheetsBtn() {
+    $('btn-settings-sheets').style.display =
+      $('settings-url').value.trim() ? 'block' : 'none';
+  }
+  syncSheetsBtn();
+  $('settings-url').addEventListener('input', syncSheetsBtn);
+  $('btn-settings-sheets').onclick = doUpload;
+
+  // Script do Apps Script
+  $('settings-script-box').textContent = APPS_SCRIPT;
+  $('btn-settings-toggle-script').onclick = () => {
+    const wrap   = $('settings-script-wrap');
+    const hidden = wrap.style.display === 'none';
+    wrap.style.display = hidden ? 'block' : 'none';
+    $('btn-settings-toggle-script').textContent =
+      hidden ? '📄  Ocultar script' : '📄  Ver script do Apps Script';
+  };
+  $('btn-settings-copy-script').onclick = async () => {
+    await navigator.clipboard.writeText(APPS_SCRIPT);
+    $('btn-settings-copy-script').textContent = '✓ Copiado!';
+    setTimeout(() => { $('btn-settings-copy-script').textContent = '📋  Copiar script'; }, 2000);
+  };
 
   $('btn-save-settings').onclick = async () => {
     const name = $('settings-name').value.trim();
@@ -702,6 +743,9 @@ function buildSettings() {
   };
 
   $('btn-back-settings').onclick = () => show('main');
+  $('btn-test-clipboard').onclick = () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('test-clipboard.html') });
+  };
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────
@@ -724,6 +768,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     uploading:      saved.uploading      || false,
     uploadResult:  saved.uploadResult  || null,
     savedLinks:    saved.savedLinks    || [],
+    sheetsEnabled: saved.sheetsEnabled || false,
   };
 
   // Bindings estáticos
@@ -738,8 +783,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     await persist({ currentRecord: { ...S.currentRecord, tipo_servico: $('combo-tipo').value } });
   });
   $('btn-add-link').addEventListener('click', doAddLink);
+  $('toggle-sheets').addEventListener('change', async () => {
+    await persist({ sheetsEnabled: $('toggle-sheets').checked });
+    syncMain();
+  });
   $('btn-sheets').addEventListener('click', doUpload);
   $('btn-sheets-help').addEventListener('click', () => show('help'));
+  $('btn-save-webhook').addEventListener('click', async () => {
+    const url = $('input-main-webhook').value.trim();
+    if (!url) return;
+    await persist({ webhook_url: url });
+    $('input-main-webhook').value = '';
+    syncMain();
+  });
+  $('input-main-webhook').addEventListener('keydown', e => {
+    if (e.key === 'Enter') $('btn-save-webhook').click();
+  });
   $('btn-edit-tipos').addEventListener('click', () => { buildEditTipos(); show('edit-tipos'); });
   $('btn-settings').addEventListener('click',   () => { buildSettings();  show('settings');  });
   $('btn-back-help').addEventListener('click',  () => show('main'));
