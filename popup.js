@@ -108,6 +108,20 @@ function extractTaskId(url) {
   return m ? `Task #${m[1]}` : null;
 }
 
+function extractIds(urls) {
+  const ids = [], seen = new Set();
+  for (const url of urls) {
+    if (!url) continue;
+    const task   = url.match(/[?&]task=(\d+)/);
+    const course = url.match(/\/courses\/(\d+)/);
+    const fic    = url.match(/\/fic\/relatorio\/(\d+)/);
+    if (task   && !seen.has('t' + task[1]))   { ids.push({ icon: '🎯', label: 'Task',  value: task[1]   }); seen.add('t' + task[1]);   }
+    if (course && !seen.has('c' + course[1])) { ids.push({ icon: '🎓', label: 'Curso', value: course[1] }); seen.add('c' + course[1]); }
+    if (fic    && !seen.has('f' + fic[1]))    { ids.push({ icon: '📄', label: 'FIC',   value: fic[1]    }); seen.add('f' + fic[1]);    }
+  }
+  return ids;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
@@ -206,14 +220,18 @@ function syncMain() {
     const list = $('suspended-list');
     list.innerHTML = '';
     suspended.forEach((entry, i) => {
-      const label = extractTaskId(entry.record.url) || entry.record.tipo_servico;
-      const div = document.createElement('div');
-      div.className = 'suspended-item';
+      const label    = extractTaskId(entry.record.url) || entry.record.tipo_servico;
+      const allUrls  = [entry.record.url, ...(entry.record.links || [])].filter(Boolean);
+      const ids      = extractIds(allUrls);
+      const badges   = ids.map(id => `<span class="suspended-id-badge">${id.icon} ${id.label} #${id.value}</span>`).join('');
+      const div      = document.createElement('div');
+      div.className  = 'suspended-item';
       const disabled = S.running ? 'disabled title="Finalize ou suspenda o card atual primeiro"' : '';
       div.innerHTML =
         `<div class="suspended-info">
            <div class="suspended-task">${label}</div>
-           <div class="suspended-meta">${entry.record.tipo_servico} · ${fmt(entry.accMs)} acumulado</div>
+           ${badges ? `<div class="suspended-ids">${badges}</div>` : ''}
+           <div class="suspended-meta">${entry.record.data ? entry.record.data + ' · ' : ''}${entry.record.tipo_servico} · ${fmt(entry.accMs)} acumulado</div>
          </div>
          <button class="btn btn-green" style="font-size:10px;padding:3px 8px;flex-shrink:0" data-i="${i}" ${disabled}>▶ Retomar</button>`;
       list.appendChild(div);
