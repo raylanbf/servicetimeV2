@@ -324,7 +324,7 @@ function showRecordDetail(r, from = 'main') {
   if (allLinks.length) {
     html += `<div class="detail-section">
       <div class="detail-section-title">🔗 Links (${allLinks.length})</div>
-      ${allLinks.map(l => `<div class="detail-link" title="${l}">${l}</div>`).join('')}
+      ${allLinks.map(l => `<div class="detail-link detail-link-clickable" data-url="${l}" title="Abrir: ${l}">${l} <span class="detail-link-open">↗</span></div>`).join('')}
     </div>`;
   }
 
@@ -359,6 +359,9 @@ function showRecordDetail(r, from = 'main') {
   }
 
   $('record-detail-body').innerHTML = html;
+  $('record-detail-body').querySelectorAll('.detail-link-clickable').forEach(el => {
+    el.addEventListener('click', () => chrome.tabs.create({ url: el.dataset.url }));
+  });
   show('record-detail');
 }
 
