@@ -5,6 +5,17 @@ const DEFAULT_TIPOS = [
   'Cards Deduca',
 ];
 
+const DEFAULT_CANVAS_EXCEPTIONS = [
+  'Apresentação da Disciplina',
+  'Plano de Ensino',
+  'Referências Bibliográficas',
+  'Orientações de Estudo',
+  'Material Complementar',
+  'Atividade Objetiva',
+  'O que você achou desta disciplina? (PÓS EAD)',
+  'PROVA FINAL',
+];
+
 const APPS_SCRIPT =
 `function doPost(e) {
   try {
@@ -879,7 +890,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     uploadResult:  saved.uploadResult  || null,
     savedLinks:    saved.savedLinks    || [],
     sheetsEnabled:      saved.sheetsEnabled      || false,
-    canvasExceptions:   saved.canvasExceptions   || [],
+    canvasExceptions:   saved.canvasExceptions   ?? DEFAULT_CANVAS_EXCEPTIONS,
   };
 
   // Bindings estáticos
