@@ -869,6 +869,104 @@ async function doApplyIndent() {
   statusEl.style.display = 'block';
 }
 
+// ── Histórico de edições Canvas ──────────────────────────────────────
+async function doFetchRevisions() {
+  const courseId = await getCanvasCourseId();
+  if (!courseId) return;
+
+  show('canvas-revisions');
+  const statusEl = $('canvas-revisions-status');
+  const listEl   = $('canvas-revisions-list');
+  statusEl.style.color = '#64748b';
+  statusEl.textContent = 'Buscando páginas do curso...';
+  listEl.innerHTML = '';
+
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    const pagesResult = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      func: async (courseId) => {
+        async function fetchAll(url) {
+          const out = []; let next = url;
+          while (next) {
+            const res  = await fetch(next);
+            const data = await res.json();
+            if (Array.isArray(data)) out.push(...data);
+            const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
+            next = m ? m[1] : null;
+          }
+          return out;
+        }
+        return fetchAll(`/api/v1/courses/${courseId}/pages?per_page=100`);
+      },
+      args: [courseId],
+    });
+
+    const pages = pagesResult[0]?.result || [];
+    if (!pages.length) { statusEl.textContent = 'Nenhuma página encontrada.'; return; }
+
+    statusEl.textContent = `Buscando revisões de ${pages.length} página(s)...`;
+
+    const revisionsResult = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      func: async (courseId, pages) => {
+        async function fetchAll(url) {
+          const out = []; let next = url;
+          while (next) {
+            const res  = await fetch(next);
+            const data = await res.json();
+            if (Array.isArray(data)) out.push(...data);
+            const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
+            next = m ? m[1] : null;
+          }
+          return out;
+        }
+        const entries = [];
+        for (const page of pages) {
+          try {
+            const revs = await fetchAll(`/api/v1/courses/${courseId}/pages/${page.url}/revisions?per_page=100`);
+            for (const rev of revs) {
+              if (!rev.edited_by) continue;
+              entries.push({
+                page_title:  page.title,
+                editor:      rev.edited_by.display_name,
+                updated_at:  rev.updated_at,
+                latest:      !!rev.latest,
+              });
+            }
+          } catch {}
+        }
+        entries.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+        return { entries, total: pages.length };
+      },
+      args: [courseId, pages],
+    });
+
+    const { entries = [], total = 0 } = revisionsResult[0]?.result || {};
+
+    if (!entries.length) { statusEl.textContent = 'Nenhuma revisão encontrada.'; return; }
+
+    statusEl.textContent = `${entries.length} edição(ões) em ${total} página(s)`;
+
+    entries.forEach(e => {
+      const d         = new Date(e.updated_at);
+      const formatted = `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+      const div       = document.createElement('div');
+      div.className   = 'revision-item';
+      div.innerHTML   =
+        `<div class="revision-page">${e.page_title}${e.latest ? '<span class="revision-latest">atual</span>' : ''}</div>
+         <div class="revision-editor">👤 ${e.editor}</div>
+         <div class="revision-date">${formatted}</div>`;
+      listEl.appendChild(div);
+    });
+
+  } catch (err) {
+    statusEl.style.color = '#f87171';
+    statusEl.textContent = '✗ Erro: ' + err.message;
+  }
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   const saved = await chrome.storage.local.get(null);
@@ -930,6 +1028,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-all-records').addEventListener('click', () => { buildAllRecords(); show('records'); });
   $('btn-back-records').addEventListener('click', () => show('main'));
   $('btn-canvas-indent').addEventListener('click', doApplyIndent);
+  $('btn-canvas-revisions').addEventListener('click', doFetchRevisions);
+  $('btn-back-canvas-revisions').addEventListener('click', () => show('main'));
   $('btn-back-record-detail').addEventListener('click', () => {
     const from = $('btn-back-record-detail').dataset.from || 'main';
     show(from);
