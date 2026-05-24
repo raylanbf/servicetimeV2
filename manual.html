@@ -246,6 +246,7 @@
   <div class="nav-section">Integrações</div>
   <a class="nav-item" href="#sheets">Google Sheets</a>
   <a class="nav-item" href="#canvas">Canvas LMS</a>
+  <a class="nav-item" href="#canvas-revisions">↳ Histórico de edições</a>
 
   <div class="nav-section">Ferramentas</div>
   <a class="nav-item" href="#contexto">Menu de contexto</a>
@@ -400,11 +401,11 @@
     <p>Quando o painel lateral está aberto em uma aba de curso do Canvas (<code>/courses/XXXX/</code>), a seção <strong>🎓 Canvas LMS</strong> aparece automaticamente com o ID do curso detectado.</p>
 
     <div class="callout blue">
-      Funciona com a sessão ativa do Canvas — não requer token de API. A autenticação é feita pelos cookies de sessão do navegador.
+      Funciona com a sessão ativa do Canvas — não requer token de API nem configuração. A autenticação é feita pelos cookies de sessão do navegador, da mesma forma que você navegaria manualmente.
     </div>
 
-    <h3>Aplicar recuo nos módulos</h3>
-    <p>O botão <strong>🔧 Aplicar recuo nos módulos</strong> percorre todos os módulos do curso e aplica a indentação automaticamente:</p>
+    <h3>🔧 Aplicar recuo nos módulos</h3>
+    <p>Percorre todos os módulos do curso e aplica a indentação automaticamente:</p>
 
     <table>
       <thead><tr><th>Item</th><th>Recuo aplicado</th></tr></thead>
@@ -415,22 +416,45 @@
     </table>
 
     <h3>Configurar as exceções</h3>
-    <p>Em <strong>Configurações → Canvas LMS → Páginas sem recuo</strong>, adicione um nome parcial por linha:</p>
+    <p>Em <strong>Configurações → Canvas LMS → Páginas sem recuo</strong>, adicione um nome parcial por linha. A comparação é <strong>parcial e sem diferenciação de maiúsculas</strong> — um termo cobre todas as variações numeradas:</p>
 
-    <pre>Orientação do professor
-Material complementar
-Apresentação
-Objetivos</pre>
+    <table>
+      <thead><tr><th>Termo configurado</th><th>Cobre automaticamente</th></tr></thead>
+      <tbody>
+        <tr><td>Orientações de Estudo</td><td>Unidade 1 - Orientações de Estudo, Unidade 2 - Orientações de Estudo…</td></tr>
+        <tr><td>Material Complementar</td><td>Material Complementar 1, Material Complementar 2…</td></tr>
+        <tr><td>Atividade Objetiva</td><td>Atividade Objetiva 1, Atividade Objetiva 2…</td></tr>
+      </tbody>
+    </table>
 
-    <p>A comparação é <strong>parcial e sem diferenciação de maiúsculas</strong>. Ao digitar <code>Orientação do professor</code>, a extensão reconhece automaticamente:</p>
-    <ul>
-      <li>Unidade 1 Orientação do professor</li>
-      <li>Unidade 2 Orientação do professor</li>
-      <li>Unidade 3 Orientação do professor</li>
-    </ul>
+    <p>A extensão já vem com as seguintes exceções pré-configuradas:</p>
+    <pre>Apresentação da Disciplina
+Plano de Ensino
+Referências Bibliográficas
+Orientações de Estudo
+Material Complementar
+Atividade Objetiva
+O que você achou desta disciplina? (PÓS EAD)
+PROVA FINAL</pre>
 
     <p>A função só faz chamadas PUT nos itens que precisam ser alterados. Ao concluir:</p>
     <div class="callout">✅ 34 item(s) ajustado(s) em 5 módulo(s) · 60 total</div>
+
+    <h3 id="canvas-revisions">👥 Ver histórico de edições</h3>
+    <p>Exibe todas as revisões de todas as páginas do curso em uma view dedicada, ordenadas da mais recente para a mais antiga.</p>
+
+    <table>
+      <thead><tr><th>Informação</th><th>Descrição</th></tr></thead>
+      <tbody>
+        <tr><td>Página</td><td>Título da página editada. Badge <strong>atual</strong> indica a versão mais recente</td></tr>
+        <tr><td>Editado por</td><td>Nome do usuário que fez a edição</td></tr>
+        <tr><td>Data e hora</td><td>Momento exato da edição no horário local</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout yellow">
+      A busca faz uma requisição por página do curso — cursos com muitas páginas podem levar alguns segundos para carregar o histórico completo.
+    </div>
   </section>
 
   <!-- ── Menu de contexto ── -->
