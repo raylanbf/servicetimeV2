@@ -1,0 +1,24 @@
+🚀 Desenvolvi uma extensão Chrome para otimizar o fluxo de trabalho da nossa equipe de produção de conteúdo EAD
+
+Ao longo das últimas semanas, identifiquei uma série de tarefas repetitivas que tomavam tempo considerável do time — e decidi automatizá-las com uma extensão própria, desenvolvida do zero.
+
+⏱ Controle de tempo por serviço
+A extensão roda como painel lateral do Chrome, permitindo iniciar, pausar, suspender e finalizar cronômetros por tipo de atendimento sem sair da aba de trabalho. Cada registro salva automaticamente horário de início, fim, pausas, links acessados e comentário — tudo exportável para o Google Sheets com um clique.
+
+🎓 Automação no Canvas LMS
+Uma das maiores demandas da equipe era a aplicação manual de recuo nos módulos dos cursos. Com a extensão, esse processo que levava minutos passou a ser feito em segundos — a ferramenta percorre todos os módulos via API, identifica as páginas que devem permanecer como cabeçalho (Orientações de Estudo, Material Complementar, Atividade Objetiva, entre outras) e aplica a indentação correta automaticamente. Também implementei uma visualização do histórico de edições de páginas por usuário, facilitando o acompanhamento do trabalho da equipe.
+
+🧹 Ferramentas de edição de conteúdo
+Para quem trabalha copiando e colando conteúdo entre plataformas, desenvolvi três modos de cópia via menu de contexto:
+- Cópia limpa — remove estilos e atributos desnecessários, mantendo formatação essencial
+- Cópia em caixa alta — para títulos e padronizações
+- Cópia Inteligente — cópia avançada para editores rich text como TinyMCE e Canvas, com correção automática de encoding quebrado (mojibake), padronização de cor e estrutura HTML limpa
+
+Além disso: redimensionamento em lote de vídeos no editor, localizar e substituir em campos de texto de qualquer página, conversão de fórmulas matemáticas para LaTeX via IA, e download de imagens em formato circular.
+
+🔧 Tecnologias utilizadas
+Chrome Extension Manifest V3 · JavaScript · Chrome Storage API · Chrome Scripting API · Canvas LMS REST API · Google Apps Script · OpenRouter API
+
+---
+
+Nenhuma ferramenta externa, nenhum custo de licença — só uma solução feita sob medida para o nosso contexto. 💡
