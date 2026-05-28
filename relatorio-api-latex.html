@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relatório — Uso de Chave API para Conversão de Fórmulas LaTeX</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      color: #1e293b;
+      background: #f1f5f9;
+    }
+
+    .page {
+      max-width: 860px;
+      margin: 40px auto;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.10);
+      overflow: hidden;
+    }
+
+    /* ── Cabeçalho ── */
+    .header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+      color: #fff;
+      padding: 48px 56px 40px;
+    }
+    .header-badge {
+      display: inline-block;
+      background: rgba(255,255,255,.15);
+      border: 1px solid rgba(255,255,255,.3);
+      border-radius: 20px;
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 4px 14px;
+      margin-bottom: 20px;
+    }
+    .header h1 {
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1.3;
+      margin-bottom: 24px;
+    }
+    .header-meta {
+      display: flex;
+      gap: 32px;
+      flex-wrap: wrap;
+    }
+    .header-meta-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .header-meta-item span:first-child {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      opacity: .65;
+    }
+    .header-meta-item span:last-child {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    /* ── Corpo ── */
+    .body {
+      padding: 48px 56px 64px;
+    }
+
+    /* ── Seções ── */
+    .section {
+      margin-bottom: 48px;
+    }
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .section-number {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      background: #2563eb;
+      color: #fff;
+      border-radius: 50%;
+      font-size: 13px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .section-title h2 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1e293b;
+    }
+
+    h3 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #334155;
+      margin: 24px 0 10px;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+
+    p {
+      color: #475569;
+      margin-bottom: 12px;
+    }
+
+    /* ── Tabelas ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 24px;
+      font-size: 13.5px;
+    }
+    thead tr {
+      background: #1e3a5f;
+      color: #fff;
+    }
+    thead th {
+      padding: 10px 14px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 12px;
+      letter-spacing: .04em;
+    }
+    tbody tr:nth-child(odd)  { background: #f8fafc; }
+    tbody tr:nth-child(even) { background: #fff; }
+    tbody tr:hover           { background: #eff6ff; }
+    tbody td {
+      padding: 10px 14px;
+      color: #334155;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    tfoot td {
+      padding: 10px 14px;
+      background: #1e3a5f;
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    /* ── Cards de benefício ── */
+    .cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin: 16px 0;
+    }
+    .card {
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .card-icon { font-size: 22px; margin-bottom: 8px; }
+    .card-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #1e293b;
+      margin-bottom: 4px;
+    }
+    .card-desc {
+      font-size: 12.5px;
+      color: #64748b;
+      line-height: 1.5;
+    }
+
+    /* ── Alert / destaque ── */
+    .alert {
+      display: flex;
+      gap: 14px;
+      background: #eff6ff;
+      border-left: 4px solid #2563eb;
+      border-radius: 0 8px 8px 0;
+      padding: 16px 20px;
+      margin: 16px 0;
+    }
+    .alert-icon { font-size: 20px; flex-shrink: 0; }
+    .alert-text { font-size: 13.5px; color: #1e40af; line-height: 1.6; }
+    .alert-text strong { display: block; margin-bottom: 2px; font-size: 14px; }
+
+    .alert-warn {
+      background: #fefce8;
+      border-color: #ca8a04;
+    }
+    .alert-warn .alert-text { color: #854d0e; }
+
+    /* ── Passos ── */
+    .steps {
+      counter-reset: step;
+      list-style: none;
+      margin: 16px 0;
+    }
+    .steps li {
+      counter-increment: step;
+      display: flex;
+      gap: 14px;
+      padding: 10px 0;
+      border-bottom: 1px dashed #e2e8f0;
+      align-items: flex-start;
+    }
+    .steps li:last-child { border-bottom: none; }
+    .steps li::before {
+      content: counter(step);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 26px;
+      height: 26px;
+      background: #dbeafe;
+      color: #1d4ed8;
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .steps li span { font-size: 14px; color: #334155; }
+    .steps li .step-highlight {
+      display: inline-block;
+      background: #dbeafe;
+      color: #1d4ed8;
+      border-radius: 4px;
+      padding: 0 6px;
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    /* ── Custo destaque ── */
+    .cost-highlight {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 32px;
+      background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+      border: 1px solid #bbf7d0;
+      border-radius: 12px;
+      padding: 28px 32px;
+      margin: 20px 0;
+      flex-wrap: wrap;
+    }
+    .cost-item { text-align: center; }
+    .cost-value {
+      font-size: 28px;
+      font-weight: 800;
+      color: #166534;
+    }
+    .cost-label {
+      font-size: 11.5px;
+      color: #15803d;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    .cost-sep {
+      font-size: 28px;
+      color: #86efac;
+      font-weight: 300;
+    }
+
+    /* ── Precauções ── */
+    .precaution-list {
+      list-style: none;
+      margin: 12px 0;
+    }
+    .precaution-list li {
+      display: flex;
+      gap: 10px;
+      padding: 8px 0;
+      font-size: 14px;
+      color: #334155;
+      border-bottom: 1px solid #f1f5f9;
+      align-items: flex-start;
+    }
+    .precaution-list li:last-child { border-bottom: none; }
+    .precaution-list li::before {
+      content: '✓';
+      color: #16a34a;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    /* ── Conclusão ── */
+    .conclusion {
+      background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%);
+      border-radius: 12px;
+      padding: 36px 40px;
+      color: #fff;
+      margin-top: 16px;
+    }
+    .conclusion h2 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 14px;
+    }
+    .conclusion p {
+      color: rgba(255,255,255,.85);
+      font-size: 14.5px;
+      margin-bottom: 10px;
+    }
+
+    /* ── Rodapé ── */
+    .footer {
+      text-align: center;
+      padding: 24px;
+      font-size: 12px;
+      color: #94a3b8;
+      border-top: 1px solid #f1f5f9;
+    }
+
+    /* ── Barra de download ── */
+    .download-bar {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 9999;
+    }
+    .btn-download {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 11px 20px;
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,.18);
+      text-decoration: none;
+      transition: transform .15s, box-shadow .15s;
+    }
+    .btn-download:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,0,0,.22);
+    }
+    .btn-pdf  { background: #dc2626; color: #fff; }
+    .btn-word { background: #1d4ed8; color: #fff; }
+    .btn-download svg { flex-shrink: 0; }
+
+    @media print {
+      .download-bar { display: none !important; }
+      body { background: #fff; }
+      .page {
+        margin: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+    }
+
+    /* ── Divisor ── */
+    hr {
+      border: none;
+      border-top: 1px solid #e2e8f0;
+      margin: 36px 0;
+    }
+
+    @media (max-width: 600px) {
+      .header, .body { padding: 28px 24px; }
+      .cards { grid-template-columns: 1fr; }
+      .header h1 { font-size: 20px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- CABEÇALHO -->
+  <div class="header">
+    <div class="header-badge">Relatório Técnico</div>
+    <h1>Uso de Chave API para Conversão Automatizada<br>de Fórmulas LaTeX no Canvas LMS para UDAS</h1>
+    <div class="header-meta">
+      <div class="header-meta-item">
+        <span>Equipe</span>
+        <span>Gestão do Ambiente Virtual</span>
+      </div>
+      <div class="header-meta-item">
+        <span>Data</span>
+        <span>Maio de 2026</span>
+      </div>
+      <div class="header-meta-item">
+        <span>Versão</span>
+        <span>1.0</span>
+      </div>
+      <div class="header-meta-item">
+        <span>Classificação</span>
+        <span>Interno</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- CORPO -->
+  <div class="body">
+
+    <!-- 1. INTRODUÇÃO -->
+    <div class="section">
+      <div class="section-title">
+        <div class="section-number">1</div>
+        <h2>Introdução</h2>
+      </div>
+      <p>O Canvas LMS (Instructure) é a plataforma de ensino adotada pela instituição para disponibilização de conteúdos educacionais. Utilizamos os materiais disponibilizados nas FICs para incluir o conteúdo das UDAs no Canvas. Nesse processo, é frequente a presença de fórmulas matemáticas, equações e expressões científicas nas FICs referentes às UDAs, que precisam ser inseridas digitalmente de forma correta e acessível.</p>
+      <p>A plataforma Canvas oferece suporte nativo ao formato <strong>LaTeX</strong>, padrão amplamente utilizado para representação de fórmulas matemáticas em ambientes digitais. Quando uma fórmula é inserida via LaTeX, ela é renderizada visualmente pela plataforma e também fica legível por tecnologias assistivas, como leitores de tela — essencial para garantir a <strong>acessibilidade do conteúdo</strong> a estudantes com deficiência visual.</p>
+      <p>Este relatório justifica a adoção de uma chave de API de inteligência artificial (OpenAI ou OpenRouter) para viabilizar o uso de uma extensão do Chrome com o objetivo de automatizar a conversão de imagens de fórmulas para código LaTeX.</p>
+    </div>
+
+    <hr>
+
+    <!-- 2. PROBLEMA ATUAL -->
+    <div class="section">
+      <div class="section-title">
+        <div class="section-number">2</div>
+        <h2>O Problema Atual</h2>
+      </div>
+
+      <h3>Origem das fórmulas nos materiais FIC</h3>
+      <p>Os materiais recebidos em formato FIC frequentemente contêm fórmulas matemáticas apresentadas como <strong>imagens</strong> — arquivos digitalizados ou elementos visuais incorporados em documentos. Essas imagens não possuem nenhuma informação textual subjacente.</p>
+
+      <h3>Por que imagens não são suficientes</h3>
+      <div class="alert">
+        <div class="alert-icon">♿</div>
+        <div class="alert-text">
+          <strong>Problema de Acessibilidade</strong>
+          Leitores de tela utilizados por pessoas com deficiência visual não conseguem interpretar o conteúdo de uma imagem. Uma fórmula inserida como imagem simplesmente não existe para esse grupo de estudantes — tornando o conteúdo inacessível e potencialmente em desconformidade com as diretrizes WCAG 2.1.
+        </div>
+      </div>
+
+      <h3>O fluxo atual sem automação</h3>
+      <ol class="steps">
+        <li><span>Identificar a fórmula no material FIC (imagem)</span></li>
+        <li><span>Abrir o editor LaTeX no Canvas</span></li>
+        <li><span>Tentar reconstituir manualmente o código LaTeX correspondente à imagem</span></li>
+        <li><span>Quando o conhecimento técnico não é suficiente, copiar a imagem e colar no <span class="step-highlight">ChatGPT gratuito</span> para obter sugestão de código</span></li>
+        <li><span>Copiar o código sugerido e colar no editor do Canvas</span></li>
+        <li><span>Verificar se a renderização está correta; ajustar se necessário</span></li>
+      </ol>
+
+      <h3>Limitações graves do fluxo atual</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Problema</th>
+            <th>Impacto</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Reconstituição manual exige conhecimento avançado em LaTeX</td>
+            <td>Nem todos os membros da equipe dominam a sintaxe</td>
+          </tr>
+          <tr>
+            <td>Processo lento por fórmula</td>
+            <td>Cada fórmula pode levar de 3 a 10 minutos</td>
+          </tr>
+          <tr>
+            <td>ChatGPT gratuito atinge limite de uso</td>
+            <td>Bloqueia novas solicitações no meio do trabalho</td>
+          </tr>
+          <tr>
+            <td>Dependência de ferramentas externas não integradas</td>
+            <td>Múltiplos passos manuais entre abas e aplicações</td>
+          </tr>
+          <tr>
+            <td>Sujeito a erro humano</td>
+            <td>Código LaTeX incorreto gera fórmula errada sem aviso imediato</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr>
+
+    <!-- 3. COMO OBTER ACESSO À API -->
+    <div class="section">
+      <div class="section-title">
+        <div class="section-number">3</div>
+        <h2>Como Obter Acesso à API</h2>
+      </div>
+
+      <p>Para utilizar a solução proposta, é necessário criar uma conta em uma das plataformas abaixo, adicionar créditos e gerar uma chave de API. O processo é simples e leva menos de 10 minutos.</p>
+
+      <h3>Opção A — OpenAI (chave direta, prefixo <code>sk-…</code>)</h3>
+      <ol class="steps">
+        <li><span>Acesse <strong>platform.openai.com</strong> e clique em "Sign up" para criar uma conta (ou "Log in" se já possuir)</span></li>
+        <li><span>Após o login, acesse o menu <strong>Settings &gt; Billing</strong></span></li>
+        <li><span>Clique em <strong>"Add payment method"</strong> e cadastre um cartão de crédito/débito internacional</span></li>
+        <li><span>Em <strong>"Usage limits"</strong>, defina o limite mensal recomendado de <strong>$5,00 USD</strong> para controle de gastos</span></li>
+        <li><span>Acesse o menu <strong>"API keys"</strong> no painel lateral e clique em <strong>"Create new secret key"</strong></span></li>
+        <li><span>Dê um nome à chave (ex: "Canvas LaTeX") e clique em <strong>"Create secret key"</strong></span></li>
+        <li><span>Copie e guarde a chave gerada — ela começa com <strong>sk-…</strong> e é exibida <strong>apenas uma vez</strong></span></li>
+        <li><span>Cole a chave no campo "Chave API" da extensão Chrome em <strong>⚙ Configurações</strong></span></li>
+      </ol>
+
+      <h3>Opção B — OpenRouter (prefixo <code>sk-or-…</code>, alternativa com mais flexibilidade)</h3>
+      <ol class="steps">
+        <li><span>Acesse <strong>openrouter.ai</strong> e clique em "Sign in" para criar uma conta (aceita login com Google)</span></li>
+        <li><span>Após o login, acesse <strong>"Credits"</strong> no menu superior</span></li>
+        <li><span>Clique em <strong>"Buy credits"</strong> e adicione créditos via cartão (valor mínimo geralmente de $5,00 USD)</span></li>
+        <li><span>Acesse <strong>"Keys"</strong> no menu superior e clique em <strong>"Create Key"</strong></span></li>
+        <li><span>Dê um nome à chave e defina um limite de crédito opcional para segurança</span></li>
+        <li><span>Copie a chave gerada — ela começa com <strong>sk-or-…</strong> e é exibida <strong>apenas uma vez</strong></span></li>
+        <li><span>Cole a chave no campo "Chave API" da extensão Chrome em <strong>⚙ Configurações</strong></span></li>
+      </ol>
+
+      <div class="alert">
+        <div class="alert-icon">💡</div>
+        <div class="alert-text">
+          <strong>Qual plataforma escolher?</strong>
+          Ambas funcionam com a extensão. A OpenAI é a opção mais direta (mesmo provedor do GPT-4o). O OpenRouter oferece mais opções de modelos e pode ser vantajoso para quem já usa outras IAs. Para o uso descrito neste relatório, qualquer uma das duas atende plenamente.
+        </div>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- 4. SOLUÇÃO PROPOSTA -->
+    <div class="section">
+      <div class="section-title">
+        <div class="section-number">4</div>
+        <h2>Solução Proposta</h2>
+      </div>
+
+      <p>A solução proposta consiste na utilização de uma extensão do Chrome com uma funcionalidade específica para este problema: a <strong>conversão automática de imagem de fórmula para código LaTeX com um único clique</strong>. Para que isso seja possível, é necessária uma chave de API de inteligência artificial que permita à extensão processar as imagens das fórmulas.</p>
+
+      <h3>Como funciona</h3>
+      <ol class="steps">
+        <li><span>O colaborador identifica a imagem da fórmula no material (página web, PDF no navegador ou material do Canvas)</span></li>
+        <li><span>Clica com o <strong>botão direito</strong> sobre a imagem</span></li>
+        <li><span>Seleciona <span class="step-highlight">🔢 Converter fórmula para LaTeX</span> no menu de contexto</span></li>
+        <li><span>A extensão envia a imagem automaticamente para a API de IA configurada</span></li>
+        <li><span>O modelo analisa a imagem e identifica a fórmula matemática</span></li>
+        <li><span>O código LaTeX é copiado diretamente para a área de transferência — <strong>Ctrl+V já está pronto</strong></span></li>
+        <li><span>No editor LaTeX do Canvas, basta colar — a fórmula aparece renderizada corretamente</span></li>
+      </ol>
+
+      <div class="alert">
+        <div class="alert-icon">⚡</div>
+        <div class="alert-text">
+          <strong>Tempo total do processo: aproximadamente 5 a 10 segundos</strong>
+          Sem abrir nenhuma aba adicional, sem copiar para outro site, sem aguardar interfaces carregarem. O processo acontece invisível, direto no navegador.
+        </div>
+      </div>
+
+      <h3>Tecnologia utilizada</h3>
+      <p>A extensão utiliza o modelo <strong>GPT-4o</strong> (OpenAI), que possui capacidade de visão computacional — analisa imagens e interpreta seu conteúdo. É reconhecido como estado da arte para interpretação visual e conversão de conteúdo matemático.</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Tipo de chave</th>
+            <th>Prefixo</th>
+            <th>Endpoint utilizado</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>OpenAI (direta)</td>
+            <td><code>sk-…</code></td>
+            <td>api.openai.com</td>
+          </tr>
+          <tr>
+            <td>OpenRouter</td>
+            <td><code>sk-or-…</code></td>
+            <td>openrouter.ai</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>A extensão detecta automaticamente o tipo de chave e direciona a requisição para o endpoint correto, sem qualquer configuração adicional.</p>
+    </div>
+
+    <hr>
+
+    <!-- 5. BENEFÍCIOS -->
+    <div class="section">
+      <div class="section-title">
+        <div class="section-number">5</div>
+        <h2>Benefícios</h2>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <div class="card-icon">⚡</div>
+          <div class="card-title">Produtividade</div>
+          <div class="card-desc">Redução de 80 a 95% no tempo por fórmula. Em um material com 10 fórmulas, economia de 40 a 120 minutos.</div>
+        </div>
+        <div class="card">
+          <div class="card-icon">♿</div>
+          <div class="card-title">Acessibilidade garantida</div>
+          <div class="card-desc">Toda fórmula em LaTeX é legível por leitores de tela, cumprindo as diretrizes WCAG 2.1 nível AA.</div>
+        </div>
+        <div class="card">
+          <div class="card-icon">♾️</div>
+          <div class="card-title">Sem limite de uso</div>
+          <div class="card-desc">Diferente do ChatGPT gratuito, a API é ilimitada. Cada requisição é cobrada individualmente, sem teto de conversas.</div>
+        </div>
+        <div class="card">
+          <div class="card-icon">🎯</div>
+          <div class="card-title">Alta precisão</div>
+          <div class="card-desc">GPT-4o interpreta frações, somatórios, integrais, vetores e expressões complexas com alta fidelidade.</div>
+        </div>
+        <div class="card">
+          <div class="card-icon">🔗</div>
+          <div class="card-title">Integrado ao fluxo</div>
+          <div class="card-desc">Funciona direto no navegador, sem trocar de aba ou abrir ferramentas externas.</div>
+        </div>
+        <div class="card">
+          <div class="card-icon">👥</div>
+          <div class="card-title">Democrático</div>
+          <div class="card-desc">Não exige conhecimento em LaTeX. Qualquer membro da equipe consegue usar com um clique.</div>
+        </div>
+      </div>
+
+      <h3>Comparativo de tempo estimado</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Etapa</th>
+            <th>Antes</th>
+            <th>Depois</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Identificar e copiar fórmula</td>
+            <td>~1 min</td>
+            <td>5 seg</td>
+          </tr>
+          <tr>
+            <td>Obter código LaTeX</td>
+            <td>3 – 10 min</td>
+            <td>automático</td>
+          </tr>
+          <tr>
+            <td>Colar e verificar no Canvas</td>
+            <td>1 – 2 min</td>
+            <td>~30 seg</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>Total estimado por fórmula</td>
+            <td>5 – 13 minutos</td>
+            <td>~1 minuto</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <hr>
+
+    <!-- 6. JUSTIFICATIVA TÉCNICA -->
+    <div class="section">
+      <div class="section-title">
+        <div class="section-number">6</div>
+        <h2>Justificativa Técnica da Escolha</h2>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Critério</th>
+            <th>ChatGPT Gratuito</th>
+            <th>API (OpenAI / OpenRouter)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Limite de uso</td>
+            <td>Sim — interrompível</td>
+            <td>Não — pay-as-you-go</td>
+          </tr>
+          <tr>
+            <td>Integração com extensão</td>
+            <td>Impossível</td>
+            <td>Sim, via REST</td>
+          </tr>
+          <tr>
+            <td>Automação (1 clique)</td>
+            <td>Impossível</td>
+            <td>Sim</td>
+          </tr>
+          <tr>
+            <td>Controle da chave</td>
+            <td>Não</td>
+            <td>Sim — revogável a qualquer momento</td>
+          </tr>
+          <tr>
+            <td>Interpretação de imagem</td>
+            <td>Manual (usuário descreve)</td>
+            <td>Automática (visão computacional)</td>
+          </tr>
+          <tr>
+            <td>Custo</td>
+            <td>Gratuito com limitações</td>
+            <td>Muito baixo — centavos por fórmula</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>O GPT-4o é um modelo <strong>multimodal</strong> — processa tanto texto quanto imagens. Sua capacidade de interpretar fórmulas matemáticas a partir de imagens é vastamente superior a modelos menores ou soluções OCR tradicionais, que frequentemente falham com notações complexas.</p>
+    </div>
+
+    <hr>
+
+    <!-- 7. CUSTOS -->
+    <div class="section">
+      <div class="section-title">
+        <div class="section-number">7</div>
+        <h2>Custos e Viabilidade</h2>
+      </div>
+
+      <p>A API da OpenAI utiliza o modelo <strong>pay-as-you-go</strong>: paga-se apenas pelo que for usado, por token processado. Não há mensalidade, não há contrato mínimo.</p>
+
+      <h3>Estimativa de custo por conversão</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Quantidade estimada</th>
+            <th>Custo (USD)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Tokens de entrada (imagem + prompt)</td>
+            <td>~200 – 500 tokens</td>
+            <td>~$0,0010</td>
+          </tr>
+          <tr>
+            <td>Tokens de saída (código LaTeX)</td>
+            <td>~50 – 200 tokens</td>
+            <td>~$0,0010</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="2">Total por fórmula</td>
+            <td>~$0,001 a $0,003</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <div class="cost-highlight">
+        <div class="cost-item">
+          <div class="cost-value">$0,002</div>
+          <div class="cost-label">por fórmula (média)</div>
+        </div>
+        <div class="cost-sep">≈</div>
+        <div class="cost-item">
+          <div class="cost-value">R$ 0,01</div>
+          <div class="cost-label">por fórmula (câmbio ~R$5,70)</div>
+        </div>
+        <div class="cost-sep">→</div>
+        <div class="cost-item">
+          <div class="cost-value">1 centavo</div>
+          <div class="cost-label">ou menos por fórmula</div>
+        </div>
+      </div>
+
+      <h3>Projeção de uso mensal</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Cenário</th>
+            <th>Fórmulas / mês</th>
+            <th>Custo estimado (USD)</th>
+            <th>Custo estimado (BRL)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Uso leve (1–2 FICs)</td>
+            <td>~50</td>
+            <td>~$0,10</td>
+            <td>~R$ 0,57</td>
+          </tr>
+          <tr>
+            <td>Uso moderado (5–8 FICs)</td>
+            <td>~300</td>
+            <td>~$0,60</td>
+            <td>~R$ 3,42</td>
+          </tr>
+          <tr>
+            <td>Uso intenso (FICs + revisões)</td>
+            <td>~1.000</td>
+            <td>~$2,00</td>
+            <td>~R$ 11,40</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="alert">
+        <div class="alert-icon">💡</div>
+        <div class="alert-text">
+          <strong>Recomendação</strong>
+          Definir um limite de gasto mensal de <strong>$5,00 USD</strong> na conta da OpenAI. Esse valor cobre mais de 2.000 conversões — suficiente para qualquer cenário de uso real — e evita cobranças inesperadas.
+        </div>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- 8. PRECAUÇÕES E SEGURANÇA -->
+    <div class="section">
+      <div class="section-title">
+        <div class="section-number">8</div>
+        <h2>Precauções e Segurança</h2>
+      </div>
+
+      <h3>Sobre a chave de API</h3>
+      <ul class="precaution-list">
+        <li>A chave é armazenada <strong>localmente no navegador</strong> do colaborador, dentro do armazenamento seguro da extensão Chrome — não é enviada para nenhum servidor da equipe</li>
+        <li>A requisição vai diretamente do navegador para o endpoint da OpenAI/OpenRouter, sem intermediários</li>
+        <li>A chave pode ser <strong>revogada a qualquer momento</strong> pelo painel da OpenAI, sem impacto a outros sistemas</li>
+        <li>Recomenda-se definir um <strong>limite de gasto mensal</strong> na conta da OpenAI para evitar cobranças inesperadas</li>
+        <li>A chave deve ser gerada em uma conta vinculada ao responsável técnico ou à instituição</li>
+      </ul>
+
+      <h3>Sobre os dados enviados</h3>
+      <ul class="precaution-list">
+        <li>A extensão envia <strong>apenas a imagem da fórmula</strong> para a API — nenhum dado da página, do usuário ou do conteúdo do Canvas é transmitido</li>
+        <li>Os dados de API <strong>não são usados para treinar modelos</strong>, conforme política da OpenAI para clientes de API (diferente do ChatGPT gratuito)</li>
+        <li>Nenhum dado de identificação pessoal é transmitido nas requisições</li>
+      </ul>
+
+      <h3>Boas práticas recomendadas</h3>
+      <ul class="precaution-list">
+        <li>Não compartilhar a chave de API em canais públicos, e-mails ou documentos não protegidos</li>
+        <li>Monitorar o uso pelo painel da OpenAI ao menos uma vez por mês</li>
+        <li>Revogar e substituir a chave imediatamente em caso de suspeita de vazamento</li>
+        <li>Manter a extensão sempre atualizada para garantir as últimas correções de segurança</li>
+      </ul>
+
+      <div class="alert alert-warn">
+        <div class="alert-icon">⚠️</div>
+        <div class="alert-text">
+          <strong>Atenção</strong>
+          A chave de API possui valor financeiro — quem a tiver pode realizar requisições cobradas na conta. Trate-a como uma senha: não compartilhe, não registre em documentos públicos, e revogue imediatamente caso haja suspeita de comprometimento.
+        </div>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- 9. CONCLUSÃO -->
+    <div class="section">
+      <div class="section-title">
+        <div class="section-number">9</div>
+        <h2>Conclusão</h2>
+      </div>
+      <div class="conclusion">
+        <h2>Resumo Executivo</h2>
+        <p>A adoção da chave de API para conversão automática de fórmulas LaTeX resolve um gargalo real e recorrente no fluxo de produção de materiais no Canvas LMS.</p>
+        <p>O processo atual é lento, dependente de conhecimento técnico especializado e sujeito a interrupções impostas por limites de ferramentas gratuitas. A solução proposta — já implementada na extensão utilizada pela equipe — reduz o tempo de inserção de cada fórmula de vários minutos para menos de 10 segundos, garante acessibilidade digital ao conteúdo e elimina a dependência de ferramentas externas.</p>
+        <p>O custo operacional é <strong>negligenciável</strong> (inferior a R$ 0,02 por fórmula). Em um único dia de trabalho com múltiplos materiais FIC, a solução automatizada economiza horas de trabalho manual a um custo de centavos.</p>
+        <p style="margin-top:16px; font-weight:600; color:#93c5fd;">A relação custo-benefício é amplamente favorável à implementação imediata.</p>
+      </div>
+    </div>
+
+  </div><!-- /body -->
+
+  <div class="footer">
+    Documento interno — Equipe de Gestão do Ambiente Virtual &nbsp;·&nbsp; Maio de 2026
+  </div>
+
+</div><!-- /page -->
+
+<!-- Barra de download -->
+<div class="download-bar">
+  <button class="btn-download btn-pdf" onclick="baixarPDF()">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+      <line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/>
+    </svg>
+    Baixar PDF
+  </button>
+  <a class="btn-download btn-word" href="relatorio-api-latex.docx" download>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+      <line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/>
+    </svg>
+    Baixar Word
+  </a>
+</div>
+
+<script>
+  function baixarPDF() {
+    window.print();
+  }
+</script>
+
+</body>
+</html>

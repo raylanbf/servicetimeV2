@@ -678,9 +678,11 @@ async function convertFormulaToLatex(info, tab) {
 
     const { base64, mimeType } = await fetchImageAsBase64(info.srcUrl);
 
-    const endpoint = openrouter_key.startsWith('sk-or-')
+    const isOpenRouter = openrouter_key.startsWith('sk-or-');
+    const endpoint = isOpenRouter
       ? 'https://openrouter.ai/api/v1/chat/completions'
       : 'https://api.openai.com/v1/chat/completions';
+    const model = isOpenRouter ? 'openai/gpt-4o' : 'gpt-4o';
 
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -689,7 +691,7 @@ async function convertFormulaToLatex(info, tab) {
         'Authorization': `Bearer ${openrouter_key}`,
       },
       body: JSON.stringify({
-        model: 'openai/gpt-4o',
+        model,
         messages: [{
           role: 'user',
           content: [
