@@ -341,6 +341,11 @@ chrome.runtime.onInstalled.addListener(() => {
     title: '🔍 Localizar e substituir',
     contexts: ['page', 'frame', 'editable'],
   });
+  chrome.contextMenus.create({
+    id: 'remove-highlights',
+    title: '🖊 Remover destaques da página',
+    contexts: ['page', 'frame'],
+  });
 });
 chrome.runtime.onStartup.addListener(refreshIcon);
 
@@ -367,6 +372,21 @@ chrome.windows.onRemoved.addListener(async () => {
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'convert-formula') {
     convertFormulaToLatex(info, tab).catch(console.error);
+  }
+  if (info.menuItemId === 'remove-highlights') {
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const marks = document.querySelectorAll('.__svc-hl__');
+        marks.forEach(mark => {
+          const parent = mark.parentNode;
+          if (!parent) return;
+          while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+          parent.removeChild(mark);
+          parent.normalize();
+        });
+      },
+    });
   }
   if (info.menuItemId === 'uppercase-selection') {
     copyClean(tab.id, ['B', 'STRONG', 'I', 'EM', 'A'], true);

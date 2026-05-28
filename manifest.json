@@ -26,6 +26,13 @@
   },
   "permissions": ["storage", "tabs", "contextMenus", "scripting", "downloads", "windows", "clipboardWrite", "sidePanel"],
   "host_permissions": ["https://script.google.com/*", "<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["highlighter.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "web_accessible_resources": [
     {
       "resources": ["test-clipboard.html", "test-clipboard.js", "manual.html", "manual.js"],
