@@ -835,14 +835,19 @@ async function doApplyIndent() {
           return out;
         }
 
-        const csrf = document.querySelector('meta[name="csrf-token"]')
-          ?.getAttribute('content') || '';
+        // Cookie _csrf_token é a fonte correta no Canvas
+        const rawCsrf = document.cookie.split(';')
+          .map(c => c.trim())
+          .find(c => c.startsWith('_csrf_token='));
+        const csrf = rawCsrf
+          ? decodeURIComponent(rawCsrf.split('=').slice(1).join('='))
+          : decodeURIComponent(document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
 
         const modules = await fetchAll(
           `/api/v1/courses/${courseId}/modules?per_page=100`
         );
 
-        let adjusted = 0, total = 0;
+        let adjusted = 0, failed = 0, total = 0, firstError = '';
 
         for (const mod of modules) {
           const items = await fetchAll(
@@ -854,7 +859,7 @@ async function doApplyIndent() {
             );
             const target = exclude ? 0 : 1;
             if (item.indent !== target) {
-              await fetch(
+              const res = await fetch(
                 `/api/v1/courses/${courseId}/modules/${mod.id}/items/${item.id}`,
                 {
                   method:  'PUT',
@@ -865,39 +870,62 @@ async function doApplyIndent() {
                   body: JSON.stringify({ module_item: { indent: target } }),
                 }
               );
-              adjusted++;
+              if (res.ok) adjusted++;
+              else {
+                if (!firstError) firstError = `HTTP ${res.status}`;
+                failed++;
+              }
             }
             total++;
           }
         }
-        return { adjusted, total, modules: modules.length };
+        return { adjusted, failed, total, modules: modules.length, firstError };
       },
       args: [courseId, exceptions],
     });
 
     const r = results[0]?.result;
     if (r) {
-      statusEl.textContent  = `✅ ${r.adjusted} item(s) ajustado(s) em ${r.modules} módulo(s) · ${r.total} total`;
-      statusEl.style.color  = '#4ade80';
+      if (r.failed > 0) {
+        statusEl.textContent = `⚠ ${r.adjusted} ajustado(s), ${r.failed} falharam · erro: ${r.firstError}`;
+        statusEl.style.color = '#f97316';
+      } else {
+        statusEl.textContent = `✅ ${r.adjusted} item(s) ajustado(s) em ${r.modules} módulo(s) · ${r.total} total — recarregando...`;
+        statusEl.style.color = '#4ade80';
+        setTimeout(() => chrome.tabs.reload(tabs[0].id), 2000);
+      }
     }
   } catch (err) {
     statusEl.textContent = '✗ Erro: ' + err.message;
     statusEl.style.color = '#f87171';
   }
 
-  btn.disabled   = false;
+  btn.disabled    = false;
   btn.textContent = '🔧  Aplicar recuo nos módulos';
   statusEl.style.display = 'block';
 }
 
 // ── Histórico de edições Canvas ──────────────────────────────────────
+let _revisionsFetching = false;
+
 async function doFetchRevisions() {
+  if (_revisionsFetching) return;
+
+  const statusEl  = $('canvas-revisions-status');
+  const listEl    = $('canvas-revisions-list');
+  const dateValue = $('revisions-date-filter').value;
+
+  if (!dateValue) {
+    statusEl.style.color = '#f97316';
+    statusEl.textContent = 'Informe uma data para buscar.';
+    return;
+  }
+
   const courseId = await getCanvasCourseId();
   if (!courseId) return;
 
-  show('canvas-revisions');
-  const statusEl = $('canvas-revisions-status');
-  const listEl   = $('canvas-revisions-list');
+  const dateFrom = new Date(dateValue + 'T00:00:00');
+  _revisionsFetching = true;
   statusEl.style.color = '#64748b';
   statusEl.textContent = 'Buscando páginas do curso...';
   listEl.innerHTML = '';
@@ -946,8 +974,9 @@ async function doFetchRevisions() {
         const entries = [];
         for (const page of pages) {
           try {
-            const revs = await fetchAll(`/api/v1/courses/${courseId}/pages/${page.url}/revisions?per_page=100`);
-            for (const rev of revs) {
+            const res  = await fetch(`/api/v1/courses/${courseId}/pages/${page.url}/revisions?per_page=2`);
+            const revs = await res.json();
+            for (const rev of Array.isArray(revs) ? revs : []) {
               if (!rev.edited_by) continue;
               entries.push({
                 page_title:  page.title,
@@ -968,15 +997,24 @@ async function doFetchRevisions() {
 
     if (!entries.length) { statusEl.textContent = 'Nenhuma revisão encontrada.'; return; }
 
-    statusEl.textContent = `${entries.length} edição(ões) em ${total} página(s)`;
+    const filtered = dateFrom
+      ? entries.filter(e => new Date(e.updated_at) >= dateFrom)
+      : entries;
 
-    entries.forEach(e => {
+    if (!filtered.length) {
+      statusEl.textContent = 'Nenhuma edição encontrada a partir dessa data.';
+      return;
+    }
+
+    statusEl.textContent = `${filtered.length} edição(ões) em ${total} página(s)${dateFrom ? ' · filtrado por data' : ''}`;
+
+    filtered.forEach(e => {
       const d         = new Date(e.updated_at);
       const formatted = `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
       const div       = document.createElement('div');
       div.className   = 'revision-item';
       div.innerHTML   =
-        `<div class="revision-page">${e.page_title}${e.latest ? '<span class="revision-latest">atual</span>' : ''}</div>
+        `<div class="revision-page">📄 <span class="revision-page-label">Página:</span> ${e.page_title}${e.latest ? '<span class="revision-latest">atual</span>' : ''}</div>
          <div class="revision-editor">👤 ${e.editor}</div>
          <div class="revision-date">${formatted}</div>`;
       listEl.appendChild(div);
@@ -985,6 +1023,8 @@ async function doFetchRevisions() {
   } catch (err) {
     statusEl.style.color = '#f87171';
     statusEl.textContent = '✗ Erro: ' + err.message;
+  } finally {
+    _revisionsFetching = false;
   }
 }
 
@@ -1049,7 +1089,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-all-records').addEventListener('click', () => { buildAllRecords(); show('records'); });
   $('btn-back-records').addEventListener('click', () => show('main'));
   $('btn-canvas-indent').addEventListener('click', doApplyIndent);
-  $('btn-canvas-revisions').addEventListener('click', doFetchRevisions);
+  $('btn-canvas-revisions').addEventListener('click', () => show('canvas-revisions'));
+  $('btn-apply-revisions-filter').addEventListener('click', doFetchRevisions);
   $('btn-back-canvas-revisions').addEventListener('click', () => show('main'));
   $('btn-back-record-detail').addEventListener('click', () => {
     const from = $('btn-back-record-detail').dataset.from || 'main';

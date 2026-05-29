@@ -346,6 +346,11 @@ chrome.runtime.onInstalled.addListener(() => {
     title: '🖊 Remover destaques da página',
     contexts: ['page', 'frame'],
   });
+  chrome.contextMenus.create({
+    id: 'add-periods',
+    title: '🔤 Adicionar ponto final nas frases',
+    contexts: ['selection'],
+  });
 });
 chrome.runtime.onStartup.addListener(refreshIcon);
 
@@ -600,6 +605,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     });
   }
 
+  if (info.menuItemId === 'add-periods') {
+    addPeriods(tab.id, info.frameId ?? 0, info.selectionText || '');
+  }
+
   if (info.menuItemId === 'resize-videos') {
     chrome.storage.local.get({ video_width: 620, video_height: 398 }, ({ video_width, video_height }) => {
       chrome.scripting.executeScript({
@@ -656,6 +665,136 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if ('running' in changes || 'paused' in changes) refreshIcon();
 });
+
+// ── Adicionar ponto final nas frases ─────────────────────────────────
+function addPeriods(tabId, frameId, selectionText) {
+  const normalized = selectionText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const processed  = normalized.split('\n').map(line => {
+    const trimmed = line.trimEnd();
+    if (!trimmed) return line;
+    if (/[.!?;:…]$/.test(trimmed)) return line;
+    return trimmed + '.' + line.slice(trimmed.length);
+  }).join('\n');
+
+  chrome.scripting.executeScript({
+    target: { tabId, frameIds: [frameId] },
+    func: (original, processed) => {
+      function showToast(text, bg) {
+        document.getElementById('__svc-toast__')?.remove();
+        const el = document.createElement('div');
+        el.id = '__svc-toast__';
+        el.textContent = text;
+        Object.assign(el.style, {
+          position: 'fixed', bottom: '24px', right: '24px',
+          background: bg, color: '#fff',
+          padding: '10px 16px', borderRadius: '6px',
+          fontFamily: 'system-ui', fontSize: '13px',
+          zIndex: '2147483647', boxShadow: '0 2px 8px rgba(0,0,0,.4)',
+        });
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 3500);
+      }
+
+      // Encontra o último nó de texto com conteúdo dentro de um elemento
+      function lastTextNode(el) {
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        let last = null, node;
+        while ((node = walker.nextNode())) {
+          if (node.textContent.trim()) last = node;
+        }
+        return last;
+      }
+
+      // Adiciona ponto ao final de um bloco se não tiver pontuação
+      function processBlocoHtml(block) {
+        const texto = block.textContent.trimEnd();
+        if (!texto || /[.!?;:…]$/.test(texto)) return false;
+        const node = lastTextNode(block);
+        if (!node) return false;
+        node.textContent = node.textContent.trimEnd() + '.';
+        return true;
+      }
+
+      // ── TinyMCE (editor rico do Canvas) ──────────────────────────
+      if (typeof tinymce !== 'undefined' && tinymce.activeEditor) {
+        const editor = tinymce.activeEditor;
+        const html   = editor.selection.getContent({ format: 'html' });
+        if (!html.trim()) { showToast('⚠ Nenhum texto selecionado.', '#b45309'); return; }
+
+        const tmp    = document.createElement('div');
+        tmp.innerHTML = html;
+
+        const blocos = [...tmp.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li, td, th')];
+        let modified = false;
+
+        if (blocos.length) {
+          blocos.forEach(b => { if (processBlocoHtml(b)) modified = true; });
+        } else {
+          if (processBlocoHtml(tmp)) modified = true;
+        }
+
+        if (!modified) { showToast('✓ Todas as frases já têm pontuação!', '#166534'); return; }
+        editor.selection.setContent(tmp.innerHTML);
+        showToast('✓ Pontuação adicionada!', '#1d4ed8');
+        return;
+      }
+
+      // ── Textarea / Input ──────────────────────────────────────────
+      if (processed === original) { showToast('✓ Todas as frases já têm pontuação!', '#166534'); return; }
+
+      let replaced = false;
+      const fields = [...document.querySelectorAll('textarea, input[type="text"], input:not([type])')];
+      for (const field of fields) {
+        const start = field.selectionStart;
+        const end   = field.selectionEnd;
+        if (start === null || end === null || start === end) continue;
+        const selected = field.value.slice(start, end).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        if (selected !== original) continue;
+        const proto  = field.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(field, field.value.slice(0, start) + processed + field.value.slice(end));
+        field.setSelectionRange(start, start + processed.length);
+        field.dispatchEvent(new Event('input',  { bubbles: true }));
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+        field.focus();
+        replaced = true;
+        break;
+      }
+
+      // ── Contenteditable genérico ──────────────────────────────────
+      if (!replaced) {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount && !sel.isCollapsed) {
+          let editable = sel.anchorNode;
+          while (editable && !editable.isContentEditable) editable = editable.parentElement;
+          if (editable) {
+            const range = sel.getRangeAt(0);
+            const frag  = range.cloneContents();
+            const tmp   = document.createElement('div');
+            tmp.appendChild(frag);
+            const blocos = [...tmp.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li')];
+            let modified = false;
+            if (blocos.length) {
+              blocos.forEach(b => { if (processBlocoHtml(b)) modified = true; });
+            } else {
+              if (processBlocoHtml(tmp)) modified = true;
+            }
+            if (modified) {
+              range.deleteContents();
+              range.insertNode(tmp);
+              replaced = true;
+            }
+          }
+        }
+      }
+
+      showToast(
+        replaced ? '✓ Pontuação adicionada!' : '⚠ Selecione o texto dentro de um campo editável.',
+        replaced ? '#1d4ed8' : '#b45309'
+      );
+    },
+    args: [normalized, processed],
+  });
+}
 
 // ── Upload delegado pelo popup ────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg) => {

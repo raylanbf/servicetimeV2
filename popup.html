@@ -246,6 +246,11 @@
     <button id="btn-back-canvas-revisions" class="btn-icon">←</button>
     <span class="view-title">Histórico de Edições</span>
   </div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:0 4px">
+    <label style="font-size:11px;color:#94a3b8;white-space:nowrap">A partir de</label>
+    <input type="date" id="revisions-date-filter" style="flex:1;padding:4px 6px;border-radius:4px;border:1px solid #3a3a5e;background:#1e1e2e;color:#e2e8f0;font-size:12px">
+    <button id="btn-apply-revisions-filter" class="btn btn-surface" style="padding:4px 10px;font-size:12px">Buscar</button>
+  </div>
   <div id="canvas-revisions-status" class="small muted" style="text-align:center;margin-bottom:6px"></div>
   <div id="canvas-revisions-list" class="revisions-list"></div>
 </div>
