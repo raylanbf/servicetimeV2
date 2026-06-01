@@ -1,5 +1,8 @@
 'use strict';
 
+const HEARTBEAT_PERIOD_MIN = 0.5;        // 30s — prova de vida do timer em andamento
+const STALE_GAP_MS         = 150 * 1000; // >150s sem prova de vida = navegador fechado / PC desligado ou dormindo
+
 async function applyIcon(state) {
   const colors = { inactive: '#ef4444', running: '#4ade80', paused: '#f97316' };
   const color  = colors[state] || colors.inactive;
@@ -306,6 +309,7 @@ function copySmartClean(tabId) {
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   refreshIcon();
+  syncHeartbeatAlarm();
   chrome.contextMenus.create({
     id: 'uppercase-selection',
     title: '🔠 Copiar em CAIXA ALTA',
@@ -352,27 +356,90 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ['selection'],
   });
 });
-chrome.runtime.onStartup.addListener(refreshIcon);
+chrome.runtime.onStartup.addListener(async () => {
+  // Navegador reiniciou com um card "rodando" => foi fechado por desligamento/
+  // crash (no fechamento limpo das janelas, windows.onRemoved já suspenderia).
+  // Suspende com o último tempo confiável, sem contar o período desligado.
+  const data = await chrome.storage.local.get(['running', 'accMs', 'lastAlive', 'startTs', 'currentRecord']);
+  if (data.running && data.currentRecord) {
+    const hms = new Date(data.lastAlive || data.startTs || Date.now()).toTimeString().slice(0, 8);
+    await autoSuspendCurrent(data.accMs || 0, hms);
+  }
+  refreshIcon();
+  syncHeartbeatAlarm();
+});
 
-// Pausa automaticamente quando todas as janelas do Chrome são fechadas
+// Suspende automaticamente o card em andamento quando todas as janelas do
+// navegador (Chrome/Edge) são fechadas — congelando o tempo no instante atual.
 chrome.windows.onRemoved.addListener(async () => {
   const windows = await chrome.windows.getAll({ windowTypes: ['normal', 'popup'] });
   if (windows.length > 0) return;
 
-  const data = await chrome.storage.local.get(['running', 'paused', 'accMs', 'startTs', 'currentRecord']);
-  if (!data.running || data.paused) return;
+  const data = await chrome.storage.local.get(['running', 'paused', 'accMs', 'startTs']);
+  if (!data.running) return;
 
-  const newAcc   = (data.accMs || 0) + (Date.now() - (data.startTs || Date.now()));
-  const pausaHMS = new Date().toTimeString().slice(0, 8);
-  const pausas   = [...(data.currentRecord?.pausas || []), { pausa: pausaHMS }];
+  const now = Date.now();
+  const ms  = data.paused ? (data.accMs || 0) : (data.accMs || 0) + (now - (data.startTs || now));
+  await autoSuspendCurrent(ms, new Date().toTimeString().slice(0, 8));
+});
 
+// ── Heartbeat: prova de vida do timer em andamento ───────────────────
+// Enquanto um card roda, grava o tempo acumulado a cada HEARTBEAT_PERIOD_MIN.
+// Assim, num desligamento abrupto (sem fechamento limpo), o último valor
+// confiável já está salvo e o período "morto" não é contado como trabalho.
+function syncHeartbeatAlarm() {
+  chrome.storage.local.get(['running', 'paused'], ({ running, paused }) => {
+    if (running && !paused) chrome.alarms.create('heartbeat', { periodInMinutes: HEARTBEAT_PERIOD_MIN });
+    else                    chrome.alarms.clear('heartbeat');
+  });
+}
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== 'heartbeat') return;
+  const data = await chrome.storage.local.get(['running', 'paused', 'accMs', 'startTs', 'lastAlive', 'currentRecord']);
+  if (!data.running || data.paused || !data.currentRecord) {
+    chrome.alarms.clear('heartbeat');
+    return;
+  }
+
+  const now   = Date.now();
+  const delta = now - (data.startTs || now);
+
+  // Buraco grande com o navegador AINDA aberto (PC dormiu/hibernou): descarta o
+  // tempo morto e continua rodando. NÃO suspende — só fechar todas as janelas
+  // (windows.onRemoved) ou reiniciar o navegador (onStartup) suspende o card.
+  if (delta > STALE_GAP_MS) {
+    await chrome.storage.local.set({ startTs: now, lastAlive: now });
+    return;
+  }
+
+  // Prova de vida normal: incorpora o decorrido e avança o marco.
   await chrome.storage.local.set({
-    paused:        true,
-    accMs:         newAcc,
-    startTs:       null,
-    currentRecord: { ...data.currentRecord, pausas },
+    accMs:     (data.accMs || 0) + delta,
+    startTs:   now,
+    lastAlive: now,
   });
 });
+
+// Move o card em andamento para a lista de suspensos, congelando `ms`.
+// auto:true => suspensão técnica (desligamento), não marca "CARD SUSPENSO".
+async function autoSuspendCurrent(ms, closeHMS) {
+  const data = await chrome.storage.local.get(['running', 'currentRecord', 'suspended']);
+  if (!data.running || !data.currentRecord) return false;   // idempotente
+
+  const pausas = (data.currentRecord.pausas || []).map((p, i, arr) =>
+    i === arr.length - 1 && !p.retorno ? { ...p, retorno: closeHMS } : p
+  );
+  const entry     = { record: { ...data.currentRecord, pausas }, accMs: ms, auto: true };
+  const suspended = [...(data.suspended || []), entry];
+
+  await chrome.storage.local.set({
+    running: false, paused: false, startTs: null, accMs: 0,
+    currentRecord: null, suspended,
+  });
+  chrome.alarms.clear('heartbeat');
+  return true;
+}
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'convert-formula') {
@@ -663,7 +730,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  if ('running' in changes || 'paused' in changes) refreshIcon();
+  if ('running' in changes || 'paused' in changes) {
+    refreshIcon();
+    syncHeartbeatAlarm();
+  }
 });
 
 // ── Adicionar ponto final nas frases ─────────────────────────────────

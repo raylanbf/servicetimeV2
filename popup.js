@@ -103,6 +103,10 @@ const APPS_SCRIPT =
 let S = {};
 let ticker = null;
 
+// Acima deste intervalo sem prova de vida do heartbeat, considera-se que o
+// navegador esteve fechado / o PC desligado: o timer é suspenso na reabertura.
+const STALE_GAP_MS = 150 * 1000;
+
 function extractTaskId(url) {
   const m = (url || '').match(/[?&]task=(\d+)/);
   return m ? `Task #${m[1]}` : null;
@@ -455,7 +459,7 @@ function askComment() {
 // ── Ações do timer ────────────────────────────────────────────────────
 async function doStart() {
   const tabs = await chrome.tabs.query({active: true, currentWindow: true});
-  const url = tabs[0].url;
+  const url = tabs[0]?.url;
 
   const record = {
     _id:                  `${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
@@ -472,7 +476,7 @@ async function doStart() {
     links:                [],
     comentario:           null,
   };
-  await persist({ running: true, paused: false, startTs: Date.now(), accMs: 0, currentRecord: record });
+  await persist({ running: true, paused: false, startTs: Date.now(), accMs: 0, lastAlive: Date.now(), currentRecord: record });
   syncMain();
   startTick();
 }
@@ -488,7 +492,7 @@ async function doPause() {
     const pausas = S.currentRecord.pausas.map((p, i, arr) =>
       i === arr.length - 1 && !p.retorno ? { ...p, retorno: nowHMS() } : p);
     const rec = { ...S.currentRecord, pausas };
-    await persist({ paused: false, startTs: Date.now(), currentRecord: rec });
+    await persist({ paused: false, startTs: Date.now(), lastAlive: Date.now(), currentRecord: rec });
     startTick();
   }
   syncMain();
@@ -554,8 +558,10 @@ async function doResumeSuspended(i) {
     running:       true,
     paused:        false,
     startTs:       Date.now(),
+    lastAlive:     Date.now(),
     accMs:         entry.accMs,
-    currentRecord: { ...entry.record, pausas, foiSuspenso: true },
+    // Suspensão automática (desligamento) não marca "CARD SUSPENSO"; só a manual marca.
+    currentRecord: { ...entry.record, pausas, foiSuspenso: entry.auto ? !!entry.record.foiSuspenso : true },
     suspended,
   });
   syncMain();
@@ -1038,6 +1044,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     running:       saved.running       || false,
     paused:        saved.paused        || false,
     startTs:       saved.startTs       || null,
+    lastAlive:     saved.lastAlive     || null,
     accMs:         saved.accMs         || 0,
     currentRecord: saved.currentRecord || null,
     registros:     saved.registros     || [],
@@ -1134,6 +1141,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   if (!S.usuario) { show('setup'); return; }
+
+  // Se o navegador ficou aberto mas houve um buraco no tempo (PC dormiu), o
+  // tempo ao vivo (accMs + agora − startTs) estaria inflado: reancora e continua
+  // rodando, descartando só o período morto. Fechar todas as janelas / desligar
+  // o PC já viram suspensão pelo service worker — aqui o card segue ativo.
+  const gap = S.lastAlive ? Date.now() - S.lastAlive : 0;
+  if (S.running && !S.paused && S.currentRecord && gap > STALE_GAP_MS) {
+    await persist({ startTs: Date.now(), lastAlive: Date.now() });
+  }
 
   syncMain();
   syncCanvasTools();
