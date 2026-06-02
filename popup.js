@@ -1034,6 +1034,175 @@ async function doFetchRevisions() {
   }
 }
 
+// ── Duplicar bloco no editor do Canvas (Camada 1) ────────────────────
+// Injeta no MAIN world (precisa do window.tinymce real da página) o modo de
+// seleção: destaca blocos, clica na origem e no destino, insere uma cópia limpa.
+async function doDuplicateBlock() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tabs[0]?.id) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      world:  'MAIN',
+      func:   blockDuplicatorMain,
+    });
+  } catch (err) {
+    alert('Não foi possível ativar nesta página: ' + err.message);
+  }
+}
+
+function blockDuplicatorMain() {
+  if (window.__svcDupActive) return;
+
+  const ed = window.tinymce && (tinymce.activeEditor || (tinymce.editors && tinymce.editors[0]));
+  if (!ed || (ed.isHidden && ed.isHidden())) {
+    alert('Abra uma página no editor de conteúdo do Canvas em modo visual (Rich Content) e tente de novo.');
+    return;
+  }
+
+  const body = ed.getBody();
+  const doc  = body.ownerDocument;
+  const win  = doc.defaultView;
+  window.__svcDupActive = true;
+
+  let phase   = 'source';   // 'source' (origem) | 'dest' (destino)
+  let current = null;       // elemento destacado no momento
+  let srcHTML = null;       // HTML da origem, já limpo
+  const COLOR = { source: '#3b82f6', dest: '#22c55e' };
+
+  // Barra de instruções (no topo da página, fora do iframe do editor)
+  const bar = document.createElement('div');
+  bar.id = '__svc-dup-bar__';
+  Object.assign(bar.style, {
+    position: 'fixed', top: '0', left: '0', right: '0', zIndex: '2147483647',
+    background: '#1e1e2e', color: '#e2e8f0', font: '13px system-ui, sans-serif',
+    padding: '8px 14px', textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,.4)',
+  });
+  document.body.appendChild(bar);
+  function setBar() {
+    bar.innerHTML = phase === 'source'
+      ? '📑 <b>Duplicar bloco</b> — clique no bloco que quer copiar. <span style="opacity:.7">↑/↓ ajusta o nível · ESC cancela</span>'
+      : '📑 <b>Clique no destino</b> — a cópia entra logo abaixo dele. <span style="opacity:.7">↑/↓ ajusta · ESC cancela</span>';
+  }
+  setBar();
+
+  // Bloco mais interno sob o cursor (sobe nós inline até achar um bloco)
+  function blockOf(node) {
+    let el = node && node.nodeType === 3 ? node.parentElement : node;
+    while (el && el !== body) {
+      const d = win.getComputedStyle(el).display;
+      if (d && d.slice(0, 6) !== 'inline') return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  function paint(el) {
+    if (!el) return;
+    el.__svcOutline = el.style.outline;
+    el.__svcOffset  = el.style.outlineOffset;
+    el.style.outline       = '2px solid ' + (phase === 'source' ? COLOR.source : COLOR.dest);
+    el.style.outlineOffset = '-2px';
+  }
+  function unpaint(el) {
+    if (!el) return;
+    el.style.outline       = el.__svcOutline || '';
+    el.style.outlineOffset = el.__svcOffset  || '';
+    delete el.__svcOutline; delete el.__svcOffset;
+  }
+  function setCurrent(el) {
+    if (el === current) return;
+    unpaint(current);
+    current = el;
+    paint(current);
+  }
+
+  // Remove ids e marcações internas do TinyMCE para não duplicar âncoras
+  function cleanHTML(html) {
+    const tmp = doc.createElement('div');
+    tmp.innerHTML = html;
+    tmp.querySelectorAll('script').forEach(n => n.remove());
+    tmp.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
+    tmp.querySelectorAll('[data-mce-selected],[data-mce-bogus]').forEach(n => {
+      n.removeAttribute('data-mce-selected');
+      n.removeAttribute('data-mce-bogus');
+    });
+    return tmp.innerHTML;
+  }
+
+  function onMove(e) {
+    const blk = blockOf(e.target);
+    if (blk) setCurrent(blk);
+  }
+
+  function onDown(e) {
+    if (!current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+
+    if (phase === 'source') {
+      srcHTML = cleanHTML(current.outerHTML);
+      unpaint(current);
+      current = null;
+      phase = 'dest';
+      setBar();
+      return;
+    }
+
+    const dest = current;
+    const run  = () => dest.insertAdjacentHTML('afterend', srcHTML);
+    if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run);
+    else run();
+    if (ed.nodeChanged) ed.nodeChanged();
+    if (ed.fire)        ed.fire('input');
+    if (ed.setDirty)    ed.setDirty(true);
+    flash('✓ Bloco duplicado! (Ctrl+Z desfaz)');
+    cleanup();
+  }
+
+  function onKey(e) {
+    if (e.key === 'Escape') { e.preventDefault(); cleanup(); return; }
+    if (!current) return;
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const p = current.parentElement;
+      if (p && p !== body) setCurrent(p);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const child = [...current.children].find(c => c.nodeType === 1);
+      if (child) setCurrent(child);
+    }
+  }
+
+  function flash(msg) {
+    const t = document.createElement('div');
+    t.textContent = msg;
+    Object.assign(t.style, {
+      position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+      background: '#166534', color: '#fff', padding: '10px 18px', borderRadius: '8px',
+      font: '13px system-ui', zIndex: '2147483647', boxShadow: '0 2px 10px rgba(0,0,0,.4)',
+    });
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2500);
+  }
+
+  function cleanup() {
+    unpaint(current);
+    doc.removeEventListener('mousemove', onMove, true);
+    doc.removeEventListener('mousedown', onDown, true);
+    doc.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('keydown', onKey, true);
+    bar.remove();
+    window.__svcDupActive = false;
+  }
+
+  doc.addEventListener('mousemove', onMove, true);
+  doc.addEventListener('mousedown', onDown, true);
+  doc.addEventListener('keydown', onKey, true);
+  document.addEventListener('keydown', onKey, true);
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   const saved = await chrome.storage.local.get(null);
@@ -1096,6 +1265,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-all-records').addEventListener('click', () => { buildAllRecords(); show('records'); });
   $('btn-back-records').addEventListener('click', () => show('main'));
   $('btn-canvas-indent').addEventListener('click', doApplyIndent);
+  $('btn-canvas-dup').addEventListener('click', doDuplicateBlock);
   $('btn-canvas-revisions').addEventListener('click', () => show('canvas-revisions'));
   $('btn-apply-revisions-filter').addEventListener('click', doFetchRevisions);
   $('btn-back-canvas-revisions').addEventListener('click', () => show('main'));
