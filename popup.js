@@ -807,8 +807,7 @@ async function getCanvasCourseId() {
 
 async function syncCanvasTools() {
   const courseId = await getCanvasCourseId();
-  $('canvas-tools-box').style.display = courseId ? 'block' : 'none';
-  if (courseId) $('canvas-course-label').textContent = `curso #${courseId}`;
+  $('canvas-course-label').textContent = courseId ? `curso #${courseId}` : 'nenhum curso nesta aba';
 }
 
 async function doApplyIndent() {
@@ -1203,6 +1202,413 @@ function blockDuplicatorMain() {
   document.addEventListener('keydown', onKey, true);
 }
 
+// ── Reorganizar blocos por arraste (drag-and-drop) ──────────────────
+async function doMoveBlocks() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tabs[0]?.id) return;
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, world: 'MAIN', func: blockMoverMain });
+  } catch (err) { alert('Não foi possível ativar nesta página: ' + err.message); }
+}
+
+function blockMoverMain() {
+  if (window.__svcMoveActive) return;
+  const ed = window.tinymce && (tinymce.activeEditor || (tinymce.editors && tinymce.editors[0]));
+  if (!ed || (ed.isHidden && ed.isHidden())) {
+    alert('Abra uma página no editor visual do Canvas e tente de novo.');
+    return;
+  }
+  const body = ed.getBody();
+  const doc  = body.ownerDocument;
+  const win  = doc.defaultView;
+  window.__svcMoveActive = true;
+
+  let current = null;    // bloco destacado no hover
+  let dragEl  = null;    // bloco sendo arrastado
+  let overEl  = null;    // irmão sob o cursor
+  let before  = false;   // soltar antes (true) / depois (false) do overEl
+  let dragging = false;
+  let downX = 0, downY = 0;
+  const THRESHOLD = 5;
+
+  const bar = document.createElement('div');
+  bar.id = '__svc-move-bar__';
+  Object.assign(bar.style, { position:'fixed', top:'0', left:'0', right:'0', zIndex:'2147483647',
+    background:'#1e1e2e', color:'#e2e8f0', font:'13px system-ui,sans-serif', padding:'8px 14px',
+    textAlign:'center', boxShadow:'0 2px 8px rgba(0,0,0,.4)' });
+  bar.innerHTML = '✋ <b>Reorganizar blocos</b> — arraste um bloco para mudar a ordem. <span style="opacity:.7">↑/↓ ajusta o que pega · a linha verde mostra onde cai · Ctrl+Z desfaz · ESC sai</span>';
+  document.body.appendChild(bar);
+
+  const line = doc.createElement('div');
+  Object.assign(line.style, { position:'absolute', height:'3px', background:'#22c55e', borderRadius:'2px',
+    zIndex:'2147483647', pointerEvents:'none', display:'none', boxShadow:'0 0 5px #22c55e' });
+  body.appendChild(line);
+
+  function blockOf(node) {
+    let el = node && node.nodeType === 3 ? node.parentElement : node;
+    while (el && el !== body) {
+      const d = win.getComputedStyle(el).display;
+      if (d && d.slice(0, 6) !== 'inline') return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+  function paint(el, color) {
+    if (!el) return;
+    el.__o = el.style.outline; el.__oo = el.style.outlineOffset;
+    el.style.outline = '2px solid ' + color; el.style.outlineOffset = '-2px';
+  }
+  function unpaint(el) {
+    if (!el) return;
+    el.style.outline = el.__o || ''; el.style.outlineOffset = el.__oo || '';
+    delete el.__o; delete el.__oo;
+  }
+  function setCurrent(el) {
+    if (el === current) return;
+    unpaint(current); current = el; paint(current, '#3b82f6');
+  }
+  function posLine(sib, isBefore) {
+    const r = sib.getBoundingClientRect();
+    line.style.top   = ((isBefore ? r.top : r.bottom) + win.scrollY - 1) + 'px';
+    line.style.left  = (r.left + win.scrollX) + 'px';
+    line.style.width = r.width + 'px';
+    line.style.display = 'block';
+  }
+  function flash(msg) {
+    const t = document.createElement('div'); t.textContent = msg;
+    Object.assign(t.style, { position:'fixed', bottom:'24px', left:'50%', transform:'translateX(-50%)',
+      background:'#166534', color:'#fff', padding:'10px 18px', borderRadius:'8px', font:'13px system-ui',
+      zIndex:'2147483647', boxShadow:'0 2px 10px rgba(0,0,0,.4)' });
+    document.body.appendChild(t); setTimeout(() => t.remove(), 2200);
+  }
+
+  function onMove(e) {
+    if (dragEl && !dragging) {
+      if (Math.abs(e.clientX - downX) > THRESHOLD || Math.abs(e.clientY - downY) > THRESHOLD) {
+        dragging = true;
+        unpaint(current); current = null;
+        dragEl.style.opacity = '0.45';
+        doc.documentElement.style.cursor = 'grabbing';
+      } else return;
+    }
+    if (dragging) {
+      const sibs = [...dragEl.parentElement.children].filter(c => c.nodeType === 1 && c !== line && c !== dragEl);
+      let found = null;
+      for (const s of sibs) {
+        const r = s.getBoundingClientRect();
+        if (e.clientY >= r.top && e.clientY <= r.bottom) { found = s; break; }
+      }
+      if (!found) { overEl = null; line.style.display = 'none'; return; }
+      const r = found.getBoundingClientRect();
+      before = (e.clientY < r.top + r.height / 2);
+      overEl = found;
+      posLine(found, before);
+      return;
+    }
+    const blk = blockOf(e.target);
+    if (blk) setCurrent(blk);
+  }
+
+  function onDown(e) {
+    if (!current) return;
+    e.preventDefault(); e.stopPropagation();
+    dragEl = current; downX = e.clientX; downY = e.clientY; dragging = false;
+  }
+
+  function onUp(e) {
+    if (!dragEl) return;
+    if (dragging) {
+      e.preventDefault(); e.stopPropagation();
+      dragEl.style.opacity = '';
+      doc.documentElement.style.cursor = '';
+      line.style.display = 'none';
+      if (overEl && overEl !== dragEl) {
+        const ref = before ? overEl : overEl.nextSibling;
+        if (ref !== dragEl) {
+          const run = () => dragEl.parentElement.insertBefore(dragEl, ref);
+          if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
+          if (ed.nodeChanged) ed.nodeChanged();
+          if (ed.fire) ed.fire('input');
+          if (ed.setDirty) ed.setDirty(true);
+          flash('✓ Bloco movido! (Ctrl+Z desfaz)');
+        }
+      }
+    }
+    dragEl = null; dragging = false; overEl = null;
+  }
+
+  function onKey(e) {
+    if (e.key === 'Escape') { e.preventDefault(); cleanup(); return; }
+    if (dragging || !current) return;
+    if (e.key === 'ArrowUp')   { e.preventDefault(); const p = current.parentElement; if (p && p !== body) setCurrent(p); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); const c = [...current.children].find(x => x.nodeType === 1); if (c) setCurrent(c); }
+  }
+
+  function block(e) { e.preventDefault(); }
+
+  function cleanup() {
+    unpaint(current);
+    if (dragEl) dragEl.style.opacity = '';
+    doc.documentElement.style.cursor = '';
+    doc.removeEventListener('mousemove', onMove, true);
+    doc.removeEventListener('mousedown', onDown, true);
+    doc.removeEventListener('mouseup', onUp, true);
+    doc.removeEventListener('keydown', onKey, true);
+    doc.removeEventListener('dragstart', block, true);
+    doc.removeEventListener('selectstart', block, true);
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('mouseup', onUp, true);
+    line.remove(); bar.remove();
+    window.__svcMoveActive = false;
+  }
+
+  doc.addEventListener('mousemove', onMove, true);
+  doc.addEventListener('mousedown', onDown, true);
+  doc.addEventListener('mouseup', onUp, true);
+  doc.addEventListener('keydown', onKey, true);
+  doc.addEventListener('dragstart', block, true);
+  doc.addEventListener('selectstart', block, true);
+  document.addEventListener('keydown', onKey, true);
+  document.addEventListener('mouseup', onUp, true);
+}
+
+// ── Mapa de elementos (Camada 2) ────────────────────────────────────
+async function doElementMap() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tabs[0]?.id) return;
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, world: 'MAIN', func: blockMapMain });
+  } catch (err) { alert('Não foi possível ativar nesta página: ' + err.message); }
+}
+
+function blockMapMain() {
+  if (window.__svcMapCleanup) { window.__svcMapCleanup(); return; }   // toggle: fecha se já aberto
+
+  const ed = window.tinymce && (tinymce.activeEditor || (tinymce.editors && tinymce.editors[0]));
+  if (!ed || (ed.isHidden && ed.isHidden())) {
+    alert('Abra uma página no editor visual do Canvas e tente de novo.');
+    return;
+  }
+  const body = ed.getBody();
+  const doc  = body.ownerDocument;
+  const win  = doc.defaultView;
+
+  const txt   = el => (el.textContent || '').replace(/\s+/g, ' ').trim();
+  const idof  = el => (el.id || '').toLowerCase();
+  const clsof = el => (el.className && el.className.toString ? el.className.toString() : '').toLowerCase();
+  const bg    = el => { try { return win.getComputedStyle(el).backgroundColor; } catch (e) { return ''; } };
+
+  // Classificador baseado no catálogo dos templates PUC Minas
+  function classify(el) {
+    const id = idof(el), cls = clsof(el), tag = el.tagName;
+    if (id === 'banner') return { icon: '🖼', label: 'Banner' };
+    if (id === 'faixa') return { icon: '🏷', label: 'Faixa' };
+    if (id === 'texto-introdutorio') return { icon: '📝', label: 'Texto introdutório' };
+    if (id === 'box-curriculum' || id === 'caixa-nome') return { icon: '👤', label: 'Caixa do professor' };
+    if (id === 'menu-lateral') return { icon: '📂', label: 'Menu lateral' };
+    if (id === 'sessao' || id === 'box-imagem-texto') return { icon: '🔗', label: 'Item de menu' };
+    if (id === 'box-principal') return { icon: '📋', label: 'Box de dados' };
+    if (id === 'videogeral') return { icon: '▦', label: 'Grade de cards' };
+    if (/^mod\d+$/.test(id)) return { icon: '🃏', label: 'Card' };
+    if (id === 'topo' || id === 'geral') return { icon: '▦', label: 'Container' };
+    if (/\bcard\b/.test(cls)) return { icon: '🃏', label: 'Card' };
+    if (/\bgrid-row\b/.test(cls)) return { icon: '▦', label: 'Linha (grid)' };
+    if (/\bcol-(xs|sm|md|lg|xl)-/.test(cls)) return { icon: '▥', label: 'Coluna' };
+    if (/\bcontent-box\b/.test(cls)) return { icon: '▦', label: 'Container' };
+    if (tag === 'IMG') {
+      return /border-radius:\s*50%/.test(el.getAttribute('style') || '')
+        ? { icon: '🖼', label: 'Foto (redonda)' } : { icon: '🖼', label: 'Imagem' };
+    }
+    if (el.querySelector && el.querySelector('iframe')) return { icon: '▶', label: 'Vídeo' };
+    if (tag === 'TABLE') return { icon: '▦', label: 'Tabela' };
+    if (tag === 'UL' || tag === 'OL') return { icon: '•', label: 'Lista' };
+    if (/^H[1-6]$/.test(tag)) return { icon: '🔤', label: 'Título' };
+    if (tag === 'HR') return { icon: '—', label: 'Separador' };
+    const b = bg(el);
+    if (b === 'rgb(77, 73, 97)') return { icon: '📚', label: 'Box de unidade' };
+    if (b === 'rgb(43, 165, 136)') return { icon: '🏷', label: 'Faixa' };
+    if (b === 'rgb(255, 127, 80)') return { icon: '🏷', label: 'Faixa (destaque)' };
+    if (txt(el)) return { icon: '📝', label: 'Texto' };
+    return null;
+  }
+
+  function isContainer(el) {
+    const id = idof(el), cls = clsof(el);
+    return /\bcontent-box\b|\bgrid-row\b/.test(cls) || /\bcol-(xs|sm|md|lg|xl)-/.test(cls) ||
+      ['topo', 'geral', 'videogeral', 'box-principal', 'menu-lateral', 'box-curriculum'].includes(id);
+  }
+  function trivial(el) {
+    const t = el.tagName;
+    return t === 'BR' || t === 'SPAN' || (t === 'P' && !txt(el));
+  }
+
+  const items = [];
+  (function collect(parent, depth) {
+    [...parent.children].forEach(el => {
+      if (el.nodeType !== 1 || trivial(el)) return;
+      const cls = classify(el);
+      if (isContainer(el) && el.children.length) {
+        if (cls) items.push({ el, depth, icon: cls.icon, label: cls.label, preview: '' });
+        if (depth < 4) collect(el, depth + 1);
+      } else if (cls) {
+        items.push({ el, depth, icon: cls.icon, label: cls.label, preview: txt(el).slice(0, 45) });
+      }
+    });
+  })(body, 0);
+
+  if (!items.length) { alert('Nenhum bloco reconhecido nesta página.'); return; }
+
+  let selected = null, actionsRow = null;
+  const pulseStyle = doc.createElement('style');
+  pulseStyle.textContent = '@keyframes __svcMapPulse{0%,100%{box-shadow:0 0 0 3px #22c55e,0 0 6px 2px rgba(34,197,94,.45)}50%{box-shadow:0 0 0 6px #22c55e,0 0 24px 10px rgba(34,197,94,.9)}}';
+  (doc.head || doc.documentElement).appendChild(pulseStyle);
+  function paint(el, color, strong) {
+    if (!el) return;
+    el.__mo = el.style.outline; el.__moo = el.style.outlineOffset;
+    el.__mbs = el.style.boxShadow; el.__man = el.style.animation;
+    el.style.outline = (strong ? '3px' : '2px') + ' solid ' + color;
+    el.style.outlineOffset = '2px';
+    if (strong) {
+      el.style.boxShadow = '0 0 0 3px ' + color + ', 0 0 16px 6px ' + color + 'aa';
+      el.style.animation = '__svcMapPulse .8s ease-in-out 3';
+    } else {
+      el.style.boxShadow = '0 0 0 2px ' + color;
+    }
+  }
+  function unpaint(el) {
+    if (!el) return;
+    el.style.outline = el.__mo || ''; el.style.outlineOffset = el.__moo || '';
+    el.style.boxShadow = el.__mbs || ''; el.style.animation = el.__man || '';
+    delete el.__mo; delete el.__moo; delete el.__mbs; delete el.__man;
+  }
+  function flash(msg) {
+    const t = document.createElement('div'); t.textContent = msg;
+    Object.assign(t.style, { position:'fixed', bottom:'24px', left:'50%', transform:'translateX(-50%)',
+      background:'#166534', color:'#fff', padding:'10px 18px', borderRadius:'8px', font:'13px system-ui',
+      zIndex:'2147483647', boxShadow:'0 2px 10px rgba(0,0,0,.4)' });
+    document.body.appendChild(t); setTimeout(() => t.remove(), 2000);
+  }
+  function cleanHTML(html) {
+    const tmp = doc.createElement('div'); tmp.innerHTML = html;
+    tmp.querySelectorAll('script').forEach(n => n.remove());
+    tmp.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
+    tmp.querySelectorAll('[data-mce-selected],[data-mce-bogus]').forEach(n => { n.removeAttribute('data-mce-selected'); n.removeAttribute('data-mce-bogus'); });
+    return tmp.innerHTML;
+  }
+  function dupe(el, sourceRow) {
+    const html = cleanHTML(el.outerHTML);
+    let clone = null;
+    const run = () => { el.insertAdjacentHTML('afterend', html); clone = el.nextElementSibling; };
+    if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
+    if (ed.nodeChanged) ed.nodeChanged();
+    if (ed.fire) ed.fire('input');
+    if (ed.setDirty) ed.setDirty(true);
+    flash('✓ Bloco duplicado! (Ctrl+Z desfaz)');
+    if (!clone) return;
+    if (actionsRow) { actionsRow.remove(); actionsRow = null; }
+    // Linha da cópia entra logo abaixo do original, marcada em vermelho e com ✕
+    const cls = classify(clone) || { icon: '📄', label: 'Bloco' };
+    const dupRow = buildRow({ el: clone, icon: cls.icon, label: cls.label, preview: txt(clone).slice(0, 45), depth: sourceRow.__depth || 0, isDup: true });
+    sourceRow.insertAdjacentElement('afterend', dupRow);
+    clone.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  function copyHtml(el) {
+    const html = cleanHTML(el.outerHTML);
+    if (navigator.clipboard && navigator.clipboard.writeText)
+      navigator.clipboard.writeText(html).then(() => flash('📋 HTML copiado!'), () => flash('Não consegui copiar.'));
+    else flash('Clipboard indisponível.');
+  }
+
+  const panel = document.createElement('div');
+  Object.assign(panel.style, { position:'fixed', top:'0', left:'0', width:'300px', maxHeight:'100vh',
+    overflowY:'auto', background:'#1e1e2e', color:'#e2e8f0', font:'12px system-ui,sans-serif',
+    zIndex:'2147483647', boxShadow:'2px 0 12px rgba(0,0,0,.5)' });
+
+  const head = document.createElement('div');
+  Object.assign(head.style, { position:'sticky', top:'0', background:'#11111b', padding:'10px 12px',
+    display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid #313244' });
+  head.innerHTML = '<b>🗺 Mapa de elementos</b>';
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕';
+  Object.assign(closeBtn.style, { background:'transparent', border:'none', color:'#e2e8f0', cursor:'pointer', fontSize:'14px' });
+  closeBtn.onclick = () => cleanup();
+  head.appendChild(closeBtn);
+  panel.appendChild(head);
+
+  function buildRow({ el, icon, label, preview, depth, isDup }) {
+    const row = document.createElement('div');
+    row.__depth = depth;
+    Object.assign(row.style, { padding: '6px 12px 6px ' + (12 + depth * 14) + 'px', cursor: 'pointer',
+      borderBottom: '1px solid #28283b', display: 'flex', alignItems: 'center', gap: '6px',
+      background: isDup ? 'rgba(239,68,68,0.18)' : '' });
+    const info = document.createElement('div');
+    Object.assign(info.style, { flex: '1', minWidth: '0', display: 'flex', flexDirection: 'column', gap: '2px' });
+    info.innerHTML = '<span>' + icon + ' <b>' + label + '</b>' +
+      (isDup ? ' <span style="color:#f87171;font-size:10px">(cópia)</span>' : '') + '</span>' +
+      (preview ? '<span style="opacity:.55;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + preview.replace(/</g, '&lt;') + '</span>' : '');
+    row.appendChild(info);
+    row.onmouseenter = () => { if (el !== selected) paint(el, '#f59e0b'); };
+    row.onmouseleave = () => { if (el !== selected) unpaint(el); };
+    row.onclick = () => {
+      if (selected && selected !== el) unpaint(selected);
+      selected = el;
+      paint(selected, '#22c55e', true);
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      openActions(row, el);
+    };
+    if (isDup) {
+      const x = document.createElement('button');
+      x.textContent = '✕';
+      x.title = 'Excluir esta cópia do editor';
+      Object.assign(x.style, { background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '14px', flexShrink: '0', padding: '0 4px' });
+      x.onclick = (e) => {
+        e.stopPropagation();
+        if (selected === el) { unpaint(el); selected = null; } else { unpaint(el); }
+        const run = () => el.remove();
+        if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
+        if (ed.nodeChanged) ed.nodeChanged();
+        if (ed.fire) ed.fire('input');
+        if (ed.setDirty) ed.setDirty(true);
+        row.remove();
+        flash('🗑 Cópia excluída.');
+      };
+      row.appendChild(x);
+    }
+    return row;
+  }
+
+  function openActions(afterRow, el) {
+    if (actionsRow) actionsRow.remove();
+    actionsRow = document.createElement('div');
+    Object.assign(actionsRow.style, { display: 'flex', gap: '6px', padding: '6px 12px', background: '#181825' });
+    const mk = (label, fn) => {
+      const b = document.createElement('button'); b.textContent = label;
+      Object.assign(b.style, { flex: '1', padding: '5px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: '#313244', color: '#e2e8f0', fontSize: '11px' });
+      b.onclick = fn; return b;
+    };
+    actionsRow.appendChild(mk('📑 Duplicar', () => dupe(el, afterRow)));
+    actionsRow.appendChild(mk('📋 Copiar HTML', () => copyHtml(el)));
+    afterRow.insertAdjacentElement('afterend', actionsRow);
+  }
+
+  items.forEach(it => panel.appendChild(
+    buildRow({ el: it.el, icon: it.icon, label: it.label, preview: it.preview, depth: it.depth, isDup: false })
+  ));
+
+  function onKey(e) { if (e.key === 'Escape') cleanup(); }
+  function cleanup() {
+    items.forEach(it => unpaint(it.el));
+    unpaint(selected);
+    pulseStyle.remove();
+    document.removeEventListener('keydown', onKey, true);
+    panel.remove();
+    window.__svcMapCleanup = null;
+  }
+  window.__svcMapCleanup = cleanup;
+  document.addEventListener('keydown', onKey, true);
+  document.body.appendChild(panel);
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   const saved = await chrome.storage.local.get(null);
@@ -1258,6 +1664,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   $('btn-edit-tipos').addEventListener('click', () => { buildEditTipos(); show('edit-tipos'); });
   $('btn-settings').addEventListener('click',   () => { buildSettings();  show('settings');  });
+  $('btn-canvas').addEventListener('click',     () => { syncCanvasTools(); show('canvas');   });
+  $('btn-back-canvas').addEventListener('click', () => show('main'));
   $('btn-back-help').addEventListener('click',  () => show('main'));
   $('btn-starters').addEventListener('click', doOpenStarters);
   $('btn-links').addEventListener('click', () => { buildLinks(); show('links'); });
@@ -1266,9 +1674,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-back-records').addEventListener('click', () => show('main'));
   $('btn-canvas-indent').addEventListener('click', doApplyIndent);
   $('btn-canvas-dup').addEventListener('click', doDuplicateBlock);
+  $('btn-canvas-move').addEventListener('click', doMoveBlocks);
+  $('btn-canvas-map').addEventListener('click', doElementMap);
   $('btn-canvas-revisions').addEventListener('click', () => show('canvas-revisions'));
   $('btn-apply-revisions-filter').addEventListener('click', doFetchRevisions);
-  $('btn-back-canvas-revisions').addEventListener('click', () => show('main'));
+  $('btn-back-canvas-revisions').addEventListener('click', () => show('canvas'));
   $('btn-back-record-detail').addEventListener('click', () => {
     const from = $('btn-back-record-detail').dataset.from || 'main';
     show(from);
@@ -1322,7 +1732,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   syncMain();
-  syncCanvasTools();
   show('main');
   if (S.running && !S.paused) startTick();
 

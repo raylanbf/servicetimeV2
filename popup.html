@@ -18,7 +18,10 @@
 <div id="view-main" class="view">
   <div class="header">
     <span id="user-label" class="muted small"></span>
-    <button id="btn-settings" class="btn-icon">⚙</button>
+    <div style="display:flex;gap:4px">
+      <button id="btn-canvas" class="btn-icon" title="Canvas LMS">🎓</button>
+      <button id="btn-settings" class="btn-icon" title="Configurações">⚙</button>
+    </div>
   </div>
   <div class="divider"></div>
 
@@ -89,24 +92,32 @@
     <div id="recent-list" class="record-list mt4"></div>
   </div>
 
-  <!-- Canvas LMS tools -->
-  <div id="canvas-tools-box" style="display:none">
-    <div class="divider"></div>
-    <div class="row-between">
-      <span class="label">🎓  Canvas LMS</span>
-      <span id="canvas-course-label" class="small muted"></span>
-    </div>
-    <button id="btn-canvas-indent" class="btn btn-surface btn-full mt4">🔧  Aplicar recuo nos módulos</button>
-    <span id="canvas-indent-status" class="small mt4" style="display:none"></span>
-    <button id="btn-canvas-revisions" class="btn btn-surface btn-full mt4">👥  Ver histórico de edições</button>
-    <button id="btn-canvas-dup" class="btn btn-surface btn-full mt4">📑  Duplicar bloco na página</button>
-  </div>
-
   <div class="divider"></div>
 
   <div class="mt6">
     <span id="count-label" class="small muted"></span>
   </div>
+</div>
+
+<!-- ── Canvas LMS ──────────────────────────────────────────────────── -->
+<div id="view-canvas" class="view">
+  <div class="view-header">
+    <button id="btn-back-canvas" class="btn-icon">←</button>
+    <span class="view-title">Canvas LMS</span>
+  </div>
+  <div class="row-between">
+    <span class="label">🎓  Ferramentas</span>
+    <span id="canvas-course-label" class="small muted"></span>
+  </div>
+  <button id="btn-canvas-indent" class="btn btn-surface btn-full mt4">🔧  Aplicar recuo nos módulos</button>
+  <span id="canvas-indent-status" class="small mt4" style="display:none"></span>
+  <button id="btn-canvas-revisions" class="btn btn-surface btn-full mt4">👥  Ver histórico de edições</button>
+
+  <div class="divider"></div>
+  <span class="small muted">Edição de página (abra uma página no editor)</span>
+  <button id="btn-canvas-dup" class="btn btn-surface btn-full mt4">📑  Duplicar bloco na página</button>
+  <button id="btn-canvas-move" class="btn btn-surface btn-full mt4">✋  Reorganizar blocos (arrastar)</button>
+  <button id="btn-canvas-map" class="btn btn-surface btn-full mt4">🗺  Mapa de elementos</button>
 </div>
 
 <!-- ── Editar serviços ─────────────────────────────────────────────── -->
