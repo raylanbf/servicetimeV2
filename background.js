@@ -687,6 +687,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
           function patchHtml(html) {
             return html.replace(/<iframe[^>]+>/gi, tag => {
               if (!/allowfullscreen/i.test(tag)) return tag;
+              if (/class=["'][^"']*lti-embed/i.test(tag)) return tag;
               const hasAttr  = /\bwidth=["']?\d+["']?/i.test(tag) && /\bheight=["']?\d+["']?/i.test(tag);
               const hasStyle = /width\s*:\s*\d+px/i.test(tag) && /height\s*:\s*\d+px/i.test(tag);
               if (!hasAttr && !hasStyle) return tag;
