@@ -1342,6 +1342,18 @@ function blockMoverMain() {
 
   function onKey(e) {
     if (e.key === 'Escape') { e.preventDefault(); cleanup(); return; }
+    if (e.key === 'Delete' && current && !dragging) {
+      e.preventDefault();
+      const el = current;
+      unpaint(el); current = null;
+      const run = () => el.remove();
+      if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
+      if (ed.nodeChanged) ed.nodeChanged();
+      if (ed.fire) ed.fire('input');
+      if (ed.setDirty) ed.setDirty(true);
+      flash('🗑 Bloco excluído. (Ctrl+Z desfaz)');
+      return;
+    }
     if (dragging || !current) return;
     if (e.key === 'ArrowUp')   { e.preventDefault(); const p = current.parentElement; if (p && p !== body) setCurrent(p); }
     if (e.key === 'ArrowDown') { e.preventDefault(); const c = [...current.children].find(x => x.nodeType === 1); if (c) setCurrent(c); }
@@ -1711,6 +1723,22 @@ function blockMapMain() {
 
   function onKey(e) {
     if (e.key === 'Escape') { cleanup(); return; }
+    if (e.key === 'Delete' && selected) {
+      e.preventDefault();
+      const el = selected;
+      const item = items.find(it => it.el === el);
+      unpaint(el); selected = null;
+      if (activeRow) { activeRow.style.background = activeRow.__origBg || ''; activeRow = null; }
+      if (actionsRow) { actionsRow.remove(); actionsRow = null; }
+      if (item && item.row) item.row.remove();
+      const run = () => el.remove();
+      if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
+      if (ed.nodeChanged) ed.nodeChanged();
+      if (ed.fire) ed.fire('input');
+      if (ed.setDirty) ed.setDirty(true);
+      flash('🗑 Bloco excluído. (Ctrl+Z desfaz)');
+      return;
+    }
     if (e.key === 'm' || e.key === 'M') { mKey = true; panel.style.cursor = 'grab'; doc.documentElement.style.cursor = 'grab'; }
   }
   function onKeyUp(e) {
@@ -1725,6 +1753,7 @@ function blockMapMain() {
     document.removeEventListener('keyup', onKeyUp, true);
     document.removeEventListener('mousemove', onDragMove, true);
     document.removeEventListener('mouseup', onDragDrop, true);
+    doc.removeEventListener('keydown', onKey, true);
     body.removeEventListener('click', onEditorClick);
     cancelDrag();
     panel.remove();
@@ -1733,6 +1762,7 @@ function blockMapMain() {
   window.__svcMapCleanup = cleanup;
   document.addEventListener('keydown', onKey, true);
   document.addEventListener('keyup', onKeyUp, true);
+  doc.addEventListener('keydown', onKey, true);
   document.addEventListener('mousemove', onDragMove, true);
   document.addEventListener('mouseup', onDragDrop, true);
   document.body.appendChild(panel);
