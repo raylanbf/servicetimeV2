@@ -1459,7 +1459,7 @@ function blockMapMain() {
   if (!items.length) { alert('Nenhum bloco reconhecido nesta página.'); return; }
 
   let selected = null, actionsRow = null, activeRow = null;
-  let dragRow = null, dragEl = null, mKey = false, scrollRaf = null;
+  let dragRow = null, dragEl = null, mKey = false, scrollRaf = null, lastMouseY = 0;
   const pulseStyle = doc.createElement('style');
   pulseStyle.textContent = '@keyframes __svcMapPulse{0%,100%{box-shadow:0 0 0 3px #22c55e,0 0 6px 2px rgba(34,197,94,.45)}50%{box-shadow:0 0 0 6px #22c55e,0 0 24px 10px rgba(34,197,94,.9)}}';
   (doc.head || doc.documentElement).appendChild(pulseStyle);
@@ -1549,13 +1549,16 @@ function blockMapMain() {
     boxShadow: '0 0 10px 3px rgba(34,197,94,0.6)', pointerEvents: 'none' });
 
   function scrollTick() {
-    if (!dragRow || !editorLine.parentNode) { scrollRaf = null; return; }
-    const r = editorLine.getBoundingClientRect();
-    const vh = win.innerHeight;
-    const ZONE = 80, SPEED = 8;
-    if (r.top < ZONE) win.scrollBy(0, -Math.ceil(SPEED * (1 - r.top / ZONE)));
-    else if (r.bottom > vh - ZONE) win.scrollBy(0, Math.ceil(SPEED * (1 - (vh - r.bottom) / ZONE)));
-    scrollRaf = win.requestAnimationFrame(scrollTick);
+    if (!dragRow) { scrollRaf = null; return; }
+    const pr = panel.getBoundingClientRect();
+    const ZONE = 80, SPEED = 10;
+    const relY = lastMouseY - pr.top;
+    const ph = pr.height;
+    if (relY >= 0 && relY < ZONE)
+      win.scrollBy(0, -Math.ceil(SPEED * (1 - relY / ZONE)));
+    else if (relY > ph - ZONE && relY <= ph)
+      win.scrollBy(0, Math.ceil(SPEED * (1 - (ph - relY) / ZONE)));
+    scrollRaf = window.requestAnimationFrame(scrollTick);
   }
 
   function cancelDrag() {
@@ -1565,11 +1568,12 @@ function blockMapMain() {
     dragRow = null; dragEl = null;
     dropLine.style.display = 'none';
     editorLine.remove();
-    if (scrollRaf) { win.cancelAnimationFrame(scrollRaf); scrollRaf = null; }
+    if (scrollRaf) { window.cancelAnimationFrame(scrollRaf); scrollRaf = null; }
   }
 
   function onDragMove(e) {
     if (!dragRow) return;
+    lastMouseY = e.clientY;
     const rows = [...panel.querySelectorAll('[data-map-row]')].filter(r => r !== dragRow);
     let placed = false;
     for (const r of rows) {
@@ -1661,8 +1665,8 @@ function blockMapMain() {
       dragRow = row; dragEl = el;
       row.style.opacity = '0.45';
       document.body.style.cursor = 'grabbing';
-      if (scrollRaf) win.cancelAnimationFrame(scrollRaf);
-      scrollRaf = win.requestAnimationFrame(scrollTick);
+      if (scrollRaf) window.cancelAnimationFrame(scrollRaf);
+      scrollRaf = window.requestAnimationFrame(scrollTick);
     });
     return row;
   }
