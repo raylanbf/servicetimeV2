@@ -1544,12 +1544,17 @@ function blockMapMain() {
   const dropLine = document.createElement('div');
   Object.assign(dropLine.style, { height: '2px', background: '#22c55e', margin: '0', display: 'none', pointerEvents: 'none' });
 
+  const editorLine = doc.createElement('div');
+  Object.assign(editorLine.style, { height: '3px', background: '#22c55e', margin: '2px 0', borderRadius: '2px',
+    boxShadow: '0 0 10px 3px rgba(34,197,94,0.6)', pointerEvents: 'none' });
+
   function cancelDrag() {
     if (dragRow) dragRow.style.opacity = '';
     document.body.style.cursor = '';
     panel.style.cursor = '';
     dragRow = null; dragEl = null;
     dropLine.style.display = 'none';
+    editorLine.remove();
   }
 
   function onDragMove(e) {
@@ -1559,14 +1564,18 @@ function blockMapMain() {
     for (const r of rows) {
       const rect = r.getBoundingClientRect();
       if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-        if (e.clientY < rect.top + rect.height / 2) r.before(dropLine);
-        else r.after(dropLine);
+        const before = e.clientY < rect.top + rect.height / 2;
+        if (before) r.before(dropLine); else r.after(dropLine);
         dropLine.style.display = 'block';
+        const targetEl = r.__el;
+        if (targetEl && targetEl !== dragEl) {
+          if (before) targetEl.before(editorLine); else targetEl.after(editorLine);
+        }
         placed = true;
         break;
       }
     }
-    if (!placed) dropLine.style.display = 'none';
+    if (!placed) { dropLine.style.display = 'none'; editorLine.remove(); }
   }
 
   function onDragDrop() {
