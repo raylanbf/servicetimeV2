@@ -491,3 +491,58 @@ input[type=text]:focus { border-color: #60a5fa; }
   animation: spin .7s linear infinite;
   vertical-align: middle;
 }
+
+/* ── Cards por curso (multi-curso) ───────────────────────────────── */
+.cl-results {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+  max-height: calc(100vh - 230px);
+}
+.cl-course-card {
+  background: #2a2a3e;
+  border: 1px solid #3a3a4e;
+  border-radius: 6px;
+  overflow: hidden;
+  transition: border-color .2s;
+}
+.cl-course-card.cl-course-ok    { border-color: #166534; }
+.cl-course-card.cl-course-warn  { border-color: #92400e; }
+.cl-course-card.cl-course-error { border-color: #7f1d1d; }
+.cl-course-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.cl-course-header:hover { background: rgba(255,255,255,0.04); }
+.cl-course-toggle {
+  font-size: 10px;
+  color: #64748b;
+  flex-shrink: 0;
+  transition: transform .2s;
+  line-height: 1;
+}
+.cl-course-toggle.open { transform: rotate(90deg); }
+.cl-course-id    { flex: 1; font-size: 12px; font-weight: bold; }
+.cl-course-badge { font-size: 13px; flex-shrink: 0; line-height: 1; }
+.cl-course-body  { border-top: 1px solid #3a3a4e; padding-bottom: 4px; }
+.cl-check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 1px;
+}
+.cl-check-row-icon   { font-size: 12px; flex-shrink: 0; width: 16px; text-align: center; }
+.cl-check-row-name   { flex: 1; font-size: 11px; }
+.cl-check-row-status { font-size: 12px; flex-shrink: 0; min-width: 18px; text-align: right; line-height: 1; }
+.cl-check-detail-row {
+  padding: 0 10px 4px 34px;
+  font-size: 10px;
+  color: #64748b;
+  line-height: 1.5;
+}
+.cl-check-detail-row > div { padding: 0; }

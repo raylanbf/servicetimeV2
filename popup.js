@@ -1768,7 +1768,7 @@ function blockMapMain() {
   document.body.appendChild(panel);
 }
 
-// ── Checklist de publicação ──────────────────────────────────────────
+// ── Checklist de publicação (multi-curso) ────────────────────────────
 
 const CHECKLIST_ITEMS = [
   { id: 'novos-videos', name: 'Módulo "Novos Vídeos"',   icon: '🎬' },
@@ -1783,99 +1783,129 @@ function clEsc(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function buildChecklistView() {
-  const list = $('checklist-list');
-  list.innerHTML = '';
-  CHECKLIST_ITEMS.forEach(item => {
-    const div = document.createElement('div');
-    div.className = 'cl-item';
-    div.id = 'check-' + item.id;
-    div.innerHTML =
-      `<div class="cl-row">
-         <span class="cl-icon-left">${item.icon}</span>
-         <span class="cl-name">${item.name}</span>
-         <span class="cl-status" id="status-${item.id}">–</span>
-       </div>
-       <div class="cl-detail" id="detail-${item.id}" style="display:none"></div>`;
-    list.appendChild(div);
-  });
+function parseCourseIds(text) {
+  return [...new Set(
+    text.split(/[\n,\s]+/).map(s => s.trim()).filter(s => /^\d+$/.test(s))
+  )];
 }
 
-function setCheckStatus(id, status, detail) {
-  const item    = $('check-'  + id);
-  const statusEl = $('status-' + id);
-  const detailEl = $('detail-' + id);
-  if (!item) return;
+function buildCourseCard(courseId) {
+  const card = document.createElement('div');
+  card.className = 'cl-course-card';
+  card.id = 'cl-course-' + courseId;
 
-  item.className = 'cl-item' +
-    (status === 'ok'    ? ' cl-ok'    :
-     status === 'warn'  ? ' cl-warn'  :
-     status === 'error' ? ' cl-error' : '');
+  const header = document.createElement('div');
+  header.className = 'cl-course-header';
+  header.innerHTML =
+    `<span class="cl-course-toggle" id="cl-toggle-${courseId}">▶</span>
+     <span class="cl-course-id">Curso #${clEsc(courseId)}</span>
+     <span class="cl-course-badge" id="cl-badge-${courseId}"><span class="spinner-sm"></span></span>`;
+
+  const body = document.createElement('div');
+  body.className = 'cl-course-body';
+  body.id = 'cl-body-' + courseId;
+  body.style.display = 'none';
+
+  CHECKLIST_ITEMS.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'cl-check-row';
+    row.innerHTML =
+      `<span class="cl-check-row-icon">${item.icon}</span>
+       <span class="cl-check-row-name">${item.name}</span>
+       <span class="cl-check-row-status" id="cl-st-${courseId}-${item.id}"><span class="spinner-sm"></span></span>`;
+    body.appendChild(row);
+
+    const detail = document.createElement('div');
+    detail.className = 'cl-check-detail-row';
+    detail.id = `cl-dt-${courseId}-${item.id}`;
+    detail.style.display = 'none';
+    body.appendChild(detail);
+  });
+
+  header.addEventListener('click', () => {
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    $('cl-toggle-' + courseId)?.classList.toggle('open', !open);
+  });
+
+  card.appendChild(header);
+  card.appendChild(body);
+  return card;
+}
+
+function setCourseCheck(courseId, checkId, status, detail) {
+  const stEl = $(`cl-st-${courseId}-${checkId}`);
+  const dtEl = $(`cl-dt-${courseId}-${checkId}`);
+  if (!stEl) return;
 
   if (status === 'loading') {
-    statusEl.innerHTML = '<span class="spinner-sm"></span>';
+    stEl.innerHTML = '<span class="spinner-sm"></span>';
   } else {
-    statusEl.textContent =
-      status === 'ok' ? '✅' : status === 'warn' ? '⚠️' : status === 'error' ? '❌' : '–';
+    stEl.textContent = status === 'ok' ? '✅' : status === 'warn' ? '⚠️' : status === 'error' ? '❌' : '–';
   }
 
   if (detail) {
     const lines = Array.isArray(detail) ? detail : [detail];
-    detailEl.innerHTML = lines.map(l => `<div>${clEsc(l)}</div>`).join('');
-    detailEl.style.display = 'block';
+    dtEl.innerHTML = lines.map(l => `<div>${clEsc(l)}</div>`).join('');
+    dtEl.style.display = 'block';
   } else {
-    detailEl.style.display = 'none';
+    dtEl.style.display = 'none';
+  }
+
+  updateCourseBadge(courseId);
+}
+
+function updateCourseBadge(courseId) {
+  const badge = $('cl-badge-' + courseId);
+  const card  = $('cl-course-' + courseId);
+  if (!badge || !card) return;
+
+  let loading = false, warn = false, error = false;
+  CHECKLIST_ITEMS.forEach(item => {
+    const st = $(`cl-st-${courseId}-${item.id}`);
+    if (!st) return;
+    if (st.querySelector('.spinner-sm')) loading = true;
+    else if (st.textContent === '⚠️')   warn  = true;
+    else if (st.textContent === '❌')   error = true;
+  });
+
+  if (loading) {
+    badge.innerHTML = '<span class="spinner-sm"></span>';
+    card.className  = 'cl-course-card';
+  } else if (error) {
+    badge.textContent = '❌';
+    card.className    = 'cl-course-card cl-course-error';
+  } else if (warn) {
+    badge.textContent = '⚠️';
+    card.className    = 'cl-course-card cl-course-warn';
+  } else {
+    badge.textContent = '✅';
+    card.className    = 'cl-course-card cl-course-ok';
   }
 }
 
-async function runChecklist() {
-  const courseId = await getCanvasCourseId();
-  if (!courseId) {
-    alert('Abra um curso do Canvas antes de rodar o checklist.');
-    return;
-  }
-  $('checklist-course-label').textContent = `Curso #${courseId}`;
-  $('btn-run-checklist').disabled = true;
-  $('btn-run-checklist').innerHTML = '<span class="spinner"></span>Verificando...';
-
-  buildChecklistView();
-  CHECKLIST_ITEMS.forEach(item => setCheckStatus(item.id, 'loading'));
-
-  const tabs  = await chrome.tabs.query({ active: true, currentWindow: true });
-  const tabId = tabs[0]?.id;
-  if (!tabId) return;
-
-  await Promise.all([
-    clCheck_novosVideos(tabId, courseId),
-    clCheck_loremIpsum(tabId, courseId),
-    clCheck_avisos(tabId, courseId),
-    clCheck_foruns(tabId, courseId),
-    clCheck_testes(tabId, courseId),
-    clCheck_links(tabId, courseId),
-  ]);
-
-  $('btn-run-checklist').disabled = false;
-  $('btn-run-checklist').textContent = '▶  Rodar verificações';
-}
-
-// ── Check 1: Módulo "Novos Vídeos" ───────────────────────────────────
-async function clCheck_novosVideos(tabId, courseId) {
-  try {
-    const result = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: async (courseId) => {
-        async function fetchAll(url) {
-          const out = []; let next = url;
-          while (next) {
-            const res = await fetch(next);
-            if (!res.ok) break;
-            const data = await res.json();
-            if (Array.isArray(data)) out.push(...data);
-            const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
-            next = m ? m[1] : null;
-          }
-          return out;
+// Checks 1-5 consolidados num único executeScript por curso
+async function clRunChecks1to5(tabId, courseId) {
+  const result = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: async (courseId) => {
+      async function fetchAll(url) {
+        const out = []; let next = url;
+        while (next) {
+          const res = await fetch(next);
+          if (!res.ok) break;
+          const data = await res.json();
+          if (Array.isArray(data)) out.push(...data);
+          const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
+          next = m ? m[1] : null;
         }
+        return out;
+      }
+
+      const out = {};
+
+      // 1: Novos Vídeos
+      try {
         const modules = await fetchAll(`/api/v1/courses/${courseId}/modules?per_page=100`);
         const mod = modules.find(m => {
           const n = m.name.toLowerCase()
@@ -1883,233 +1913,176 @@ async function clCheck_novosVideos(tabId, courseId) {
             .replace(/[íìîï]/g, 'i').replace(/[óòõôö]/g, 'o').replace(/[úùûü]/g, 'u');
           return n.includes('novos videos');
         });
-        if (!mod) return { found: false };
-        const items = await fetchAll(`/api/v1/courses/${courseId}/modules/${mod.id}/items?per_page=100`);
-        return { found: true, name: mod.name, count: items.length };
-      },
-      args: [courseId],
-    });
-    const r = result[0]?.result;
-    if (r == null) { setCheckStatus('novos-videos', 'error', 'Erro ao verificar módulos'); return; }
-    if (!r.found) {
-      setCheckStatus('novos-videos', 'ok', 'Módulo "Novos Vídeos" não encontrado');
-    } else if (r.count === 0) {
-      setCheckStatus('novos-videos', 'warn', `Módulo "${r.name}" existe mas está vazio — deve ser apagado`);
-    } else {
-      setCheckStatus('novos-videos', 'warn', `Módulo "${r.name}" existe com ${r.count} vídeo(s)`);
-    }
-  } catch (err) {
-    setCheckStatus('novos-videos', 'error', 'Erro: ' + err.message);
-  }
-}
-
-// ── Check 2: Lorem Ipsum ─────────────────────────────────────────────
-async function clCheck_loremIpsum(tabId, courseId) {
-  try {
-    const result = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: async (courseId) => {
-        async function fetchAll(url) {
-          const out = []; let next = url;
-          while (next) {
-            const res = await fetch(next);
-            if (!res.ok) break;
-            const data = await res.json();
-            if (Array.isArray(data)) out.push(...data);
-            const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
-            next = m ? m[1] : null;
-          }
-          return out;
+        if (!mod) { out.novosVideos = { found: false }; }
+        else {
+          const items = await fetchAll(`/api/v1/courses/${courseId}/modules/${mod.id}/items?per_page=100`);
+          out.novosVideos = { found: true, name: mod.name, count: items.length };
         }
+      } catch (e) { out.novosVideos = { error: e.message }; }
+
+      // 2: Lorem Ipsum
+      try {
         const pages = await fetchAll(`/api/v1/courses/${courseId}/pages?per_page=100`);
         const found = [];
         for (let i = 0; i < pages.length; i += 10) {
-          const batch = pages.slice(i, i + 10);
-          const results = await Promise.all(batch.map(async p => {
+          const results = await Promise.all(pages.slice(i, i + 10).map(async p => {
             try {
               const res = await fetch(`/api/v1/courses/${courseId}/pages/${p.url}`);
               if (!res.ok) return null;
-              const data = await res.json();
-              return (data.body || '').toLowerCase().includes('lorem ipsum') ? p.title : null;
+              const d = await res.json();
+              return (d.body || '').toLowerCase().includes('lorem ipsum') ? p.title : null;
             } catch { return null; }
           }));
           found.push(...results.filter(Boolean));
         }
-        return { found };
-      },
-      args: [courseId],
-    });
-    const r = result[0]?.result;
-    if (r == null) { setCheckStatus('lorem-ipsum', 'error', 'Erro ao verificar páginas'); return; }
-    if (r.found.length === 0) {
-      setCheckStatus('lorem-ipsum', 'ok', 'Nenhuma página com Lorem Ipsum encontrada');
-    } else {
-      const lines = r.found.slice(0, 5).map(t => `📄 ${t}`);
-      if (r.found.length > 5) lines.push(`... e mais ${r.found.length - 5} página(s)`);
-      setCheckStatus('lorem-ipsum', 'warn', [`${r.found.length} página(s) com Lorem Ipsum:`, ...lines]);
-    }
-  } catch (err) {
-    setCheckStatus('lorem-ipsum', 'error', 'Erro: ' + err.message);
-  }
-}
+        out.loremIpsum = { found };
+      } catch (e) { out.loremIpsum = { error: e.message }; }
 
-// ── Check 3: Avisos ──────────────────────────────────────────────────
-async function clCheck_avisos(tabId, courseId) {
-  try {
-    const result = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: async (courseId) => {
+      // 3: Avisos
+      try {
         const res = await fetch(`/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=100`);
-        if (!res.ok) return { count: 0, titles: [] };
-        const data = await res.json();
-        const list = Array.isArray(data) ? data : [];
-        return { count: list.length, titles: list.slice(0, 3).map(d => d.title) };
-      },
-      args: [courseId],
-    });
-    const r = result[0]?.result;
-    if (r == null) { setCheckStatus('avisos', 'error', 'Erro ao verificar avisos'); return; }
-    if (r.count === 0) {
-      setCheckStatus('avisos', 'ok', 'Nenhum aviso encontrado');
-    } else {
-      const lines = r.titles.map(t => `📢 ${t}`);
-      if (r.count > 3) lines.push(`... e mais ${r.count - 3}`);
-      setCheckStatus('avisos', 'warn', [`${r.count} aviso(s) encontrado(s):`, ...lines]);
-    }
-  } catch (err) {
-    setCheckStatus('avisos', 'error', 'Erro: ' + err.message);
-  }
-}
+        const list = res.ok ? (await res.json()) : [];
+        out.avisos = { count: list.length, titles: list.slice(0, 3).map(d => d.title) };
+      } catch (e) { out.avisos = { error: e.message }; }
 
-// ── Check 4: Fóruns ──────────────────────────────────────────────────
-async function clCheck_foruns(tabId, courseId) {
-  try {
-    const result = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: async (courseId) => {
+      // 4: Fóruns
+      try {
         const res = await fetch(`/api/v1/courses/${courseId}/discussion_topics?per_page=100`);
-        if (!res.ok) return { count: 0, titles: [] };
-        const data = await res.json();
-        const list = (Array.isArray(data) ? data : []).filter(d => !d.is_announcement);
-        return { count: list.length, titles: list.slice(0, 3).map(d => d.title) };
-      },
-      args: [courseId],
-    });
-    const r = result[0]?.result;
-    if (r == null) { setCheckStatus('foruns', 'error', 'Erro ao verificar fóruns'); return; }
-    if (r.count === 0) {
-      setCheckStatus('foruns', 'ok', 'Nenhum fórum encontrado');
-    } else {
-      const lines = r.titles.map(t => `💬 ${t}`);
-      if (r.count > 3) lines.push(`... e mais ${r.count - 3}`);
-      setCheckStatus('foruns', 'warn', [`${r.count} fórum(ns) encontrado(s):`, ...lines]);
-    }
-  } catch (err) {
-    setCheckStatus('foruns', 'error', 'Erro: ' + err.message);
-  }
-}
+        const list = res.ok ? (await res.json()).filter(d => !d.is_announcement) : [];
+        out.foruns = { count: list.length, titles: list.slice(0, 3).map(d => d.title) };
+      } catch (e) { out.foruns = { error: e.message }; }
 
-// ── Check 5: Testes e pontuações ─────────────────────────────────────
-async function clCheck_testes(tabId, courseId) {
-  try {
-    const result = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: async (courseId) => {
-        async function fetchAll(url) {
-          const out = []; let next = url;
-          while (next) {
-            const res = await fetch(next);
-            if (!res.ok) break;
-            const data = await res.json();
-            if (Array.isArray(data)) out.push(...data);
-            const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
-            next = m ? m[1] : null;
-          }
-          return out;
-        }
+      // 5: Testes
+      try {
         const [quizzes, assignments] = await Promise.all([
           fetchAll(`/api/v1/courses/${courseId}/quizzes?per_page=100`),
           fetchAll(`/api/v1/courses/${courseId}/assignments?per_page=100`),
         ]);
-        const assignByQuizId = {};
-        assignments.forEach(a => { if (a.quiz_id) assignByQuizId[a.quiz_id] = a; });
-        return quizzes.map(q => {
-          const a = assignByQuizId[q.id] || {};
+        const byQuizId = {};
+        assignments.forEach(a => { if (a.quiz_id) byQuizId[a.quiz_id] = a; });
+        out.testes = quizzes.map(q => {
+          const a = byQuizId[q.id] || {};
           return {
             title:           q.title,
             question_count:  q.question_count  || 0,
             points_possible: q.points_possible || 0,
-            published:       a.published  !== undefined ? a.published  : (q.published  || false),
-            post_to_sis:     a.post_to_sis !== undefined ? a.post_to_sis : false,
+            published:   a.published   !== undefined ? a.published   : (q.published   || false),
+            post_to_sis: a.post_to_sis !== undefined ? a.post_to_sis : false,
           };
         });
-      },
-      args: [courseId],
+      } catch (e) { out.testes = { error: e.message }; }
+
+      return out;
+    },
+    args: [courseId],
+  });
+  return result[0]?.result || null;
+}
+
+function applyCourseResults(courseId, data) {
+  if (!data) {
+    CHECKLIST_ITEMS.slice(0, 5).forEach(item => setCourseCheck(courseId, item.id, 'error', 'Sem resposta da API'));
+    return;
+  }
+
+  // 1: Novos Vídeos
+  const nv = data.novosVideos;
+  if (nv?.error)       setCourseCheck(courseId, 'novos-videos', 'error', 'Erro: ' + nv.error);
+  else if (!nv?.found) setCourseCheck(courseId, 'novos-videos', 'ok',   'Módulo "Novos Vídeos" não encontrado');
+  else if (nv.count === 0) setCourseCheck(courseId, 'novos-videos', 'warn', `Módulo "${nv.name}" existe mas vazio — deve ser apagado`);
+  else                 setCourseCheck(courseId, 'novos-videos', 'warn', `Módulo "${nv.name}" com ${nv.count} vídeo(s)`);
+
+  // 2: Lorem Ipsum
+  const li = data.loremIpsum;
+  if (li?.error) {
+    setCourseCheck(courseId, 'lorem-ipsum', 'error', 'Erro: ' + li.error);
+  } else if (!li?.found?.length) {
+    setCourseCheck(courseId, 'lorem-ipsum', 'ok', 'Nenhuma página com Lorem Ipsum');
+  } else {
+    const lines = li.found.slice(0, 5).map(t => `📄 ${t}`);
+    if (li.found.length > 5) lines.push(`... e mais ${li.found.length - 5}`);
+    setCourseCheck(courseId, 'lorem-ipsum', 'warn', [`${li.found.length} página(s):`, ...lines]);
+  }
+
+  // 3: Avisos
+  const av = data.avisos;
+  if (av?.error) {
+    setCourseCheck(courseId, 'avisos', 'error', 'Erro: ' + av.error);
+  } else if (av.count === 0) {
+    setCourseCheck(courseId, 'avisos', 'ok', 'Nenhum aviso');
+  } else {
+    const lines = av.titles.map(t => `📢 ${t}`);
+    if (av.count > 3) lines.push(`... e mais ${av.count - 3}`);
+    setCourseCheck(courseId, 'avisos', 'warn', [`${av.count} aviso(s):`, ...lines]);
+  }
+
+  // 4: Fóruns
+  const fo = data.foruns;
+  if (fo?.error) {
+    setCourseCheck(courseId, 'foruns', 'error', 'Erro: ' + fo.error);
+  } else if (fo.count === 0) {
+    setCourseCheck(courseId, 'foruns', 'ok', 'Nenhum fórum');
+  } else {
+    const lines = fo.titles.map(t => `💬 ${t}`);
+    if (fo.count > 3) lines.push(`... e mais ${fo.count - 3}`);
+    setCourseCheck(courseId, 'foruns', 'warn', [`${fo.count} fórum(ns):`, ...lines]);
+  }
+
+  // 5: Testes
+  const quizzes = data.testes;
+  if (!quizzes || quizzes?.error) {
+    setCourseCheck(courseId, 'testes', 'error', quizzes?.error ? 'Erro: ' + quizzes.error : 'Sem dados');
+    return;
+  }
+
+  const issues = [];
+  const tl = s => s.toLowerCase();
+
+  const provaFinal = quizzes.find(q => tl(q.title).includes('prova final'));
+  if (!provaFinal) {
+    issues.push('Prova Final não encontrada');
+  } else {
+    if (provaFinal.points_possible !== 40) issues.push(`Prova Final: ${provaFinal.points_possible}pts (esperado: 40)`);
+    if (provaFinal.question_count  !== 10) issues.push(`Prova Final: ${provaFinal.question_count} perguntas (esperado: 10)`);
+    if (!provaFinal.published)             issues.push('Prova Final: não publicada');
+    if (!provaFinal.post_to_sis)           issues.push('Prova Final: SIS não habilitado');
+  }
+
+  const atividades = quizzes.filter(q => tl(q.title).includes('atividade objetiva'));
+  if (atividades.length === 0) {
+    issues.push('Nenhuma Atividade Objetiva encontrada');
+  } else {
+    const sumPts = atividades.reduce((s, a) => s + a.points_possible, 0);
+    if (sumPts !== 60) issues.push(`Atividades: ${sumPts}pts (esperado: 60)`);
+    atividades.forEach(a => {
+      if (!a.published)   issues.push(`"${a.title}": não publicada`);
+      if (!a.post_to_sis) issues.push(`"${a.title}": SIS não habilitado`);
     });
+  }
 
-    const quizzes = result[0]?.result;
-    if (!quizzes) { setCheckStatus('testes', 'error', 'Erro ao verificar testes'); return; }
+  const atividadesPts = atividades.reduce((s, a) => s + a.points_possible, 0);
+  const total = (provaFinal?.points_possible || 0) + atividadesPts;
+  if (provaFinal && atividades.length && total !== 100) issues.push(`Total: ${total}pts (esperado: 100)`);
 
-    const issues  = [];
-    const t = s => s.toLowerCase();
+  const pesquisa = quizzes.find(q =>
+    tl(q.title).includes('como você avalia') || tl(q.title).includes('como voce avalia')
+  );
+  if (!pesquisa)                          issues.push('Pesquisa de avaliação não encontrada');
+  else if (pesquisa.question_count !== 5) issues.push(`Pesquisa: ${pesquisa.question_count} perguntas (esperado: 5)`);
 
-    // Prova Final
-    const provaFinal = quizzes.find(q => t(q.title).includes('prova final'));
-    if (!provaFinal) {
-      issues.push('Prova Final não encontrada');
-    } else {
-      if (provaFinal.points_possible !== 40)  issues.push(`Prova Final: ${provaFinal.points_possible}pts (esperado: 40)`);
-      if (provaFinal.question_count  !== 10)  issues.push(`Prova Final: ${provaFinal.question_count} perguntas (esperado: 10)`);
-      if (!provaFinal.published)              issues.push('Prova Final: não publicada');
-      if (!provaFinal.post_to_sis)            issues.push('Prova Final: sincronização SIS não habilitada');
-    }
-
-    // Atividades Objetivas
-    const atividades = quizzes.filter(q => t(q.title).includes('atividade objetiva'));
-    if (atividades.length === 0) {
-      issues.push('Nenhuma Atividade Objetiva encontrada');
-    } else {
-      const sumPts = atividades.reduce((s, a) => s + a.points_possible, 0);
-      if (sumPts !== 60) issues.push(`Atividades Objetivas: soma ${sumPts}pts (esperado: 60)`);
-      atividades.forEach(a => {
-        if (!a.published)    issues.push(`"${a.title}": não publicada`);
-        if (!a.post_to_sis)  issues.push(`"${a.title}": SIS não habilitado`);
-      });
-    }
-
-    // Total
-    const atividadesPts = atividades.reduce((s, a) => s + a.points_possible, 0);
-    const total = (provaFinal?.points_possible || 0) + atividadesPts;
-    if (provaFinal && atividades.length && total !== 100) issues.push(`Total: ${total}pts (esperado: 100)`);
-
-    // Pesquisa
-    const pesquisa = quizzes.find(q =>
-      t(q.title).includes('como você avalia') || t(q.title).includes('como voce avalia')
-    );
-    if (!pesquisa) {
-      issues.push('Pesquisa de avaliação não encontrada');
-    } else if (pesquisa.question_count !== 5) {
-      issues.push(`Pesquisa: ${pesquisa.question_count} perguntas (esperado: 5)`);
-    }
-
-    if (issues.length === 0) {
-      setCheckStatus('testes', 'ok', [
-        `Prova Final: ${provaFinal.points_possible}pts · ${provaFinal.question_count} perguntas`,
-        `Atividades Objetivas (${atividades.length}): ${atividadesPts}pts`,
-        `Pesquisa: ${pesquisa?.question_count} perguntas`,
-        `Total: ${total}pts`,
-      ]);
-    } else {
-      setCheckStatus('testes', 'warn', issues);
-    }
-  } catch (err) {
-    setCheckStatus('testes', 'error', 'Erro: ' + err.message);
+  if (issues.length === 0) {
+    setCourseCheck(courseId, 'testes', 'ok', [
+      `Prova Final: ${provaFinal.points_possible}pts · ${provaFinal.question_count} perguntas`,
+      `Atividades (${atividades.length}): ${atividadesPts}pts · Total: ${total}pts`,
+      `Pesquisa: ${pesquisa?.question_count ?? '?'} perguntas`,
+    ]);
+  } else {
+    setCourseCheck(courseId, 'testes', 'warn', issues);
   }
 }
 
-// ── Check 6: Links quebrados ─────────────────────────────────────────
-async function clCheck_links(tabId, courseId) {
-  setCheckStatus('links', 'loading', 'Iniciando validação... (pode demorar alguns minutos)');
+async function clRunLinkCheck(tabId, courseId) {
+  setCourseCheck(courseId, 'links', 'loading', 'Validando... (pode demorar)');
   try {
     const result = await chrome.scripting.executeScript({
       target: { tabId },
@@ -2131,21 +2104,14 @@ async function clCheck_links(tabId, courseId) {
           const res = await fetch(`/api/v1/courses/${courseId}/link_validation`);
           if (!res.ok) return { completed: false, failed: true };
           const data = await res.json();
-
           if (data.workflow_state === 'completed') {
             let totalBroken = 0;
             const brokenItems = [];
-            const results = data.results || {};
-            const allItems = Array.isArray(results)
-              ? results
-              : Object.values(results).flat().filter(Boolean);
-
-            allItems.forEach(item => {
+            const raw = data.results || {};
+            const all = Array.isArray(raw) ? raw : Object.values(raw).flat().filter(Boolean);
+            all.forEach(item => {
               const links = item.invalid_links || [];
-              if (links.length > 0) {
-                totalBroken += links.length;
-                brokenItems.push(`${item.name || item.title}: ${links.length} link(s)`);
-              }
+              if (links.length) { totalBroken += links.length; brokenItems.push(`${item.name || item.title}: ${links.length} link(s)`); }
             });
             return { completed: true, totalBroken, brokenItems: brokenItems.slice(0, 5), more: Math.max(0, brokenItems.length - 5) };
           }
@@ -2157,24 +2123,92 @@ async function clCheck_links(tabId, courseId) {
     });
 
     const r = result[0]?.result;
-    if (!r) { setCheckStatus('links', 'error', 'Erro ao validar links'); return; }
-
+    if (!r) { setCourseCheck(courseId, 'links', 'error', 'Sem resposta'); return; }
     if (!r.completed) {
-      setCheckStatus('links', r.failed ? 'error' : 'warn',
-        r.failed ? 'Validação falhou no servidor' : 'Tempo esgotado — tente rodar novamente');
+      setCourseCheck(courseId, 'links', r.failed ? 'error' : 'warn',
+        r.failed ? 'Falhou no servidor' : 'Tempo esgotado');
       return;
     }
-
     if (r.totalBroken === 0) {
-      setCheckStatus('links', 'ok', 'Nenhum link quebrado encontrado');
+      setCourseCheck(courseId, 'links', 'ok', 'Nenhum link quebrado');
     } else {
       const lines = [...r.brokenItems];
       if (r.more > 0) lines.push(`... e mais ${r.more} item(s)`);
-      setCheckStatus('links', 'warn', [`${r.totalBroken} link(s) quebrado(s):`, ...lines]);
+      setCourseCheck(courseId, 'links', 'warn', [`${r.totalBroken} link(s) quebrado(s):`, ...lines]);
     }
   } catch (err) {
-    setCheckStatus('links', 'error', 'Erro: ' + err.message);
+    setCourseCheck(courseId, 'links', 'error', 'Erro: ' + err.message);
   }
+}
+
+function clAutoExpand(courseId) {
+  const badge = $('cl-badge-' + courseId);
+  if (!badge || badge.querySelector('.spinner-sm')) return;
+  if (badge.textContent === '⚠️' || badge.textContent === '❌') {
+    const body = $('cl-body-' + courseId);
+    if (body && body.style.display === 'none') {
+      body.style.display = 'block';
+      $('cl-toggle-' + courseId)?.classList.add('open');
+    }
+  }
+}
+
+async function runChecklist() {
+  const courseIds = parseCourseIds($('cl-courses-input').value);
+  if (!courseIds.length) {
+    alert('Informe pelo menos um código de curso válido (somente números).');
+    return;
+  }
+
+  const tabs   = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tabId  = tabs[0]?.id;
+  const tabUrl = tabs[0]?.url || '';
+  if (!tabUrl.includes('instructure.com')) {
+    alert('Abra uma página do Canvas (instructure.com) antes de rodar o checklist.');
+    return;
+  }
+
+  const includeLinks = $('cl-toggle-links').checked;
+  $('btn-run-checklist').disabled = true;
+  $('btn-run-checklist').innerHTML = '<span class="spinner"></span>Verificando...';
+
+  const results  = $('checklist-results');
+  const progress = $('cl-progress');
+  results.innerHTML = '';
+  progress.style.display = 'block';
+  progress.textContent   = `0 / ${courseIds.length} cursos verificados`;
+
+  courseIds.forEach(id => {
+    results.appendChild(buildCourseCard(id));
+    if (!includeLinks) setCourseCheck(id, 'links', 'skip');
+  });
+
+  let done = 0;
+  await Promise.all(courseIds.map(async id => {
+    try {
+      const data = await clRunChecks1to5(tabId, id);
+      applyCourseResults(id, data);
+    } catch (err) {
+      CHECKLIST_ITEMS.slice(0, 5).forEach(item =>
+        setCourseCheck(id, item.id, 'error', 'Erro: ' + err.message)
+      );
+    }
+    done++;
+    progress.textContent = `${done} / ${courseIds.length} cursos verificados${includeLinks ? ' (links pendentes)' : ''}`;
+    if (!includeLinks) clAutoExpand(id);
+  }));
+
+  if (includeLinks) {
+    for (const id of courseIds) {
+      await clRunLinkCheck(tabId, id);
+      clAutoExpand(id);
+    }
+  }
+
+  const okCount = courseIds.filter(id => $('cl-badge-' + id)?.textContent === '✅').length;
+  progress.textContent = `Concluído — ${okCount}/${courseIds.length} curso(s) sem pendências`;
+  $('btn-run-checklist').disabled = false;
+  $('btn-run-checklist').textContent = '▶  Rodar verificações';
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────
@@ -2247,14 +2281,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-canvas-revisions').addEventListener('click', () => show('canvas-revisions'));
   $('btn-apply-revisions-filter').addEventListener('click', doFetchRevisions);
   $('btn-back-canvas-revisions').addEventListener('click', () => show('canvas'));
-  $('btn-canvas-checklist').addEventListener('click', async () => {
-    show('checklist');
-    buildChecklistView();
-    const id = await getCanvasCourseId();
-    $('checklist-course-label').textContent = id ? `Curso #${id}` : 'Nenhum curso detectado na aba ativa';
-  });
+  $('btn-canvas-checklist').addEventListener('click', () => show('checklist'));
   $('btn-back-checklist').addEventListener('click', () => show('canvas'));
   $('btn-run-checklist').addEventListener('click', runChecklist);
+  $('btn-cl-use-tab').addEventListener('click', async () => {
+    const id = await getCanvasCourseId();
+    if (!id) { alert('Nenhum curso Canvas detectado na aba ativa.'); return; }
+    const input    = $('cl-courses-input');
+    const existing = parseCourseIds(input.value);
+    if (!existing.includes(id)) {
+      input.value = (input.value.trim() ? input.value.trim() + '\n' : '') + id;
+    }
+  });
   $('btn-back-record-detail').addEventListener('click', () => {
     const from = $('btn-back-record-detail').dataset.from || 'main';
     show(from);
