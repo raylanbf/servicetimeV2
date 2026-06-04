@@ -1063,6 +1063,7 @@ function blockDuplicatorMain() {
   const doc  = body.ownerDocument;
   const win  = doc.defaultView;
   window.__svcDupActive = true;
+  doc.documentElement.style.cursor = 'copy';
 
   let phase   = 'source';   // 'source' (origem) | 'dest' (destino)
   let current = null;       // elemento destacado no momento
@@ -1188,6 +1189,7 @@ function blockDuplicatorMain() {
 
   function cleanup() {
     unpaint(current);
+    doc.documentElement.style.cursor = '';
     doc.removeEventListener('mousemove', onMove, true);
     doc.removeEventListener('mousedown', onDown, true);
     doc.removeEventListener('keydown', onKey, true);
@@ -1459,6 +1461,8 @@ function blockMapMain() {
 
   if (!items.length) { alert('Nenhum bloco reconhecido nesta página.'); return; }
 
+  doc.documentElement.style.cursor = 'pointer';
+
   let selected = null, actionsRow = null, activeRow = null;
   let dragRow = null, dragEl = null, mKey = false;
   const pulseStyle = doc.createElement('style');
@@ -1707,14 +1711,15 @@ function blockMapMain() {
 
   function onKey(e) {
     if (e.key === 'Escape') { cleanup(); return; }
-    if (e.key === 'm' || e.key === 'M') { mKey = true; panel.style.cursor = 'grab'; }
+    if (e.key === 'm' || e.key === 'M') { mKey = true; panel.style.cursor = 'grab'; doc.documentElement.style.cursor = 'grab'; }
   }
   function onKeyUp(e) {
-    if (e.key === 'm' || e.key === 'M') { mKey = false; panel.style.cursor = ''; cancelDrag(); }
+    if (e.key === 'm' || e.key === 'M') { mKey = false; panel.style.cursor = ''; doc.documentElement.style.cursor = 'pointer'; cancelDrag(); }
   }
   function cleanup() {
     items.forEach(it => unpaint(it.el));
     unpaint(selected);
+    doc.documentElement.style.cursor = '';
     pulseStyle.remove();
     document.removeEventListener('keydown', onKey, true);
     document.removeEventListener('keyup', onKeyUp, true);
