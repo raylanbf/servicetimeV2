@@ -1885,14 +1885,31 @@ function updateCourseBadge(courseId) {
 }
 
 // Checks 1-5 consolidados num único executeScript por curso
-async function clRunChecks1to5(tabId, courseId) {
+async function clRunChecks1to5(tabId, courseId, includeLoremIpsum) {
   const result = await chrome.scripting.executeScript({
     target: { tabId },
-    func: async (courseId) => {
+    func: async (courseId, includeLoremIpsum) => {
+      const delay = ms => new Promise(r => setTimeout(r, ms));
+
+      // Fetch com proteção de rate limit do Canvas
+      async function safeFetch(url, opts = {}) {
+        for (let attempt = 0; attempt <= 2; attempt++) {
+          const res = await fetch(url, opts);
+          if (res.status === 429) {
+            await delay(2000 * (attempt + 1));
+            continue;
+          }
+          const remaining = parseFloat(res.headers.get('X-Rate-Limit-Remaining') || '999');
+          if (remaining < 30) await delay(800);
+          return res;
+        }
+        throw new Error('Rate limit esgotado após 3 tentativas');
+      }
+
       async function fetchAll(url) {
         const out = []; let next = url;
         while (next) {
-          const res = await fetch(next);
+          const res = await safeFetch(next);
           if (!res.ok) break;
           const data = await res.json();
           if (Array.isArray(data)) out.push(...data);
@@ -1920,34 +1937,39 @@ async function clRunChecks1to5(tabId, courseId) {
         }
       } catch (e) { out.novosVideos = { error: e.message }; }
 
-      // 2: Lorem Ipsum
-      try {
-        const pages = await fetchAll(`/api/v1/courses/${courseId}/pages?per_page=100`);
-        const found = [];
-        for (let i = 0; i < pages.length; i += 10) {
-          const results = await Promise.all(pages.slice(i, i + 10).map(async p => {
-            try {
-              const res = await fetch(`/api/v1/courses/${courseId}/pages/${p.url}`);
-              if (!res.ok) return null;
-              const d = await res.json();
-              return (d.body || '').toLowerCase().includes('lorem ipsum') ? p.title : null;
-            } catch { return null; }
-          }));
-          found.push(...results.filter(Boolean));
-        }
-        out.loremIpsum = { found };
-      } catch (e) { out.loremIpsum = { error: e.message }; }
+      // 2: Lorem Ipsum (apenas se habilitado)
+      if (!includeLoremIpsum) {
+        out.loremIpsum = { skipped: true };
+      } else {
+        try {
+          const pages = await fetchAll(`/api/v1/courses/${courseId}/pages?per_page=100`);
+          const found = [];
+          for (let i = 0; i < pages.length; i += 3) {      // lotes de 3 para não sobrecarregar
+            const results = await Promise.all(pages.slice(i, i + 3).map(async p => {
+              try {
+                const res = await safeFetch(`/api/v1/courses/${courseId}/pages/${p.url}`);
+                if (!res.ok) return null;
+                const d = await res.json();
+                return (d.body || '').toLowerCase().includes('lorem ipsum') ? p.title : null;
+              } catch { return null; }
+            }));
+            found.push(...results.filter(Boolean));
+            if (i + 3 < pages.length) await delay(150);    // pausa entre lotes
+          }
+          out.loremIpsum = { found };
+        } catch (e) { out.loremIpsum = { error: e.message }; }
+      }
 
       // 3: Avisos
       try {
-        const res = await fetch(`/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=100`);
+        const res = await safeFetch(`/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=100`);
         const list = res.ok ? (await res.json()) : [];
         out.avisos = { count: list.length, titles: list.slice(0, 3).map(d => d.title) };
       } catch (e) { out.avisos = { error: e.message }; }
 
       // 4: Fóruns
       try {
-        const res = await fetch(`/api/v1/courses/${courseId}/discussion_topics?per_page=100`);
+        const res = await safeFetch(`/api/v1/courses/${courseId}/discussion_topics?per_page=100`);
         const list = res.ok ? (await res.json()).filter(d => !d.is_announcement) : [];
         out.foruns = { count: list.length, titles: list.slice(0, 3).map(d => d.title) };
       } catch (e) { out.foruns = { error: e.message }; }
@@ -1974,7 +1996,7 @@ async function clRunChecks1to5(tabId, courseId) {
 
       return out;
     },
-    args: [courseId],
+    args: [courseId, includeLoremIpsum],
   });
   return result[0]?.result || null;
 }
@@ -1994,14 +2016,16 @@ function applyCourseResults(courseId, data) {
 
   // 2: Lorem Ipsum
   const li = data.loremIpsum;
-  if (li?.error) {
-    setCourseCheck(courseId, 'lorem-ipsum', 'error', 'Erro: ' + li.error);
-  } else if (!li?.found?.length) {
-    setCourseCheck(courseId, 'lorem-ipsum', 'ok', 'Nenhuma página com Lorem Ipsum');
-  } else {
-    const lines = li.found.slice(0, 5).map(t => `📄 ${t}`);
-    if (li.found.length > 5) lines.push(`... e mais ${li.found.length - 5}`);
-    setCourseCheck(courseId, 'lorem-ipsum', 'warn', [`${li.found.length} página(s):`, ...lines]);
+  if (!li?.skipped) {
+    if (li?.error) {
+      setCourseCheck(courseId, 'lorem-ipsum', 'error', 'Erro: ' + li.error);
+    } else if (!li?.found?.length) {
+      setCourseCheck(courseId, 'lorem-ipsum', 'ok', 'Nenhuma página com Lorem Ipsum');
+    } else {
+      const lines = li.found.slice(0, 5).map(t => `📄 ${t}`);
+      if (li.found.length > 5) lines.push(`... e mais ${li.found.length - 5}`);
+      setCourseCheck(courseId, 'lorem-ipsum', 'warn', [`${li.found.length} página(s):`, ...lines]);
+    }
   }
 
   // 3: Avisos
@@ -2168,7 +2192,8 @@ async function runChecklist() {
     return;
   }
 
-  const includeLinks = $('cl-toggle-links').checked;
+  const includeLoremIpsum = $('cl-toggle-lorem').checked;
+  const includeLinks      = $('cl-toggle-links').checked;
   $('btn-run-checklist').disabled = true;
   $('btn-run-checklist').innerHTML = '<span class="spinner"></span>Verificando...';
 
@@ -2180,18 +2205,22 @@ async function runChecklist() {
 
   courseIds.forEach(id => {
     results.appendChild(buildCourseCard(id));
-    if (!includeLinks) setCourseCheck(id, 'links', 'skip');
+    if (!includeLoremIpsum) setCourseCheck(id, 'lorem-ipsum', 'skip');
+    if (!includeLinks)      setCourseCheck(id, 'links',       'skip');
   });
 
   let done = 0;
-  await Promise.all(courseIds.map(async id => {
+  await Promise.all(courseIds.map(async (id, index) => {
+    // Escalonamento: cada curso começa 300ms depois do anterior
+    if (index > 0) await new Promise(r => setTimeout(r, index * 300));
     try {
-      const data = await clRunChecks1to5(tabId, id);
+      const data = await clRunChecks1to5(tabId, id, includeLoremIpsum);
       applyCourseResults(id, data);
     } catch (err) {
-      CHECKLIST_ITEMS.slice(0, 5).forEach(item =>
-        setCourseCheck(id, item.id, 'error', 'Erro: ' + err.message)
-      );
+      CHECKLIST_ITEMS.slice(0, 5).forEach(item => {
+        if (!includeLoremIpsum && item.id === 'lorem-ipsum') return;
+        setCourseCheck(id, item.id, 'error', 'Erro: ' + err.message);
+      });
     }
     done++;
     progress.textContent = `${done} / ${courseIds.length} cursos verificados${includeLinks ? ' (links pendentes)' : ''}`;
