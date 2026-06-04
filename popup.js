@@ -1222,6 +1222,7 @@ function blockMoverMain() {
   const doc  = body.ownerDocument;
   const win  = doc.defaultView;
   window.__svcMoveActive = true;
+  doc.documentElement.style.cursor = 'grab';
 
   let current = null;    // bloco destacado no hover
   let dragEl  = null;    // bloco sendo arrastado
@@ -1235,14 +1236,14 @@ function blockMoverMain() {
   bar.id = '__svc-move-bar__';
   Object.assign(bar.style, { position:'fixed', top:'0', left:'0', right:'0', zIndex:'2147483647',
     background:'#1e1e2e', color:'#e2e8f0', font:'13px system-ui,sans-serif', padding:'8px 14px',
-    textAlign:'center', boxShadow:'0 2px 8px rgba(0,0,0,.4)' });
+    textAlign:'center', boxShadow:'0 2px 8px rgba(0,0,0,.4)', cursor:'default' });
   bar.innerHTML = '✋ <b>Reorganizar blocos</b> — arraste um bloco para mudar a ordem. <span style="opacity:.7">↑/↓ ajusta o que pega · a linha verde mostra onde cai · Ctrl+Z desfaz · ESC sai</span>';
   document.body.appendChild(bar);
 
+  // Linha de drop inline (inserida no DOM entre blocos, permite scrollIntoView)
   const line = doc.createElement('div');
-  Object.assign(line.style, { position:'absolute', height:'3px', background:'#22c55e', borderRadius:'2px',
-    zIndex:'2147483647', pointerEvents:'none', display:'none', boxShadow:'0 0 5px #22c55e' });
-  body.appendChild(line);
+  Object.assign(line.style, { height: '3px', background: '#22c55e', borderRadius: '2px',
+    margin: '2px 0', pointerEvents: 'none', boxShadow: '0 0 10px 3px rgba(34,197,94,0.6)' });
 
   function blockOf(node) {
     let el = node && node.nodeType === 3 ? node.parentElement : node;
@@ -1268,11 +1269,11 @@ function blockMoverMain() {
     unpaint(current); current = el; paint(current, '#3b82f6');
   }
   function posLine(sib, isBefore) {
-    const r = sib.getBoundingClientRect();
-    line.style.top   = ((isBefore ? r.top : r.bottom) + win.scrollY - 1) + 'px';
-    line.style.left  = (r.left + win.scrollX) + 'px';
-    line.style.width = r.width + 'px';
-    line.style.display = 'block';
+    const prevSib = line.previousElementSibling;
+    if (isBefore) sib.before(line); else sib.after(line);
+    if (prevSib !== line.previousElementSibling) {
+      line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
   }
   function flash(msg) {
     const t = document.createElement('div'); t.textContent = msg;
@@ -1298,7 +1299,7 @@ function blockMoverMain() {
         const r = s.getBoundingClientRect();
         if (e.clientY >= r.top && e.clientY <= r.bottom) { found = s; break; }
       }
-      if (!found) { overEl = null; line.style.display = 'none'; return; }
+      if (!found) { overEl = null; line.remove(); return; }
       const r = found.getBoundingClientRect();
       before = (e.clientY < r.top + r.height / 2);
       overEl = found;
@@ -1320,8 +1321,8 @@ function blockMoverMain() {
     if (dragging) {
       e.preventDefault(); e.stopPropagation();
       dragEl.style.opacity = '';
-      doc.documentElement.style.cursor = '';
-      line.style.display = 'none';
+      doc.documentElement.style.cursor = 'grab';
+      line.remove();
       if (overEl && overEl !== dragEl) {
         const ref = before ? overEl : overEl.nextSibling;
         if (ref !== dragEl) {
