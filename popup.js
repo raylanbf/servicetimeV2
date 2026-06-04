@@ -1459,7 +1459,7 @@ function blockMapMain() {
   if (!items.length) { alert('Nenhum bloco reconhecido nesta página.'); return; }
 
   let selected = null, actionsRow = null, activeRow = null;
-  let dragRow = null, dragEl = null, mKey = false;
+  let dragRow = null, dragEl = null, mKey = false, scrollRaf = null;
   const pulseStyle = doc.createElement('style');
   pulseStyle.textContent = '@keyframes __svcMapPulse{0%,100%{box-shadow:0 0 0 3px #22c55e,0 0 6px 2px rgba(34,197,94,.45)}50%{box-shadow:0 0 0 6px #22c55e,0 0 24px 10px rgba(34,197,94,.9)}}';
   (doc.head || doc.documentElement).appendChild(pulseStyle);
@@ -1548,6 +1548,16 @@ function blockMapMain() {
   Object.assign(editorLine.style, { height: '3px', background: '#22c55e', margin: '2px 0', borderRadius: '2px',
     boxShadow: '0 0 10px 3px rgba(34,197,94,0.6)', pointerEvents: 'none' });
 
+  function scrollTick() {
+    if (!dragRow || !editorLine.parentNode) { scrollRaf = null; return; }
+    const r = editorLine.getBoundingClientRect();
+    const vh = win.innerHeight;
+    const ZONE = 80, SPEED = 8;
+    if (r.top < ZONE) win.scrollBy(0, -Math.ceil(SPEED * (1 - r.top / ZONE)));
+    else if (r.bottom > vh - ZONE) win.scrollBy(0, Math.ceil(SPEED * (1 - (vh - r.bottom) / ZONE)));
+    scrollRaf = win.requestAnimationFrame(scrollTick);
+  }
+
   function cancelDrag() {
     if (dragRow) dragRow.style.opacity = '';
     document.body.style.cursor = '';
@@ -1555,6 +1565,7 @@ function blockMapMain() {
     dragRow = null; dragEl = null;
     dropLine.style.display = 'none';
     editorLine.remove();
+    if (scrollRaf) { win.cancelAnimationFrame(scrollRaf); scrollRaf = null; }
   }
 
   function onDragMove(e) {
@@ -1650,6 +1661,8 @@ function blockMapMain() {
       dragRow = row; dragEl = el;
       row.style.opacity = '0.45';
       document.body.style.cursor = 'grabbing';
+      if (scrollRaf) win.cancelAnimationFrame(scrollRaf);
+      scrollRaf = win.requestAnimationFrame(scrollTick);
     });
     return row;
   }
