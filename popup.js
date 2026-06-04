@@ -1458,7 +1458,7 @@ function blockMapMain() {
 
   if (!items.length) { alert('Nenhum bloco reconhecido nesta página.'); return; }
 
-  let selected = null, actionsRow = null;
+  let selected = null, actionsRow = null, activeRow = null;
   let dragRow = null, dragEl = null, mKey = false;
   const pulseStyle = doc.createElement('style');
   pulseStyle.textContent = '@keyframes __svcMapPulse{0%,100%{box-shadow:0 0 0 3px #22c55e,0 0 6px 2px rgba(34,197,94,.45)}50%{box-shadow:0 0 0 6px #22c55e,0 0 24px 10px rgba(34,197,94,.9)}}';
@@ -1614,6 +1614,7 @@ function blockMapMain() {
       selected = el;
       paint(selected, '#22c55e', true);
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setActiveRow(row);
       openActions(row, el);
     };
     if (isDup) {
@@ -1658,9 +1659,35 @@ function blockMapMain() {
     afterRow.insertAdjacentElement('afterend', actionsRow);
   }
 
-  items.forEach(it => panel.appendChild(
-    buildRow({ el: it.el, icon: it.icon, label: it.label, preview: it.preview, depth: it.depth, isDup: false })
-  ));
+  function setActiveRow(row) {
+    if (activeRow && activeRow !== row) activeRow.style.background = activeRow.__origBg || '';
+    activeRow = row;
+    if (row) { row.__origBg = row.style.background; row.style.background = 'rgba(34,197,94,0.15)'; }
+  }
+
+  function selectRowFromEditor(item) {
+    if (selected && selected !== item.el) unpaint(selected);
+    selected = item.el;
+    paint(selected, '#22c55e', true);
+    setActiveRow(item.row);
+    item.row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    openActions(item.row, item.el);
+  }
+
+  function onEditorClick(e) {
+    let target = e.target;
+    while (target && target !== body) {
+      const item = items.find(it => it.el === target);
+      if (item) { selectRowFromEditor(item); break; }
+      target = target.parentElement;
+    }
+  }
+  body.addEventListener('click', onEditorClick);
+
+  items.forEach(it => {
+    it.row = buildRow({ el: it.el, icon: it.icon, label: it.label, preview: it.preview, depth: it.depth, isDup: false });
+    panel.appendChild(it.row);
+  });
 
   function onKey(e) {
     if (e.key === 'Escape') { cleanup(); return; }
@@ -1677,6 +1704,7 @@ function blockMapMain() {
     document.removeEventListener('keyup', onKeyUp, true);
     document.removeEventListener('mousemove', onDragMove, true);
     document.removeEventListener('mouseup', onDragDrop, true);
+    body.removeEventListener('click', onEditorClick);
     cancelDrag();
     panel.remove();
     window.__svcMapCleanup = null;
