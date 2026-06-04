@@ -1768,6 +1768,415 @@ function blockMapMain() {
   document.body.appendChild(panel);
 }
 
+// ── Checklist de publicação ──────────────────────────────────────────
+
+const CHECKLIST_ITEMS = [
+  { id: 'novos-videos', name: 'Módulo "Novos Vídeos"',   icon: '🎬' },
+  { id: 'lorem-ipsum',  name: 'Lorem Ipsum nas páginas', icon: '📄' },
+  { id: 'avisos',       name: 'Avisos antigos',           icon: '📢' },
+  { id: 'foruns',       name: 'Fóruns antigos',           icon: '💬' },
+  { id: 'testes',       name: 'Testes e pontuações',      icon: '📊' },
+  { id: 'links',        name: 'Links quebrados',          icon: '🔗' },
+];
+
+function clEsc(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function buildChecklistView() {
+  const list = $('checklist-list');
+  list.innerHTML = '';
+  CHECKLIST_ITEMS.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'cl-item';
+    div.id = 'check-' + item.id;
+    div.innerHTML =
+      `<div class="cl-row">
+         <span class="cl-icon-left">${item.icon}</span>
+         <span class="cl-name">${item.name}</span>
+         <span class="cl-status" id="status-${item.id}">–</span>
+       </div>
+       <div class="cl-detail" id="detail-${item.id}" style="display:none"></div>`;
+    list.appendChild(div);
+  });
+}
+
+function setCheckStatus(id, status, detail) {
+  const item    = $('check-'  + id);
+  const statusEl = $('status-' + id);
+  const detailEl = $('detail-' + id);
+  if (!item) return;
+
+  item.className = 'cl-item' +
+    (status === 'ok'    ? ' cl-ok'    :
+     status === 'warn'  ? ' cl-warn'  :
+     status === 'error' ? ' cl-error' : '');
+
+  if (status === 'loading') {
+    statusEl.innerHTML = '<span class="spinner-sm"></span>';
+  } else {
+    statusEl.textContent =
+      status === 'ok' ? '✅' : status === 'warn' ? '⚠️' : status === 'error' ? '❌' : '–';
+  }
+
+  if (detail) {
+    const lines = Array.isArray(detail) ? detail : [detail];
+    detailEl.innerHTML = lines.map(l => `<div>${clEsc(l)}</div>`).join('');
+    detailEl.style.display = 'block';
+  } else {
+    detailEl.style.display = 'none';
+  }
+}
+
+async function runChecklist() {
+  const courseId = await getCanvasCourseId();
+  if (!courseId) {
+    alert('Abra um curso do Canvas antes de rodar o checklist.');
+    return;
+  }
+  $('checklist-course-label').textContent = `Curso #${courseId}`;
+  $('btn-run-checklist').disabled = true;
+  $('btn-run-checklist').innerHTML = '<span class="spinner"></span>Verificando...';
+
+  buildChecklistView();
+  CHECKLIST_ITEMS.forEach(item => setCheckStatus(item.id, 'loading'));
+
+  const tabs  = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tabId = tabs[0]?.id;
+  if (!tabId) return;
+
+  await Promise.all([
+    clCheck_novosVideos(tabId, courseId),
+    clCheck_loremIpsum(tabId, courseId),
+    clCheck_avisos(tabId, courseId),
+    clCheck_foruns(tabId, courseId),
+    clCheck_testes(tabId, courseId),
+    clCheck_links(tabId, courseId),
+  ]);
+
+  $('btn-run-checklist').disabled = false;
+  $('btn-run-checklist').textContent = '▶  Rodar verificações';
+}
+
+// ── Check 1: Módulo "Novos Vídeos" ───────────────────────────────────
+async function clCheck_novosVideos(tabId, courseId) {
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (courseId) => {
+        async function fetchAll(url) {
+          const out = []; let next = url;
+          while (next) {
+            const res = await fetch(next);
+            if (!res.ok) break;
+            const data = await res.json();
+            if (Array.isArray(data)) out.push(...data);
+            const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
+            next = m ? m[1] : null;
+          }
+          return out;
+        }
+        const modules = await fetchAll(`/api/v1/courses/${courseId}/modules?per_page=100`);
+        const mod = modules.find(m => {
+          const n = m.name.toLowerCase()
+            .replace(/[áàãâä]/g, 'a').replace(/[éèêë]/g, 'e')
+            .replace(/[íìîï]/g, 'i').replace(/[óòõôö]/g, 'o').replace(/[úùûü]/g, 'u');
+          return n.includes('novos videos');
+        });
+        if (!mod) return { found: false };
+        const items = await fetchAll(`/api/v1/courses/${courseId}/modules/${mod.id}/items?per_page=100`);
+        return { found: true, name: mod.name, count: items.length };
+      },
+      args: [courseId],
+    });
+    const r = result[0]?.result;
+    if (r == null) { setCheckStatus('novos-videos', 'error', 'Erro ao verificar módulos'); return; }
+    if (!r.found) {
+      setCheckStatus('novos-videos', 'ok', 'Módulo "Novos Vídeos" não encontrado');
+    } else if (r.count === 0) {
+      setCheckStatus('novos-videos', 'warn', `Módulo "${r.name}" existe mas está vazio — deve ser apagado`);
+    } else {
+      setCheckStatus('novos-videos', 'warn', `Módulo "${r.name}" existe com ${r.count} vídeo(s)`);
+    }
+  } catch (err) {
+    setCheckStatus('novos-videos', 'error', 'Erro: ' + err.message);
+  }
+}
+
+// ── Check 2: Lorem Ipsum ─────────────────────────────────────────────
+async function clCheck_loremIpsum(tabId, courseId) {
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (courseId) => {
+        async function fetchAll(url) {
+          const out = []; let next = url;
+          while (next) {
+            const res = await fetch(next);
+            if (!res.ok) break;
+            const data = await res.json();
+            if (Array.isArray(data)) out.push(...data);
+            const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
+            next = m ? m[1] : null;
+          }
+          return out;
+        }
+        const pages = await fetchAll(`/api/v1/courses/${courseId}/pages?per_page=100`);
+        const found = [];
+        for (let i = 0; i < pages.length; i += 10) {
+          const batch = pages.slice(i, i + 10);
+          const results = await Promise.all(batch.map(async p => {
+            try {
+              const res = await fetch(`/api/v1/courses/${courseId}/pages/${p.url}`);
+              if (!res.ok) return null;
+              const data = await res.json();
+              return (data.body || '').toLowerCase().includes('lorem ipsum') ? p.title : null;
+            } catch { return null; }
+          }));
+          found.push(...results.filter(Boolean));
+        }
+        return { found };
+      },
+      args: [courseId],
+    });
+    const r = result[0]?.result;
+    if (r == null) { setCheckStatus('lorem-ipsum', 'error', 'Erro ao verificar páginas'); return; }
+    if (r.found.length === 0) {
+      setCheckStatus('lorem-ipsum', 'ok', 'Nenhuma página com Lorem Ipsum encontrada');
+    } else {
+      const lines = r.found.slice(0, 5).map(t => `📄 ${t}`);
+      if (r.found.length > 5) lines.push(`... e mais ${r.found.length - 5} página(s)`);
+      setCheckStatus('lorem-ipsum', 'warn', [`${r.found.length} página(s) com Lorem Ipsum:`, ...lines]);
+    }
+  } catch (err) {
+    setCheckStatus('lorem-ipsum', 'error', 'Erro: ' + err.message);
+  }
+}
+
+// ── Check 3: Avisos ──────────────────────────────────────────────────
+async function clCheck_avisos(tabId, courseId) {
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (courseId) => {
+        const res = await fetch(`/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=100`);
+        if (!res.ok) return { count: 0, titles: [] };
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : [];
+        return { count: list.length, titles: list.slice(0, 3).map(d => d.title) };
+      },
+      args: [courseId],
+    });
+    const r = result[0]?.result;
+    if (r == null) { setCheckStatus('avisos', 'error', 'Erro ao verificar avisos'); return; }
+    if (r.count === 0) {
+      setCheckStatus('avisos', 'ok', 'Nenhum aviso encontrado');
+    } else {
+      const lines = r.titles.map(t => `📢 ${t}`);
+      if (r.count > 3) lines.push(`... e mais ${r.count - 3}`);
+      setCheckStatus('avisos', 'warn', [`${r.count} aviso(s) encontrado(s):`, ...lines]);
+    }
+  } catch (err) {
+    setCheckStatus('avisos', 'error', 'Erro: ' + err.message);
+  }
+}
+
+// ── Check 4: Fóruns ──────────────────────────────────────────────────
+async function clCheck_foruns(tabId, courseId) {
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (courseId) => {
+        const res = await fetch(`/api/v1/courses/${courseId}/discussion_topics?per_page=100`);
+        if (!res.ok) return { count: 0, titles: [] };
+        const data = await res.json();
+        const list = (Array.isArray(data) ? data : []).filter(d => !d.is_announcement);
+        return { count: list.length, titles: list.slice(0, 3).map(d => d.title) };
+      },
+      args: [courseId],
+    });
+    const r = result[0]?.result;
+    if (r == null) { setCheckStatus('foruns', 'error', 'Erro ao verificar fóruns'); return; }
+    if (r.count === 0) {
+      setCheckStatus('foruns', 'ok', 'Nenhum fórum encontrado');
+    } else {
+      const lines = r.titles.map(t => `💬 ${t}`);
+      if (r.count > 3) lines.push(`... e mais ${r.count - 3}`);
+      setCheckStatus('foruns', 'warn', [`${r.count} fórum(ns) encontrado(s):`, ...lines]);
+    }
+  } catch (err) {
+    setCheckStatus('foruns', 'error', 'Erro: ' + err.message);
+  }
+}
+
+// ── Check 5: Testes e pontuações ─────────────────────────────────────
+async function clCheck_testes(tabId, courseId) {
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (courseId) => {
+        async function fetchAll(url) {
+          const out = []; let next = url;
+          while (next) {
+            const res = await fetch(next);
+            if (!res.ok) break;
+            const data = await res.json();
+            if (Array.isArray(data)) out.push(...data);
+            const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
+            next = m ? m[1] : null;
+          }
+          return out;
+        }
+        const [quizzes, assignments] = await Promise.all([
+          fetchAll(`/api/v1/courses/${courseId}/quizzes?per_page=100`),
+          fetchAll(`/api/v1/courses/${courseId}/assignments?per_page=100`),
+        ]);
+        const assignByQuizId = {};
+        assignments.forEach(a => { if (a.quiz_id) assignByQuizId[a.quiz_id] = a; });
+        return quizzes.map(q => {
+          const a = assignByQuizId[q.id] || {};
+          return {
+            title:           q.title,
+            question_count:  q.question_count  || 0,
+            points_possible: q.points_possible || 0,
+            published:       a.published  !== undefined ? a.published  : (q.published  || false),
+            post_to_sis:     a.post_to_sis !== undefined ? a.post_to_sis : false,
+          };
+        });
+      },
+      args: [courseId],
+    });
+
+    const quizzes = result[0]?.result;
+    if (!quizzes) { setCheckStatus('testes', 'error', 'Erro ao verificar testes'); return; }
+
+    const issues  = [];
+    const t = s => s.toLowerCase();
+
+    // Prova Final
+    const provaFinal = quizzes.find(q => t(q.title).includes('prova final'));
+    if (!provaFinal) {
+      issues.push('Prova Final não encontrada');
+    } else {
+      if (provaFinal.points_possible !== 40)  issues.push(`Prova Final: ${provaFinal.points_possible}pts (esperado: 40)`);
+      if (provaFinal.question_count  !== 10)  issues.push(`Prova Final: ${provaFinal.question_count} perguntas (esperado: 10)`);
+      if (!provaFinal.published)              issues.push('Prova Final: não publicada');
+      if (!provaFinal.post_to_sis)            issues.push('Prova Final: sincronização SIS não habilitada');
+    }
+
+    // Atividades Objetivas
+    const atividades = quizzes.filter(q => t(q.title).includes('atividade objetiva'));
+    if (atividades.length === 0) {
+      issues.push('Nenhuma Atividade Objetiva encontrada');
+    } else {
+      const sumPts = atividades.reduce((s, a) => s + a.points_possible, 0);
+      if (sumPts !== 60) issues.push(`Atividades Objetivas: soma ${sumPts}pts (esperado: 60)`);
+      atividades.forEach(a => {
+        if (!a.published)    issues.push(`"${a.title}": não publicada`);
+        if (!a.post_to_sis)  issues.push(`"${a.title}": SIS não habilitado`);
+      });
+    }
+
+    // Total
+    const atividadesPts = atividades.reduce((s, a) => s + a.points_possible, 0);
+    const total = (provaFinal?.points_possible || 0) + atividadesPts;
+    if (provaFinal && atividades.length && total !== 100) issues.push(`Total: ${total}pts (esperado: 100)`);
+
+    // Pesquisa
+    const pesquisa = quizzes.find(q =>
+      t(q.title).includes('como você avalia') || t(q.title).includes('como voce avalia')
+    );
+    if (!pesquisa) {
+      issues.push('Pesquisa de avaliação não encontrada');
+    } else if (pesquisa.question_count !== 5) {
+      issues.push(`Pesquisa: ${pesquisa.question_count} perguntas (esperado: 5)`);
+    }
+
+    if (issues.length === 0) {
+      setCheckStatus('testes', 'ok', [
+        `Prova Final: ${provaFinal.points_possible}pts · ${provaFinal.question_count} perguntas`,
+        `Atividades Objetivas (${atividades.length}): ${atividadesPts}pts`,
+        `Pesquisa: ${pesquisa?.question_count} perguntas`,
+        `Total: ${total}pts`,
+      ]);
+    } else {
+      setCheckStatus('testes', 'warn', issues);
+    }
+  } catch (err) {
+    setCheckStatus('testes', 'error', 'Erro: ' + err.message);
+  }
+}
+
+// ── Check 6: Links quebrados ─────────────────────────────────────────
+async function clCheck_links(tabId, courseId) {
+  setCheckStatus('links', 'loading', 'Iniciando validação... (pode demorar alguns minutos)');
+  try {
+    const result = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (courseId) => {
+        const rawCsrf = document.cookie.split(';').map(c => c.trim())
+          .find(c => c.startsWith('_csrf_token='));
+        const csrf = rawCsrf
+          ? decodeURIComponent(rawCsrf.split('=').slice(1).join('='))
+          : (document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
+
+        await fetch(`/api/v1/courses/${courseId}/link_validation`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+          body: JSON.stringify({}),
+        });
+
+        for (let i = 0; i < 60; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          const res = await fetch(`/api/v1/courses/${courseId}/link_validation`);
+          if (!res.ok) return { completed: false, failed: true };
+          const data = await res.json();
+
+          if (data.workflow_state === 'completed') {
+            let totalBroken = 0;
+            const brokenItems = [];
+            const results = data.results || {};
+            const allItems = Array.isArray(results)
+              ? results
+              : Object.values(results).flat().filter(Boolean);
+
+            allItems.forEach(item => {
+              const links = item.invalid_links || [];
+              if (links.length > 0) {
+                totalBroken += links.length;
+                brokenItems.push(`${item.name || item.title}: ${links.length} link(s)`);
+              }
+            });
+            return { completed: true, totalBroken, brokenItems: brokenItems.slice(0, 5), more: Math.max(0, brokenItems.length - 5) };
+          }
+          if (data.workflow_state === 'failed') return { completed: false, failed: true };
+        }
+        return { completed: false, timeout: true };
+      },
+      args: [courseId],
+    });
+
+    const r = result[0]?.result;
+    if (!r) { setCheckStatus('links', 'error', 'Erro ao validar links'); return; }
+
+    if (!r.completed) {
+      setCheckStatus('links', r.failed ? 'error' : 'warn',
+        r.failed ? 'Validação falhou no servidor' : 'Tempo esgotado — tente rodar novamente');
+      return;
+    }
+
+    if (r.totalBroken === 0) {
+      setCheckStatus('links', 'ok', 'Nenhum link quebrado encontrado');
+    } else {
+      const lines = [...r.brokenItems];
+      if (r.more > 0) lines.push(`... e mais ${r.more} item(s)`);
+      setCheckStatus('links', 'warn', [`${r.totalBroken} link(s) quebrado(s):`, ...lines]);
+    }
+  } catch (err) {
+    setCheckStatus('links', 'error', 'Erro: ' + err.message);
+  }
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   const saved = await chrome.storage.local.get(null);
@@ -1838,6 +2247,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-canvas-revisions').addEventListener('click', () => show('canvas-revisions'));
   $('btn-apply-revisions-filter').addEventListener('click', doFetchRevisions);
   $('btn-back-canvas-revisions').addEventListener('click', () => show('canvas'));
+  $('btn-canvas-checklist').addEventListener('click', async () => {
+    show('checklist');
+    buildChecklistView();
+    const id = await getCanvasCourseId();
+    $('checklist-course-label').textContent = id ? `Curso #${id}` : 'Nenhum curso detectado na aba ativa';
+  });
+  $('btn-back-checklist').addEventListener('click', () => show('canvas'));
+  $('btn-run-checklist').addEventListener('click', runChecklist);
   $('btn-back-record-detail').addEventListener('click', () => {
     const from = $('btn-back-record-detail').dataset.from || 'main';
     show(from);
