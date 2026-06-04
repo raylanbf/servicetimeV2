@@ -1459,7 +1459,7 @@ function blockMapMain() {
   if (!items.length) { alert('Nenhum bloco reconhecido nesta página.'); return; }
 
   let selected = null, actionsRow = null, activeRow = null;
-  let dragRow = null, dragEl = null, mKey = false, scrollRaf = null, lastMouseY = 0;
+  let dragRow = null, dragEl = null, mKey = false;
   const pulseStyle = doc.createElement('style');
   pulseStyle.textContent = '@keyframes __svcMapPulse{0%,100%{box-shadow:0 0 0 3px #22c55e,0 0 6px 2px rgba(34,197,94,.45)}50%{box-shadow:0 0 0 6px #22c55e,0 0 24px 10px rgba(34,197,94,.9)}}';
   (doc.head || doc.documentElement).appendChild(pulseStyle);
@@ -1548,19 +1548,6 @@ function blockMapMain() {
   Object.assign(editorLine.style, { height: '3px', background: '#22c55e', margin: '2px 0', borderRadius: '2px',
     boxShadow: '0 0 10px 3px rgba(34,197,94,0.6)', pointerEvents: 'none' });
 
-  function scrollTick() {
-    if (!dragRow) { scrollRaf = null; return; }
-    const pr = panel.getBoundingClientRect();
-    const ZONE = 80, SPEED = 10;
-    const relY = lastMouseY - pr.top;
-    const ph = pr.height;
-    if (relY >= 0 && relY < ZONE)
-      win.scrollBy(0, -Math.ceil(SPEED * (1 - relY / ZONE)));
-    else if (relY > ph - ZONE && relY <= ph)
-      win.scrollBy(0, Math.ceil(SPEED * (1 - (ph - relY) / ZONE)));
-    scrollRaf = window.requestAnimationFrame(scrollTick);
-  }
-
   function cancelDrag() {
     if (dragRow) dragRow.style.opacity = '';
     document.body.style.cursor = '';
@@ -1568,12 +1555,10 @@ function blockMapMain() {
     dragRow = null; dragEl = null;
     dropLine.style.display = 'none';
     editorLine.remove();
-    if (scrollRaf) { window.cancelAnimationFrame(scrollRaf); scrollRaf = null; }
   }
 
   function onDragMove(e) {
     if (!dragRow) return;
-    lastMouseY = e.clientY;
     const rows = [...panel.querySelectorAll('[data-map-row]')].filter(r => r !== dragRow);
     let placed = false;
     for (const r of rows) {
@@ -1584,7 +1569,13 @@ function blockMapMain() {
         dropLine.style.display = 'block';
         const targetEl = r.__el;
         if (targetEl && targetEl !== dragEl) {
+          const wasPlaced = !!editorLine.parentNode;
+          const prevSibling = editorLine.previousElementSibling;
           if (before) targetEl.before(editorLine); else targetEl.after(editorLine);
+          // Rola o editor para mostrar onde o elemento vai cair, só quando muda de posição
+          if (!wasPlaced || prevSibling !== editorLine.previousElementSibling) {
+            editorLine.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
         }
         placed = true;
         break;
@@ -1665,8 +1656,6 @@ function blockMapMain() {
       dragRow = row; dragEl = el;
       row.style.opacity = '0.45';
       document.body.style.cursor = 'grabbing';
-      if (scrollRaf) window.cancelAnimationFrame(scrollRaf);
-      scrollRaf = window.requestAnimationFrame(scrollTick);
     });
     return row;
   }
