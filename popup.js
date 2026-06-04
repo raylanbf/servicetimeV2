@@ -1459,6 +1459,7 @@ function blockMapMain() {
   if (!items.length) { alert('Nenhum bloco reconhecido nesta página.'); return; }
 
   let selected = null, actionsRow = null;
+  let dragRow = null, dragEl = null, mKey = false;
   const pulseStyle = doc.createElement('style');
   pulseStyle.textContent = '@keyframes __svcMapPulse{0%,100%{box-shadow:0 0 0 3px #22c55e,0 0 6px 2px rgba(34,197,94,.45)}50%{box-shadow:0 0 0 6px #22c55e,0 0 24px 10px rgba(34,197,94,.9)}}';
   (doc.head || doc.documentElement).appendChild(pulseStyle);
@@ -1535,9 +1536,68 @@ function blockMapMain() {
   head.appendChild(closeBtn);
   panel.appendChild(head);
 
+  const hint = document.createElement('div');
+  Object.assign(hint.style, { padding: '3px 12px 5px', fontSize: '10px', opacity: '.4', background: '#11111b', borderBottom: '1px solid #313244' });
+  hint.textContent = 'Segure M + arraste para reordenar';
+  panel.appendChild(hint);
+
+  const dropLine = document.createElement('div');
+  Object.assign(dropLine.style, { height: '2px', background: '#22c55e', margin: '0', display: 'none', pointerEvents: 'none' });
+
+  function cancelDrag() {
+    if (dragRow) dragRow.style.opacity = '';
+    document.body.style.cursor = '';
+    panel.style.cursor = '';
+    dragRow = null; dragEl = null;
+    dropLine.style.display = 'none';
+  }
+
+  function onDragMove(e) {
+    if (!dragRow) return;
+    const rows = [...panel.querySelectorAll('[data-map-row]')].filter(r => r !== dragRow);
+    let placed = false;
+    for (const r of rows) {
+      const rect = r.getBoundingClientRect();
+      if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+        if (e.clientY < rect.top + rect.height / 2) r.before(dropLine);
+        else r.after(dropLine);
+        dropLine.style.display = 'block';
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) dropLine.style.display = 'none';
+  }
+
+  function onDragDrop() {
+    if (!dragRow) return;
+    const next = dropLine.nextElementSibling;
+    const prev = dropLine.previousElementSibling;
+    if (dropLine.parentNode === panel) {
+      const targetRow = (next && next.dataset && next.dataset.mapRow) ? next
+        : (prev && prev.dataset && prev.dataset.mapRow) ? prev : null;
+      if (targetRow && targetRow !== dragRow) {
+        const targetEl = targetRow.__el;
+        const before = next === targetRow;
+        if (targetEl && dragEl && targetEl !== dragEl) {
+          const run = () => { if (before) targetEl.before(dragEl); else targetEl.after(dragEl); };
+          if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
+          if (ed.nodeChanged) ed.nodeChanged();
+          if (ed.fire) ed.fire('input');
+          if (ed.setDirty) ed.setDirty(true);
+          if (before) targetRow.before(dragRow); else targetRow.after(dragRow);
+          flash('↕ Bloco movido! (Ctrl+Z desfaz)');
+        }
+      }
+    }
+    cancelDrag();
+  }
+
   function buildRow({ el, icon, label, preview, depth, isDup }) {
     const row = document.createElement('div');
     row.__depth = depth;
+    row.__el = el;
+    row.dataset.mapRow = '1';
     Object.assign(row.style, { padding: '6px 12px 6px ' + (12 + depth * 14) + 'px', cursor: 'pointer',
       borderBottom: '1px solid #28283b', display: 'flex', alignItems: 'center', gap: '6px',
       background: isDup ? 'rgba(239,68,68,0.18)' : '' });
@@ -1547,8 +1607,8 @@ function blockMapMain() {
       (isDup ? ' <span style="color:#f87171;font-size:10px">(cópia)</span>' : '') + '</span>' +
       (preview ? '<span style="opacity:.55;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + preview.replace(/</g, '&lt;') + '</span>' : '');
     row.appendChild(info);
-    row.onmouseenter = () => { if (el !== selected) paint(el, '#f59e0b'); };
-    row.onmouseleave = () => { if (el !== selected) unpaint(el); };
+    row.onmouseenter = () => { if (el !== selected && !dragRow) paint(el, '#f59e0b'); };
+    row.onmouseleave = () => { if (el !== selected && !dragRow) unpaint(el); };
     row.onclick = () => {
       if (selected && selected !== el) unpaint(selected);
       selected = el;
@@ -1574,6 +1634,13 @@ function blockMapMain() {
       };
       row.appendChild(x);
     }
+    row.addEventListener('mousedown', e => {
+      if (!mKey) return;
+      e.preventDefault(); e.stopPropagation();
+      dragRow = row; dragEl = el;
+      row.style.opacity = '0.45';
+      document.body.style.cursor = 'grabbing';
+    });
     return row;
   }
 
@@ -1595,17 +1662,30 @@ function blockMapMain() {
     buildRow({ el: it.el, icon: it.icon, label: it.label, preview: it.preview, depth: it.depth, isDup: false })
   ));
 
-  function onKey(e) { if (e.key === 'Escape') cleanup(); }
+  function onKey(e) {
+    if (e.key === 'Escape') { cleanup(); return; }
+    if (e.key === 'm' || e.key === 'M') { mKey = true; panel.style.cursor = 'grab'; }
+  }
+  function onKeyUp(e) {
+    if (e.key === 'm' || e.key === 'M') { mKey = false; panel.style.cursor = ''; cancelDrag(); }
+  }
   function cleanup() {
     items.forEach(it => unpaint(it.el));
     unpaint(selected);
     pulseStyle.remove();
     document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('keyup', onKeyUp, true);
+    document.removeEventListener('mousemove', onDragMove, true);
+    document.removeEventListener('mouseup', onDragDrop, true);
+    cancelDrag();
     panel.remove();
     window.__svcMapCleanup = null;
   }
   window.__svcMapCleanup = cleanup;
   document.addEventListener('keydown', onKey, true);
+  document.addEventListener('keyup', onKeyUp, true);
+  document.addEventListener('mousemove', onDragMove, true);
+  document.addEventListener('mouseup', onDragDrop, true);
   document.body.appendChild(panel);
 }
 
