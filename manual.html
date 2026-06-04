@@ -247,6 +247,10 @@
   <a class="nav-item" href="#sheets">Google Sheets</a>
   <a class="nav-item" href="#canvas">Canvas LMS</a>
   <a class="nav-item" href="#canvas-revisions">↳ Histórico de edições</a>
+  <a class="nav-item" href="#canvas-editor">↳ Edição de página</a>
+  <a class="nav-item" href="#canvas-editor-dup">　· Duplicar bloco</a>
+  <a class="nav-item" href="#canvas-editor-move">　· Reorganizar blocos</a>
+  <a class="nav-item" href="#canvas-editor-map">　· Mapa de elementos</a>
 
   <div class="nav-section">Ferramentas</div>
   <a class="nav-item" href="#contexto">Menu de contexto</a>
@@ -458,6 +462,169 @@ PROVA FINAL</pre>
     </div>
   </section>
 
+  <!-- ── Edição de página ── -->
+  <section id="canvas-editor">
+    <h2><span class="icon">✏️</span>Edição de página</h2>
+    <p>Ferramentas disponíveis quando uma página do Canvas está aberta no <strong>editor visual (TinyMCE)</strong>. Acesse pelo painel lateral em <strong>Canvas LMS → Edição de página</strong>.</p>
+
+    <div class="callout blue">
+      Todas as operações usam o <strong>undoManager do TinyMCE</strong> — qualquer alteração pode ser desfeita com <strong>Ctrl+Z</strong> diretamente no editor. Nenhuma operação cria HTML extra: apenas reposiciona, copia ou remove elementos já existentes.
+    </div>
+
+    <table>
+      <thead><tr><th>Ferramenta</th><th>Cursor no editor</th><th>Atalho para sair</th></tr></thead>
+      <tbody>
+        <tr><td>📑 Duplicar bloco</td><td><code>copy</code> durante toda a seleção</td><td>ESC</td></tr>
+        <tr><td>✋ Reorganizar blocos</td><td><code>grab</code> ao ativar · <code>grabbing</code> ao arrastar</td><td>ESC</td></tr>
+        <tr><td>🗺 Mapa de elementos</td><td><code>pointer</code> quando aberto · <code>grab</code> com M · <code>grabbing</code> ao arrastar</td><td>ESC ou fechar painel</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ── Duplicar bloco ── -->
+  <section id="canvas-editor-dup">
+    <h2><span class="icon">📑</span>Duplicar bloco na página</h2>
+    <p>Copia um bloco HTML completo (div, seção, card etc.) para outra posição da mesma página, em dois cliques.</p>
+
+    <ol class="steps">
+      <li>Clique em <strong>📑 Duplicar bloco na página</strong> — o cursor muda para <code>copy</code> e uma barra de instrução aparece no topo</li>
+      <li>Passe o mouse sobre o bloco que deseja copiar — ele fica destacado em <strong>azul</strong></li>
+      <li>Use <strong>↑ / ↓</strong> para subir ou descer um nível na hierarquia HTML, se necessário</li>
+      <li>Clique no bloco de origem — a seleção muda para a fase de destino (destaque em <strong>verde</strong>)</li>
+      <li>Clique no bloco de destino — a cópia é inserida <strong>logo abaixo</strong> dele</li>
+    </ol>
+
+    <div class="callout yellow">
+      A cópia remove automaticamente atributos <code>id</code> do HTML copiado, evitando âncoras duplicadas na página.
+    </div>
+
+    <table>
+      <thead><tr><th>Ação</th><th>Como fazer</th></tr></thead>
+      <tbody>
+        <tr><td>Subir nível (pegar elemento pai)</td><td>Tecla <strong>↑</strong></td></tr>
+        <tr><td>Descer nível (pegar filho)</td><td>Tecla <strong>↓</strong></td></tr>
+        <tr><td>Cancelar</td><td><strong>ESC</strong></td></tr>
+        <tr><td>Desfazer</td><td><strong>Ctrl+Z</strong> no editor</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ── Reorganizar blocos ── -->
+  <section id="canvas-editor-move">
+    <h2><span class="icon">✋</span>Reorganizar blocos (arrastar)</h2>
+    <p>Reordena blocos HTML por arraste direto no editor. Ao ativar, o cursor muda para <code>grab</code> em todo o editor.</p>
+
+    <ol class="steps">
+      <li>Clique em <strong>✋ Reorganizar blocos (arrastar)</strong> — barra de instrução aparece no topo e o cursor vira <code>grab</code></li>
+      <li>Passe o mouse sobre o bloco que deseja mover — ele fica destacado em azul</li>
+      <li>Clique e arraste — cursor vira <code>grabbing</code> e o bloco fica semitransparente</li>
+      <li>Uma <strong>linha verde</strong> aparece entre os elementos indicando onde o bloco vai cair</li>
+      <li>Solte o mouse para confirmar o reposicionamento</li>
+    </ol>
+
+    <div class="callout">
+      O editor faz <strong>scroll automático</strong> enquanto você arrasta: a linha verde segue o destino e o editor rola suavemente para mostrar onde o elemento será inserido.
+    </div>
+
+    <table>
+      <thead><tr><th>Ação</th><th>Como fazer</th></tr></thead>
+      <tbody>
+        <tr><td>Subir nível (selecionar elemento pai)</td><td>Tecla <strong>↑</strong> (sem arrastar)</td></tr>
+        <tr><td>Descer nível (selecionar filho)</td><td>Tecla <strong>↓</strong> (sem arrastar)</td></tr>
+        <tr><td>Excluir elemento em hover</td><td>Tecla <strong>Del</strong> com elemento destacado</td></tr>
+        <tr><td>Desfazer</td><td><strong>Ctrl+Z</strong> no editor</td></tr>
+        <tr><td>Sair do modo</td><td><strong>ESC</strong></td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout yellow">
+      A operação <strong>não cria HTML extra</strong>: apenas reposiciona o nó DOM existente. O layout original é preservado.
+    </div>
+  </section>
+
+  <!-- ── Mapa de elementos ── -->
+  <section id="canvas-editor-map">
+    <h2><span class="icon">🗺</span>Mapa de elementos</h2>
+    <p>Abre um painel lateral (300 px) mostrando a <strong>hierarquia de elementos</strong> da página aberta no editor Canvas. Permite navegar, reordenar, duplicar e excluir blocos diretamente pelo painel.</p>
+
+    <h3>Estrutura do painel</h3>
+    <p>Cada linha representa um bloco classificado — com ícone, rótulo e prévia do texto. A indentação indica a profundidade na hierarquia HTML (até 4 níveis).</p>
+
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="title">🖼 Banner</div>
+        <div class="desc">Identificado pelo <code>id="banner"</code></div>
+      </div>
+      <div class="feature-card">
+        <div class="title">🏷 Faixa</div>
+        <div class="desc"><code>id="faixa"</code> ou cor de fundo específica</div>
+      </div>
+      <div class="feature-card">
+        <div class="title">▶ Vídeo</div>
+        <div class="desc">Elemento que contém um <code>&lt;iframe&gt;</code></div>
+      </div>
+      <div class="feature-card">
+        <div class="title">🃏 Card</div>
+        <div class="desc"><code>id</code> no padrão <code>mod1</code>, <code>mod2</code>… ou classe <code>card</code></div>
+      </div>
+      <div class="feature-card">
+        <div class="title">📝 Texto</div>
+        <div class="desc">Qualquer elemento com conteúdo textual não classificado</div>
+      </div>
+      <div class="feature-card">
+        <div class="title">▦ Container / Coluna</div>
+        <div class="desc">Classes <code>content-box</code>, <code>grid-row</code>, <code>col-*</code></div>
+      </div>
+    </div>
+
+    <h3>Interações com o painel</h3>
+    <table>
+      <thead><tr><th>Ação</th><th>Resultado</th></tr></thead>
+      <tbody>
+        <tr><td>Passar o mouse sobre uma linha</td><td>Destaca o elemento em <strong>laranja</strong> no editor</td></tr>
+        <tr><td>Clicar em uma linha</td><td>Seleciona o elemento (destaque verde pulsante) e abre ações</td></tr>
+        <tr><td>Clicar em elemento no editor</td><td>Painel scrolla e destaca a linha correspondente automaticamente</td></tr>
+        <tr><td>Botão <strong>📑 Duplicar</strong></td><td>Insere cópia do bloco logo abaixo, marcada em vermelho no painel</td></tr>
+        <tr><td>Botão <strong>📋 Copiar HTML</strong></td><td>Copia o HTML limpo do elemento para o clipboard</td></tr>
+        <tr><td>Botão <strong>✕</strong> na cópia</td><td>Remove a cópia do editor e do painel</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Reordenar elementos com drag</h3>
+    <ol class="steps">
+      <li>Mantenha a tecla <strong>M</strong> pressionada — cursor do painel e editor mudam para <code>grab</code></li>
+      <li>Clique e arraste uma linha do painel — ela fica semitransparente</li>
+      <li>Uma <strong>linha verde</strong> aparece no painel indicando a posição destino</li>
+      <li>Simultaneamente, uma <strong>linha verde com brilho</strong> é inserida no editor mostrando onde o bloco vai cair</li>
+      <li>O editor faz <strong>scroll automático</strong> conforme você passa sobre linhas fora da área visível</li>
+      <li>Solte o mouse para confirmar — tanto o painel quanto o editor são atualizados</li>
+    </ol>
+
+    <h3>Excluir elemento</h3>
+    <ol class="steps">
+      <li>Clique em uma linha do painel (ou clique no elemento no editor) para selecioná-lo</li>
+      <li>Pressione <strong>Del</strong> — o elemento é removido do editor e a linha some do painel</li>
+    </ol>
+
+    <div class="callout yellow">
+      <strong>Del</strong> funciona independentemente do foco — tanto com o cursor no painel quanto dentro do editor Canvas.
+    </div>
+
+    <table>
+      <thead><tr><th>Atalho</th><th>Ação</th></tr></thead>
+      <tbody>
+        <tr><td><strong>M</strong> (segurar)</td><td>Ativa modo drag no painel</td></tr>
+        <tr><td><strong>Del</strong></td><td>Exclui o elemento selecionado</td></tr>
+        <tr><td><strong>Ctrl+Z</strong></td><td>Desfaz a última operação no editor</td></tr>
+        <tr><td><strong>ESC</strong></td><td>Fecha o painel</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      Clicar duas vezes no botão <strong>🗺 Mapa de elementos</strong> fecha o painel (toggle).
+    </div>
+  </section>
+
   <!-- ── Menu de contexto ── -->
   <section id="contexto">
     <h2><span class="icon">🖱</span>Menu de contexto</h2>
@@ -486,7 +653,7 @@ PROVA FINAL</pre>
     <table>
       <thead><tr><th>Opção</th><th>Descrição</th></tr></thead>
       <tbody>
-        <tr><td>📐 Redimensionar vídeos</td><td>Ajusta iframes de vídeo às dimensões configuradas (padrão 620×398)</td></tr>
+        <tr><td>📐 Redimensionar vídeos</td><td>Ajusta iframes de vídeo às dimensões configuradas (padrão 620×398). Ignora automaticamente iframes de questionários e atividades LTI (<code>class="lti-embed"</code>)</td></tr>
         <tr><td>🔍 Localizar e substituir</td><td>Abre painel flutuante para busca e substituição em campos de texto da página</td></tr>
         <tr><td>🖊 Remover destaques da página</td><td>Remove todos os trechos marcados pelo marca-texto de uma só vez</td></tr>
       </tbody>
