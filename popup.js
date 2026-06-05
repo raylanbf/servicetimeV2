@@ -2088,17 +2088,10 @@ function applyCourseResults(courseId, data) {
   const total = (provaFinal?.points_possible || 0) + atividadesPts;
   if (provaFinal && atividades.length && total !== 100) issues.push(`Total: ${total}pts (esperado: 100)`);
 
-  const pesquisa = quizzes.find(q =>
-    tl(q.title).includes('como você avalia') || tl(q.title).includes('como voce avalia')
-  );
-  if (!pesquisa)                          issues.push('Pesquisa de avaliação não encontrada');
-  else if (pesquisa.question_count !== 5) issues.push(`Pesquisa: ${pesquisa.question_count} perguntas (esperado: 5)`);
-
   if (issues.length === 0) {
     setCourseCheck(courseId, 'testes', 'ok', [
       `Prova Final: ${provaFinal.points_possible}pts · ${provaFinal.question_count} perguntas`,
       `Atividades (${atividades.length}): ${atividadesPts}pts · Total: ${total}pts`,
-      `Pesquisa: ${pesquisa?.question_count ?? '?'} perguntas`,
     ]);
   } else {
     setCourseCheck(courseId, 'testes', 'warn', issues);
