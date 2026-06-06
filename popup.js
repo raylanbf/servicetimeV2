@@ -1426,6 +1426,11 @@ function blockMapMain() {
     if (id === 'videogeral') return { icon: '▦', label: 'Grade de cards' };
     if (/^mod\d+$/.test(id)) return { icon: '🃏', label: 'Card' };
     if (id === 'topo' || id === 'geral') return { icon: '▦', label: 'Container' };
+    if (/^borda-box-unidade\d+$/.test(id)) return { icon: '📚', label: 'Bloco de unidade' };
+    if (/^box-unidade\d+$/.test(id))       return { icon: '🔢', label: 'Número da unidade' };
+    if (/^titulo-unid\d+$/.test(id))       return { icon: '📌', label: 'Título da unidade' };
+    if (/^atividade-unid\d+$/.test(id))    return { icon: '✏️', label: 'Link de atividade' };
+    if (id === 'sintese')                  return { icon: '📋', label: 'Síntese' };
     if (/\bcard\b/.test(cls)) return { icon: '🃏', label: 'Card' };
     if (/\bgrid-row\b/.test(cls)) return { icon: '▦', label: 'Linha (grid)' };
     if (/\bcol-(xs|sm|md|lg|xl)-/.test(cls)) return { icon: '▥', label: 'Coluna' };
@@ -1439,10 +1444,18 @@ function blockMapMain() {
     if (tag === 'UL' || tag === 'OL') return { icon: '•', label: 'Lista' };
     if (/^H[1-6]$/.test(tag)) return { icon: '🔤', label: 'Título' };
     if (tag === 'HR') return { icon: '—', label: 'Separador' };
+    if (tag === 'P' && txt(el)) return { icon: '¶', label: 'Parágrafo' };
+    const styleAttr = el.getAttribute('style') || '';
+    if (styleAttr.includes('border') && styleAttr.includes('#4d4961'))
+      return { icon: '📚', label: 'Box de unidade' };
     const b = bg(el);
-    if (b === 'rgb(77, 73, 97)') return { icon: '📚', label: 'Box de unidade' };
-    if (b === 'rgb(43, 165, 136)') return { icon: '🏷', label: 'Faixa' };
-    if (b === 'rgb(255, 127, 80)') return { icon: '🏷', label: 'Faixa (destaque)' };
+    if (b === 'rgb(77, 73, 97)')    return { icon: '📚', label: 'Box de unidade' };
+    if (b === 'rgb(43, 165, 136)')  return { icon: '🏷', label: 'Faixa' };
+    if (b === 'rgb(255, 127, 80)')  return { icon: '🏷', label: 'Faixa (destaque)' };
+    if (b === 'rgb(53, 65, 73)')    return { icon: '🏷', label: 'Faixa - Título' };
+    if (b === 'rgb(114, 166, 142)') return { icon: '🔗', label: 'Botão de menu' };
+    if (b === 'rgb(239, 239, 239)') return { icon: '📄', label: 'Bloco de texto' };
+    if (b === 'rgb(223, 236, 231)') return { icon: '📋', label: 'Ficha da disciplina' };
     if (txt(el)) return { icon: '📝', label: 'Texto' };
     return null;
   }
@@ -1450,7 +1463,8 @@ function blockMapMain() {
   function isContainer(el) {
     const id = idof(el), cls = clsof(el);
     return /\bcontent-box\b|\bgrid-row\b/.test(cls) || /\bcol-(xs|sm|md|lg|xl)-/.test(cls) ||
-      ['topo', 'geral', 'videogeral', 'box-principal', 'menu-lateral', 'box-curriculum'].includes(id);
+      ['topo', 'geral', 'videogeral', 'box-principal', 'menu-lateral', 'box-curriculum'].includes(id) ||
+      /^borda-box-unidade\d+$/.test(id);
   }
   function trivial(el) {
     const t = el.tagName;
@@ -1464,7 +1478,7 @@ function blockMapMain() {
       const cls = classify(el);
       if (isContainer(el) && el.children.length) {
         if (cls) items.push({ el, depth, icon: cls.icon, label: cls.label, preview: '' });
-        if (depth < 4) collect(el, depth + 1);
+        if (depth < 5) collect(el, depth + 1);
       } else if (cls) {
         items.push({ el, depth, icon: cls.icon, label: cls.label, preview: txt(el).slice(0, 45) });
       }
@@ -1964,7 +1978,11 @@ async function clRunChecks1to5(tabId, courseId, includeLoremIpsum) {
       try {
         const res = await safeFetch(`/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=100`);
         const list = res.ok ? (await res.json()) : [];
-        out.avisos = { count: list.length, titles: list.slice(0, 3).map(d => d.title) };
+        out.avisos = { count: list.length, items: list.slice(0, 5).map(d => ({
+          title:           d.title,
+          created_at:      d.created_at      || null,
+          delayed_post_at: d.delayed_post_at || null,
+        })) };
       } catch (e) { out.avisos = { error: e.message }; }
 
       // 4: Fóruns
@@ -2035,8 +2053,14 @@ function applyCourseResults(courseId, data) {
   } else if (av.count === 0) {
     setCourseCheck(courseId, 'avisos', 'ok', 'Nenhum aviso');
   } else {
-    const lines = av.titles.map(t => `📢 ${t}`);
-    if (av.count > 3) lines.push(`... e mais ${av.count - 3}`);
+    const fmtDate = iso => iso ? new Date(iso).toLocaleDateString('pt-BR') : null;
+    const lines = av.items.map(a => {
+      const created = fmtDate(a.created_at);
+      const delayed = fmtDate(a.delayed_post_at);
+      const info    = delayed ? `criado ${created} · publica ${delayed}` : `criado ${created}`;
+      return `📢 ${a.title} · ${info}`;
+    });
+    if (av.count > 5) lines.push(`... e mais ${av.count - 5}`);
     setCourseCheck(courseId, 'avisos', 'warn', [`${av.count} aviso(s):`, ...lines]);
   }
 
@@ -2072,9 +2096,10 @@ function applyCourseResults(courseId, data) {
     if (!provaFinal.post_to_sis)           issues.push('Prova Final: SIS não habilitado');
   }
 
-  const atividades = quizzes.filter(q => tl(q.title).includes('atividade objetiva'));
+  // Atividades = tudo com pontuação exceto a Prova Final (independente do nome)
+  const atividades = quizzes.filter(q => q.points_possible > 0 && !tl(q.title).includes('prova final'));
   if (atividades.length === 0) {
-    issues.push('Nenhuma Atividade Objetiva encontrada');
+    issues.push('Nenhuma atividade com pontuação encontrada (exceto Prova Final)');
   } else {
     const sumPts = atividades.reduce((s, a) => s + a.points_possible, 0);
     if (sumPts !== 60) issues.push(`Atividades: ${sumPts}pts (esperado: 60)`);
