@@ -1790,6 +1790,8 @@ const CHECKLIST_ITEMS = [
   { id: 'avisos',       name: 'Avisos antigos',           icon: '📢' },
   { id: 'foruns',       name: 'Fóruns antigos',           icon: '💬' },
   { id: 'testes',       name: 'Testes e pontuações',      icon: '📊' },
+  { id: 'paginas-nao-publicadas', name: 'Páginas não publicadas', icon: '📌' },
+  { id: 'requisitos-conclusao', name: 'Itens sem requisito de conclusão', icon: '⚙️' },
   { id: 'links',        name: 'Links quebrados',          icon: '🔗' },
 ];
 
@@ -1898,11 +1900,11 @@ function updateCourseBadge(courseId) {
   }
 }
 
-// Checks 1-5 consolidados num único executeScript por curso
-async function clRunChecks1to5(tabId, courseId, includeLoremIpsum) {
+// Checks 1-7 consolidados num único executeScript por curso
+async function clRunChecks1to5(tabId, courseId, includeLoremIpsum, includePageNaoPublicadas, includeRequisitosConclusao) {
   const result = await chrome.scripting.executeScript({
     target: { tabId },
-    func: async (courseId, includeLoremIpsum) => {
+    func: async (courseId, includeLoremIpsum, includePageNaoPublicadas, includeRequisitosConclusao) => {
       const delay = ms => new Promise(r => setTimeout(r, ms));
 
       // Fetch com proteção de rate limit do Canvas
@@ -1924,7 +1926,7 @@ async function clRunChecks1to5(tabId, courseId, includeLoremIpsum) {
         const out = []; let next = url;
         while (next) {
           const res = await safeFetch(next);
-          if (!res.ok) break;
+          if (!res.ok) throw new Error(`API error: ${res.status}`);
           const data = await res.json();
           if (Array.isArray(data)) out.push(...data);
           const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
@@ -1976,8 +1978,7 @@ async function clRunChecks1to5(tabId, courseId, includeLoremIpsum) {
 
       // 3: Avisos
       try {
-        const res = await safeFetch(`/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=100`);
-        const list = res.ok ? (await res.json()) : [];
+        const list = await fetchAll(`/api/v1/courses/${courseId}/discussion_topics?only_announcements=true&per_page=100`);
         out.avisos = { count: list.length, items: list.slice(0, 5).map(d => ({
           title:           d.title,
           created_at:      d.created_at      || null,
@@ -1987,8 +1988,8 @@ async function clRunChecks1to5(tabId, courseId, includeLoremIpsum) {
 
       // 4: Fóruns
       try {
-        const res = await safeFetch(`/api/v1/courses/${courseId}/discussion_topics?per_page=100`);
-        const list = res.ok ? (await res.json()).filter(d => !d.is_announcement) : [];
+        const all = await fetchAll(`/api/v1/courses/${courseId}/discussion_topics?per_page=100`);
+        const list = all.filter(d => !d.is_announcement);
         out.foruns = { count: list.length, titles: list.slice(0, 3).map(d => d.title) };
       } catch (e) { out.foruns = { error: e.message }; }
 
@@ -2012,16 +2013,67 @@ async function clRunChecks1to5(tabId, courseId, includeLoremIpsum) {
         });
       } catch (e) { out.testes = { error: e.message }; }
 
+      // 6: Páginas não publicadas nos módulos
+      if (includePageNaoPublicadas) {
+        try {
+          const modules = await fetchAll(`/api/v1/courses/${courseId}/modules?per_page=100`);
+          const unpublished = [];
+
+          for (const mod of modules) {
+            const items = await fetchAll(`/api/v1/courses/${courseId}/modules/${mod.id}/items?per_page=100`);
+            const pageItems = items.filter(item => item.type === 'Page');
+
+            for (let i = 0; i < pageItems.length; i += 5) {
+              const batch = pageItems.slice(i, i + 5);
+              const results = await Promise.all(batch.map(async item => {
+                try {
+                  const res = await safeFetch(`/api/v1/courses/${courseId}/pages/${item.page_url}`);
+                  if (!res.ok) return null;
+                  const page = await res.json();
+                  return !page.published ? { module: mod.name, page: page.title } : null;
+                } catch { return null; }
+              }));
+              unpublished.push(...results.filter(Boolean));
+              if (i + 5 < pageItems.length) await delay(100);
+            }
+          }
+
+          out.paginasNaoPublicadas = { unpublished };
+        } catch (e) { out.paginasNaoPublicadas = { error: e.message }; }
+      } else {
+        out.paginasNaoPublicadas = { skipped: true };
+      }
+
+      // 7: Itens sem requisito de conclusão
+      if (includeRequisitosConclusao) {
+        try {
+          const modules = await fetchAll(`/api/v1/courses/${courseId}/modules?per_page=100`);
+          const itemsWithoutRequirement = {};
+
+          for (const mod of modules) {
+            const items = await fetchAll(`/api/v1/courses/${courseId}/modules/${mod.id}/items?per_page=100`);
+            const itemsWithoutReq = items.filter(item => !item.completion_requirement);
+            if (itemsWithoutReq.length > 0) {
+              itemsWithoutRequirement[mod.name] = itemsWithoutReq.length;
+            }
+          }
+
+          out.requisitosConclisao = { itemsWithoutRequirement };
+        } catch (e) { out.requisitosConclisao = { error: e.message }; }
+      } else {
+        out.requisitosConclisao = { skipped: true };
+      }
+
       return out;
     },
-    args: [courseId, includeLoremIpsum],
+    args: [courseId, includeLoremIpsum, includePageNaoPublicadas, includeRequisitosConclusao],
   });
   return result[0]?.result || null;
 }
 
 function applyCourseResults(courseId, data) {
   if (!data) {
-    CHECKLIST_ITEMS.slice(0, 5).forEach(item => setCourseCheck(courseId, item.id, 'error', 'Sem resposta da API'));
+    CHECKLIST_ITEMS.slice(0, 7).forEach(item => setCourseCheck(courseId, item.id, 'error', 'Sem resposta da API'));
     return;
   }
 
@@ -2029,8 +2081,8 @@ function applyCourseResults(courseId, data) {
   const nv = data.novosVideos;
   if (nv?.error)       setCourseCheck(courseId, 'novos-videos', 'error', 'Erro: ' + nv.error);
   else if (!nv?.found) setCourseCheck(courseId, 'novos-videos', 'ok',   'Módulo "Novos Vídeos" não encontrado');
-  else if (nv.count === 0) setCourseCheck(courseId, 'novos-videos', 'warn', `Módulo "${nv.name}" existe mas vazio — deve ser apagado`);
-  else                 setCourseCheck(courseId, 'novos-videos', 'warn', `Módulo "${nv.name}" com ${nv.count} vídeo(s)`);
+  else if (nv.count === 0) setCourseCheck(courseId, 'novos-videos', 'ok', `Módulo "${nv.name}" vazio (0 vídeos)`);
+  else                 setCourseCheck(courseId, 'novos-videos', 'ok', `${nv.count} vídeo${nv.count > 1 ? 's' : ''} encontrado${nv.count > 1 ? 's' : ''} em "${nv.name}"`);
 
   // 2: Lorem Ipsum
   const li = data.loremIpsum;
@@ -2121,6 +2173,34 @@ function applyCourseResults(courseId, data) {
   } else {
     setCourseCheck(courseId, 'testes', 'warn', issues);
   }
+
+  // 6: Páginas não publicadas
+  const pnp = data.paginasNaoPublicadas;
+  if (!pnp?.skipped) {
+    if (pnp?.error) {
+      setCourseCheck(courseId, 'paginas-nao-publicadas', 'error', 'Erro: ' + pnp.error);
+    } else if (!pnp?.unpublished?.length) {
+      setCourseCheck(courseId, 'paginas-nao-publicadas', 'ok', 'Nenhuma página não publicada');
+    } else {
+      setCourseCheck(courseId, 'paginas-nao-publicadas', 'warn', `${pnp.unpublished.length} página(s) não publicada(s)`);
+    }
+  }
+
+  // 7: Itens sem requisito de conclusão
+  const rc = data.requisitosConclisao;
+  if (!rc?.skipped) {
+    if (rc?.error) {
+      setCourseCheck(courseId, 'requisitos-conclusao', 'error', 'Erro: ' + rc.error);
+    } else {
+      const itemsWithoutReq = rc?.itemsWithoutRequirement || {};
+      const totalItens = Object.values(itemsWithoutReq).reduce((s, n) => s + n, 0);
+      if (totalItens === 0) {
+        setCourseCheck(courseId, 'requisitos-conclusao', 'ok', 'Todos os itens têm requisito de conclusão');
+      } else {
+        setCourseCheck(courseId, 'requisitos-conclusao', 'warn', `${totalItens} item${totalItens > 1 ? 'ns' : ''} sem requisito de conclusão`);
+      }
+    }
+  }
 }
 
 async function clRunLinkCheck(tabId, courseId) {
@@ -2210,8 +2290,10 @@ async function runChecklist() {
     return;
   }
 
-  const includeLoremIpsum = $('cl-toggle-lorem').checked;
-  const includeLinks      = $('cl-toggle-links').checked;
+  const includeLoremIpsum      = $('cl-toggle-lorem').checked;
+  const includeLinks           = $('cl-toggle-links').checked;
+  const includePageNaoPublicadas = $('cl-toggle-paginas-nao-pub').checked;
+  const includeRequisitosConclusao = $('cl-toggle-requisitos').checked;
   $('btn-run-checklist').disabled = true;
   $('btn-run-checklist').innerHTML = '<span class="spinner"></span>Verificando...';
 
@@ -2223,8 +2305,10 @@ async function runChecklist() {
 
   courseIds.forEach(id => {
     results.appendChild(buildCourseCard(id));
-    if (!includeLoremIpsum) setCourseCheck(id, 'lorem-ipsum', 'skip');
-    if (!includeLinks)      setCourseCheck(id, 'links',       'skip');
+    if (!includeLoremIpsum)           setCourseCheck(id, 'lorem-ipsum',           'skip');
+    if (!includePageNaoPublicadas)    setCourseCheck(id, 'paginas-nao-publicadas', 'skip');
+    if (!includeRequisitosConclusao)  setCourseCheck(id, 'requisitos-conclusao',   'skip');
+    if (!includeLinks)                setCourseCheck(id, 'links',                  'skip');
   });
 
   let done = 0;
@@ -2232,10 +2316,10 @@ async function runChecklist() {
     // Escalonamento: cada curso começa 300ms depois do anterior
     if (index > 0) await new Promise(r => setTimeout(r, index * 300));
     try {
-      const data = await clRunChecks1to5(tabId, id, includeLoremIpsum);
+      const data = await clRunChecks1to5(tabId, id, includeLoremIpsum, includePageNaoPublicadas, includeRequisitosConclusao);
       applyCourseResults(id, data);
     } catch (err) {
-      CHECKLIST_ITEMS.slice(0, 5).forEach(item => {
+      CHECKLIST_ITEMS.slice(0, 7).forEach(item => {
         if (!includeLoremIpsum && item.id === 'lorem-ipsum') return;
         setCourseCheck(id, item.id, 'error', 'Erro: ' + err.message);
       });

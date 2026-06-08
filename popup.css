@@ -497,8 +497,6 @@ input[type=text]:focus { border-color: #60a5fa; }
   display: flex;
   flex-direction: column;
   gap: 5px;
-  overflow-y: auto;
-  max-height: calc(100vh - 230px);
 }
 .cl-course-card {
   background: #2a2a3e;
@@ -529,7 +527,11 @@ input[type=text]:focus { border-color: #60a5fa; }
 .cl-course-toggle.open { transform: rotate(90deg); }
 .cl-course-id    { flex: 1; font-size: 12px; font-weight: bold; }
 .cl-course-badge { font-size: 13px; flex-shrink: 0; line-height: 1; }
-.cl-course-body  { border-top: 1px solid #3a3a4e; padding-bottom: 4px; }
+.cl-course-body  { border-top: 1px solid #3a3a4e; padding-bottom: 4px; overflow-y: scroll; }
+.cl-course-body::-webkit-scrollbar { width: 8px; }
+.cl-course-body::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+.cl-course-body::-webkit-scrollbar-thumb { background: #4ade80; border-radius: 4px; }
+.cl-course-body::-webkit-scrollbar-thumb:hover { background: #22c55e; }
 .cl-check-row {
   display: flex;
   align-items: center;
@@ -544,5 +546,8 @@ input[type=text]:focus { border-color: #60a5fa; }
   font-size: 10px;
   color: #64748b;
   line-height: 1.5;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
 }
-.cl-check-detail-row > div { padding: 0; }
+.cl-check-detail-row > div { padding: 0; word-wrap: break-word; overflow-wrap: break-word; }
