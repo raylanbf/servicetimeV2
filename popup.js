@@ -300,6 +300,7 @@ function recordItem(r) {
 
 function showRecordDetail(r, from = 'main') {
   $('btn-back-record-detail').dataset.from = from;
+  $('btn-back-record-detail').dataset.recordId = r._id;
   function pauseDurLabel(p) {
     if (!p.pausa || !p.retorno) return '';
     const toMin = s => { const [h, m, sec] = s.split(':').map(Number); return h * 60 + m + (sec || 0) / 60; };
@@ -362,9 +363,21 @@ function showRecordDetail(r, from = 'main') {
     html += `<div class="detail-tags">${tags.join('')}</div>`;
   }
 
+  html += `<div class="row-btns mt10">
+    <button id="btn-delete-record" class="btn btn-red" style="flex:1">🗑️  Deletar registro</button>
+  </div>`;
+
   $('record-detail-body').innerHTML = html;
   $('record-detail-body').querySelectorAll('.detail-link-clickable').forEach(el => {
     el.addEventListener('click', () => chrome.tabs.create({ url: el.dataset.url }));
+  });
+  $('btn-delete-record').addEventListener('click', async () => {
+    if (confirm('Tem certeza que deseja deletar este registro?')) {
+      S.registros = S.registros.filter(x => x._id !== r._id);
+      await chrome.storage.local.set({ registros: S.registros });
+      show($('btn-back-record-detail').dataset.from === 'records' ? 'records' : 'main');
+      syncMain();
+    }
   });
   show('record-detail');
 }
