@@ -172,6 +172,7 @@ function updateCount() {
 // ── Sincroniza UI com estado ──────────────────────────────────────────
 function syncMain() {
   $('user-label').textContent = '👤  ' + S.usuario;
+  $('version-label').textContent = 'v' + chrome.runtime.getManifest().version;
 
   const combo = $('combo-tipo');
   combo.innerHTML = '';
