@@ -120,6 +120,7 @@
   <button id="btn-canvas-dup" class="btn btn-surface btn-full mt4">📑  Duplicar bloco na página</button>
   <button id="btn-canvas-move" class="btn btn-surface btn-full mt4">✋  Reorganizar blocos (arrastar)</button>
   <button id="btn-canvas-map" class="btn btn-surface btn-full mt4">🗺  Mapa de elementos</button>
+  <button id="btn-canvas-blocks" class="btn btn-surface btn-full mt4">📦  Blocos salvos</button>
 </div>
 
 <!-- ── Editar serviços ─────────────────────────────────────────────── -->
@@ -155,7 +156,7 @@
       <button id="btn-settings-sheets" class="btn btn-blue btn-full cfg-mt8" style="display:none">📊  Enviar ao Google Sheets</button>
     </div>
     <div class="cfg-group">
-      <label class="cfg-label">Chave API OpenRouter (LaTeX)</label>
+      <label class="cfg-label">Chave API OpenRouter ou OpenAI (LaTeX)</label>
       <input id="settings-openrouter" type="password" placeholder="sk-or-... ou sk-...">
     </div>
   </div>
@@ -215,6 +216,22 @@
     <label style="font-size:11px;color:#cbd5e1;cursor:pointer">⭐ Marcar como starter</label>
   </div>
   <button id="btn-add-saved-link" class="btn btn-green btn-full">+ Adicionar link</button>
+</div>
+
+<!-- ── Blocos salvos ──────────────────────────────────────────────── -->
+<div id="view-blocks" class="view">
+  <div class="view-header">
+    <button id="btn-back-blocks" class="btn-icon">←</button>
+    <span class="view-title">Blocos Salvos</span>
+  </div>
+  <p class="small muted" style="margin-top:0">Trechos de HTML reutilizáveis. Insira-os pela ferramenta <b>Reorganizar</b> ou <b>Mapa de elementos</b>, no local selecionado.</p>
+  <div id="blocks-saved-list" class="links-saved-list"></div>
+  <div class="divider mt6"></div>
+  <label class="field-label">Nome</label>
+  <input id="input-block-name" type="text" placeholder="Ex: Box de Libras">
+  <label class="field-label mt6">HTML</label>
+  <textarea id="input-block-html" class="comment-textarea" placeholder="&lt;div&gt;...&lt;/div&gt;" style="min-height:120px;font-family:'Courier New',monospace;font-size:11px"></textarea>
+  <button id="btn-add-block" class="btn btn-green btn-full mt4">+ Salvar bloco</button>
 </div>
 
 <!-- ── Ajuda Google Sheets ────────────────────────────────────────── -->

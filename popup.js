@@ -742,6 +742,93 @@ function buildLinks() {
   };
 }
 
+// Remove só atributos data-darkreader-* (lixo da extensão Dark Reader); mantém
+// ids/classes/styles porque fazem parte da estrutura do template. Só normaliza
+// (round-trip pelo parser) quando há sujeira a remover, para não alterar HTML limpo.
+function stripDarkreader(html) {
+  if (!html || !/data-darkreader-/.test(html)) return html;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  tmp.querySelectorAll('*').forEach(n => {
+    [...n.attributes].forEach(a => {
+      if (a.name.startsWith('data-darkreader-')) n.removeAttribute(a.name);
+    });
+  });
+  return tmp.innerHTML;
+}
+
+// ── Blocos salvos (biblioteca de HTML reutilizável) ───────────────────
+function buildBlocks() {
+  const list = $('blocks-saved-list');
+  let editId = null;
+
+  function render() {
+    const blocks = S.savedBlocks || [];
+    if (!blocks.length) {
+      list.innerHTML = '<div class="small muted" style="text-align:center;padding:10px">Nenhum bloco salvo ainda.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    blocks.forEach(b => {
+      const div = document.createElement('div');
+      div.className = 'saved-link-item';
+      div.innerHTML =
+        `<div class="saved-link-info" data-a="edit" data-id="${b.id}" style="cursor:pointer">
+           <div class="saved-link-label">${(b.name || '').replace(/</g, '&lt;')}</div>
+           <div class="saved-link-url">${(b.html || '').replace(/</g, '&lt;').slice(0, 70)}…</div>
+         </div>
+         <button class="btn-rm-link" data-a="rm" data-id="${b.id}">✕</button>`;
+      list.appendChild(div);
+    });
+  }
+
+  function resetForm() {
+    editId = null;
+    $('input-block-name').value = '';
+    $('input-block-html').value = '';
+    $('btn-add-block').textContent = '+ Salvar bloco';
+  }
+
+  render();
+  resetForm();
+
+  list.onclick = async e => {
+    const btn = e.target.closest('[data-a]');
+    if (!btn) return;
+    const blocks = [...(S.savedBlocks || [])];
+    const idx = blocks.findIndex(b => b.id === btn.dataset.id);
+    if (idx < 0) return;
+    if (btn.dataset.a === 'edit') {
+      editId = blocks[idx].id;
+      $('input-block-name').value = blocks[idx].name;
+      $('input-block-html').value = blocks[idx].html;
+      $('btn-add-block').textContent = '💾 Salvar alterações';
+      $('input-block-name').focus();
+    } else if (btn.dataset.a === 'rm') {
+      blocks.splice(idx, 1);
+      await persist({ savedBlocks: blocks });
+      if (editId === btn.dataset.id) resetForm();
+      render();
+    }
+  };
+
+  $('btn-add-block').onclick = async () => {
+    const name = $('input-block-name').value.trim();
+    const html = stripDarkreader($('input-block-html').value.trim());
+    if (!name || !html) return;
+    const blocks = [...(S.savedBlocks || [])];
+    if (editId) {
+      const idx = blocks.findIndex(b => b.id === editId);
+      if (idx >= 0) blocks[idx] = { ...blocks[idx], name, html };
+    } else {
+      blocks.push({ id: 'b' + Date.now().toString(36), name, html });
+    }
+    await persist({ savedBlocks: blocks });
+    resetForm();
+    render();
+  };
+}
+
 // ── Configurações ─────────────────────────────────────────────────────
 function buildSettings() {
   $('settings-name').value       = S.usuario;
@@ -1222,12 +1309,14 @@ function blockDuplicatorMain() {
 async function doMoveBlocks() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tabs[0]?.id) return;
+  const { savedBlocks = [] } = await chrome.storage.local.get('savedBlocks');
   try {
-    await chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, world: 'MAIN', func: blockMoverMain });
+    await chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, world: 'MAIN', func: blockMoverMain, args: [savedBlocks] });
   } catch (err) { alert('Não foi possível ativar nesta página: ' + err.message); }
 }
 
-function blockMoverMain() {
+function blockMoverMain(savedBlocks) {
+  savedBlocks = savedBlocks || [];
   if (window.__svcMoveActive) return;
   const ed = window.tinymce && (tinymce.activeEditor || (tinymce.editors && tinymce.editors[0]));
   if (!ed || (ed.isHidden && ed.isHidden())) {
@@ -1248,12 +1337,41 @@ function blockMoverMain() {
   let downX = 0, downY = 0;
   const THRESHOLD = 5;
 
+  // Modo "inserir bloco salvo": clique posiciona o snippet escolhido
+  let pendingHtml = null;  // HTML do bloco salvo aguardando clique
+  let insTarget   = null;  // bloco-alvo sob o cursor
+  let insBefore   = false; // inserir antes (true) / depois (false)
+
+  const BAR_NORMAL = '✋ <b>Reorganizar blocos</b> — arraste um bloco para mudar a ordem. <span style="opacity:.7">↑/↓ ajusta o que pega · a linha verde mostra onde cai · Ctrl+Z desfaz · ESC sai</span>';
+  const BAR_INSERT = '➕ <b>Inserir bloco salvo</b> — clique num bloco. <span style="opacity:.7">metade de cima = antes · metade de baixo = depois · ESC cancela</span>';
+
   const bar = document.createElement('div');
   bar.id = '__svc-move-bar__';
   Object.assign(bar.style, { position:'fixed', top:'0', left:'0', right:'0', zIndex:'2147483647',
     background:'#1e1e2e', color:'#e2e8f0', font:'13px system-ui,sans-serif', padding:'8px 14px',
     textAlign:'center', boxShadow:'0 2px 8px rgba(0,0,0,.4)', cursor:'default' });
-  bar.innerHTML = '✋ <b>Reorganizar blocos</b> — arraste um bloco para mudar a ordem. <span style="opacity:.7">↑/↓ ajusta o que pega · a linha verde mostra onde cai · Ctrl+Z desfaz · ESC sai</span>';
+  const barText = document.createElement('span');
+  barText.innerHTML = BAR_NORMAL;
+  bar.appendChild(barText);
+  const setBarNormal = () => { barText.innerHTML = BAR_NORMAL; };
+  const setBarInsert = () => { barText.innerHTML = BAR_INSERT; };
+
+  if (savedBlocks.length) {
+    const sel = document.createElement('select');
+    Object.assign(sel.style, { marginLeft:'10px', fontSize:'12px', padding:'2px 4px', borderRadius:'4px',
+      border:'1px solid #45475a', background:'#313244', color:'#e2e8f0', cursor:'pointer' });
+    sel.innerHTML = '<option value="">📦 inserir bloco salvo…</option>' +
+      savedBlocks.map((b, i) => `<option value="${i}">${(b.name || '').replace(/</g, '&lt;')}</option>`).join('');
+    sel.onchange = () => {
+      if (sel.value === '') { pendingHtml = null; setBarNormal(); doc.documentElement.style.cursor = 'grab'; return; }
+      pendingHtml = savedBlocks[+sel.value].html;
+      sel.value = '';
+      unpaint(current); current = null;
+      setBarInsert();
+      doc.documentElement.style.cursor = 'copy';
+    };
+    bar.appendChild(sel);
+  }
   document.body.appendChild(bar);
 
   // Linha de drop inline (inserida no DOM entre blocos, permite scrollIntoView)
@@ -1300,6 +1418,15 @@ function blockMoverMain() {
   }
 
   function onMove(e) {
+    if (pendingHtml) {
+      const blk = blockOf(e.target);
+      if (!blk || blk === body) { line.remove(); insTarget = null; return; }
+      const r = blk.getBoundingClientRect();
+      insBefore = e.clientY < r.top + r.height / 2;
+      insTarget = blk;
+      posLine(blk, insBefore);
+      return;
+    }
     if (dragEl && !dragging) {
       if (Math.abs(e.clientX - downX) > THRESHOLD || Math.abs(e.clientY - downY) > THRESHOLD) {
         dragging = true;
@@ -1327,6 +1454,22 @@ function blockMoverMain() {
   }
 
   function onDown(e) {
+    if (pendingHtml) {
+      e.preventDefault(); e.stopPropagation();
+      if (insTarget) {
+        const target = insTarget, html = pendingHtml, isBefore = insBefore;
+        const run = () => target.insertAdjacentHTML(isBefore ? 'beforebegin' : 'afterend', html);
+        if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
+        if (ed.nodeChanged) ed.nodeChanged();
+        if (ed.fire) ed.fire('input');
+        if (ed.setDirty) ed.setDirty(true);
+        flash('✓ Bloco inserido! (Ctrl+Z desfaz)');
+      }
+      pendingHtml = null; insTarget = null; line.remove();
+      setBarNormal();
+      doc.documentElement.style.cursor = 'grab';
+      return;
+    }
     if (!current) return;
     e.preventDefault(); e.stopPropagation();
     dragEl = current; downX = e.clientX; downY = e.clientY; dragging = false;
@@ -1355,7 +1498,13 @@ function blockMoverMain() {
   }
 
   function onKey(e) {
-    if (e.key === 'Escape') { e.preventDefault(); cleanup(); return; }
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;   // não sequestrar teclas do seletor
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (pendingHtml) { pendingHtml = null; insTarget = null; line.remove(); setBarNormal(); doc.documentElement.style.cursor = 'grab'; return; }
+      cleanup(); return;
+    }
     if (e.key === 'Delete' && current && !dragging) {
       e.preventDefault();
       const el = current;
@@ -1405,12 +1554,29 @@ function blockMoverMain() {
 async function doElementMap() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tabs[0]?.id) return;
+  const { savedBlocks = [] } = await chrome.storage.local.get('savedBlocks');
   try {
-    await chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, world: 'MAIN', func: blockMapMain });
+    // Ponte ISOLATED: recebe pedidos de "salvar bloco" vindos do mundo MAIN (que não acessa chrome.storage)
+    await chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, func: blockSaveBridge });
+    await chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, world: 'MAIN', func: blockMapMain, args: [savedBlocks] });
   } catch (err) { alert('Não foi possível ativar nesta página: ' + err.message); }
 }
 
-function blockMapMain() {
+// Roda no mundo ISOLATED (tem chrome.storage). Escuta postMessage do mapa e salva o bloco.
+function blockSaveBridge() {
+  if (window.__svcBlockBridge) return;
+  window.__svcBlockBridge = true;
+  window.addEventListener('message', async (e) => {
+    const d = e.data;
+    if (!d || d.__svc !== 'saveBlock' || typeof d.html !== 'string') return;
+    const { savedBlocks = [] } = await chrome.storage.local.get('savedBlocks');
+    savedBlocks.push({ id: 'b' + Date.now().toString(36), name: (d.name || 'Bloco').trim(), html: d.html });
+    await chrome.storage.local.set({ savedBlocks });
+  });
+}
+
+function blockMapMain(savedBlocks) {
+  savedBlocks = savedBlocks || [];
   if (window.__svcMapCleanup) { window.__svcMapCleanup(); return; }   // toggle: fecha se já aberto
 
   const ed = window.tinymce && (tinymce.activeEditor || (tinymce.editors && tinymce.editors[0]));
@@ -1653,7 +1819,7 @@ function blockMapMain() {
     cancelDrag();
   }
 
-  function buildRow({ el, icon, label, preview, depth, isDup }) {
+  function buildRow({ el, icon, label, preview, depth, isDup, tag }) {
     const row = document.createElement('div');
     row.__depth = depth;
     row.__el = el;
@@ -1664,7 +1830,7 @@ function blockMapMain() {
     const info = document.createElement('div');
     Object.assign(info.style, { flex: '1', minWidth: '0', display: 'flex', flexDirection: 'column', gap: '2px' });
     info.innerHTML = '<span>' + icon + ' <b>' + label + '</b>' +
-      (isDup ? ' <span style="color:#f87171;font-size:10px">(cópia)</span>' : '') + '</span>' +
+      (isDup ? ' <span style="color:#f87171;font-size:10px">(' + (tag || 'cópia') + ')</span>' : '') + '</span>' +
       (preview ? '<span style="opacity:.55;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + preview.replace(/</g, '&lt;') + '</span>' : '');
     row.appendChild(info);
     row.onmouseenter = () => { if (el !== selected && !dragRow) paint(el, '#f59e0b'); };
@@ -1680,7 +1846,7 @@ function blockMapMain() {
     if (isDup) {
       const x = document.createElement('button');
       x.textContent = '✕';
-      x.title = 'Excluir esta cópia do editor';
+      x.title = 'Excluir este bloco do editor';
       Object.assign(x.style, { background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '14px', flexShrink: '0', padding: '0 4px' });
       x.onclick = (e) => {
         e.stopPropagation();
@@ -1715,8 +1881,97 @@ function blockMapMain() {
       b.onclick = fn; return b;
     };
     actionsRow.appendChild(mk('📑 Duplicar', () => dupe(el, afterRow)));
-    actionsRow.appendChild(mk('📋 Copiar HTML', () => copyHtml(el)));
+    actionsRow.appendChild(mk('📋 Copiar', () => copyHtml(el)));
+    actionsRow.appendChild(mk('➕ Inserir', () => openInsertPicker(afterRow, el)));
+    actionsRow.appendChild(mk('💾 Salvar', () => saveBlock(el)));
     afterRow.insertAdjacentElement('afterend', actionsRow);
+  }
+
+  // Limpeza para SALVAR um bloco da página: tira scripts e atributos do TinyMCE/Dark
+  // Reader, mas MANTÉM ids/classes/styles (fazem parte da estrutura do template).
+  function cleanForSave(html) {
+    const tmp = doc.createElement('div'); tmp.innerHTML = html;
+    tmp.querySelectorAll('script').forEach(n => n.remove());
+    tmp.querySelectorAll('*').forEach(n => {
+      [...n.attributes].forEach(a => {
+        if (a.name.startsWith('data-mce-') || a.name.startsWith('data-darkreader-')) n.removeAttribute(a.name);
+      });
+    });
+    return tmp.innerHTML;
+  }
+
+  function saveBlock(el) {
+    const name = prompt('Nome do bloco salvo:');
+    if (name === null) return;            // cancelado
+    window.postMessage({ __svc: 'saveBlock', name: name || 'Bloco', html: cleanForSave(el.outerHTML) }, '*');
+    flash('💾 Bloco salvo na biblioteca!');
+  }
+
+  // Escolhe qual bloco salvo inserir (substitui a barra de ações por uma lista)
+  function openInsertPicker(afterRow, el) {
+    if (actionsRow) { actionsRow.remove(); actionsRow = null; }
+    if (!savedBlocks.length) { flash('Nenhum bloco salvo. Use 📦 Blocos salvos.'); return; }
+    const pick = document.createElement('div');
+    Object.assign(pick.style, { padding: '6px 12px', background: '#181825' });
+    const title = document.createElement('div');
+    title.textContent = 'Inserir qual bloco?';
+    Object.assign(title.style, { fontSize: '11px', opacity: '.7', marginBottom: '4px' });
+    pick.appendChild(title);
+    savedBlocks.forEach(b => {
+      const btn = document.createElement('button');
+      btn.textContent = '📦 ' + b.name;
+      Object.assign(btn.style, { display: 'block', width: '100%', textAlign: 'left', padding: '5px 8px',
+        marginBottom: '3px', borderRadius: '4px', border: 'none', cursor: 'pointer',
+        background: '#313244', color: '#e2e8f0', fontSize: '11px',
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
+      btn.onclick = () => choosePosition(pick, afterRow, el, b.html);
+      pick.appendChild(btn);
+    });
+    actionsRow = pick;                    // mantém a referência para o cleanup remover
+    afterRow.insertAdjacentElement('afterend', pick);
+  }
+
+  // Pergunta antes/depois e insere
+  function choosePosition(container, afterRow, el, html) {
+    container.innerHTML = '';
+    const t = document.createElement('div');
+    t.textContent = 'Inserir onde?';
+    Object.assign(t.style, { fontSize: '11px', opacity: '.7', marginBottom: '4px' });
+    container.appendChild(t);
+    const row = document.createElement('div');
+    Object.assign(row.style, { display: 'flex', gap: '6px' });
+    const mkb = (label, pos) => {
+      const b = document.createElement('button'); b.textContent = label;
+      Object.assign(b.style, { flex: '1', padding: '5px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: '#313244', color: '#e2e8f0', fontSize: '11px' });
+      b.onclick = () => insertSnippet(afterRow, el, html, pos); return b;
+    };
+    row.appendChild(mkb('⬆ Antes', 'before'));
+    row.appendChild(mkb('⬇ Depois', 'after'));
+    container.appendChild(row);
+  }
+
+  function insertSnippet(afterRow, el, html, pos) {
+    let inserted = null;
+    const run = () => {
+      el.insertAdjacentHTML(pos === 'before' ? 'beforebegin' : 'afterend', html);
+      inserted = pos === 'before' ? el.previousElementSibling : el.nextElementSibling;
+    };
+    if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
+    if (ed.nodeChanged) ed.nodeChanged();
+    if (ed.fire) ed.fire('input');
+    if (ed.setDirty) ed.setDirty(true);
+    flash('✓ Bloco inserido! (Ctrl+Z desfaz)');
+    if (actionsRow) { actionsRow.remove(); actionsRow = null; }
+    if (!inserted) return;
+    // Cria uma linha no painel para o bloco recém-inserido (marcada "novo", removível)
+    const cls = classify(inserted) || { icon: '📄', label: 'Bloco' };
+    const item = items.find(it => it.el === el);
+    const depth = item ? item.depth : (afterRow.__depth || 0);
+    const newRow = buildRow({ el: inserted, icon: cls.icon, label: cls.label, preview: txt(inserted).slice(0, 45), depth, isDup: true, tag: 'novo' });
+    if (pos === 'before') afterRow.insertAdjacentElement('beforebegin', newRow);
+    else afterRow.insertAdjacentElement('afterend', newRow);
+    items.push({ el: inserted, row: newRow, depth, icon: cls.icon, label: cls.label, preview: txt(inserted).slice(0, 45) });
+    inserted.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   function setActiveRow(row) {
@@ -2023,6 +2278,8 @@ async function clRunChecks1to5(tabId, courseId, includeLoremIpsum, includePageNa
             points_possible: q.points_possible || 0,
             published:   a.published   !== undefined ? a.published   : (q.published   || false),
             post_to_sis: a.post_to_sis !== undefined ? a.post_to_sis : false,
+            shuffle_answers:  q.shuffle_answers === true,
+            allowed_attempts: typeof q.allowed_attempts === 'number' ? q.allowed_attempts : null,
           };
         });
       } catch (e) { out.testes = { error: e.message }; }
@@ -2065,8 +2322,12 @@ async function clRunChecks1to5(tabId, courseId, includeLoremIpsum, includePageNa
           const itemsWithoutRequirement = {};
 
           for (const mod of modules) {
+            if (mod.published === false) continue;   // módulo oculto não aparece na tela
             const items = await fetchAll(`/api/v1/courses/${courseId}/modules/${mod.id}/items?per_page=100`);
-            const itemsWithoutReq = items.filter(item => !item.completion_requirement);
+            // conta só os itens que aparecem na tela: ignora ocultos (published:false).
+            // Itens excluídos não são retornados pela API de module items.
+            const visiveis = items.filter(item => item.published !== false);
+            const itemsWithoutReq = visiveis.filter(item => !item.completion_requirement);
             if (itemsWithoutReq.length > 0) {
               itemsWithoutRequirement[mod.name] = itemsWithoutReq.length;
             }
@@ -2160,6 +2421,13 @@ function applyCourseResults(courseId, data) {
     if (provaFinal.question_count  !== 10) issues.push(`Prova Final: ${provaFinal.question_count} perguntas (esperado: 10)`);
     if (!provaFinal.published)             issues.push('Prova Final: não publicada');
     if (!provaFinal.post_to_sis)           issues.push('Prova Final: SIS não habilitado');
+    if (!provaFinal.shuffle_answers)       issues.push('Prova Final: respostas não embaralhadas');
+    if (provaFinal.allowed_attempts === 1) {
+      issues.push('Prova Final: múltiplas tentativas desabilitadas');
+    } else if (provaFinal.allowed_attempts != null && provaFinal.allowed_attempts !== 2) {
+      const n = provaFinal.allowed_attempts === -1 ? 'ilimitadas' : provaFinal.allowed_attempts;
+      issues.push(`Prova Final: ${n} tentativa(s) (esperado: 2)`);
+    }
   }
 
   // Atividades = tudo com pontuação exceto a Prova Final (independente do nome)
@@ -2181,7 +2449,7 @@ function applyCourseResults(courseId, data) {
 
   if (issues.length === 0) {
     setCourseCheck(courseId, 'testes', 'ok', [
-      `Prova Final: ${provaFinal.points_possible}pts · ${provaFinal.question_count} perguntas`,
+      `Prova Final: ${provaFinal.points_possible}pts · ${provaFinal.question_count} perguntas · ${provaFinal.allowed_attempts} tentativas · embaralhada`,
       `Atividades (${atividades.length}): ${atividadesPts}pts · Total: ${total}pts`,
     ]);
   } else {
@@ -2377,6 +2645,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     uploading:      saved.uploading      || false,
     uploadResult:  saved.uploadResult  || null,
     savedLinks:    saved.savedLinks    || [],
+    savedBlocks:   saved.savedBlocks   || [],
     sheetsEnabled:      saved.sheetsEnabled      || false,
     canvasExceptions:   saved.canvasExceptions   ?? DEFAULT_CANVAS_EXCEPTIONS,
   };
@@ -2423,6 +2692,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-canvas-dup').addEventListener('click', doDuplicateBlock);
   $('btn-canvas-move').addEventListener('click', doMoveBlocks);
   $('btn-canvas-map').addEventListener('click', doElementMap);
+  $('btn-canvas-blocks').addEventListener('click', () => { buildBlocks(); show('blocks'); });
+  $('btn-back-blocks').addEventListener('click', () => show('canvas'));
   $('btn-canvas-revisions').addEventListener('click', () => show('canvas-revisions'));
   $('btn-apply-revisions-filter').addEventListener('click', doFetchRevisions);
   $('btn-back-canvas-revisions').addEventListener('click', () => show('canvas'));
@@ -2465,6 +2736,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Listener: upload concluído pelo service worker enquanto popup está aberto
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    // Bloco salvo pela ponte do mapa (mundo ISOLATED) — mantém S em sincronia
+    if ('savedBlocks' in changes) S.savedBlocks = changes.savedBlocks.newValue || [];
     if ('uploading' in changes && changes.uploading.newValue === false) {
       S.uploading = false;
       setUploadingUI(false);

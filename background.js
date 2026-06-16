@@ -904,11 +904,12 @@ async function convertFormulaToLatex(info, tab) {
   showFormulaToast(tab.id, 'info', '⏳ Processando fórmula...');
   try {
     const { openrouter_key } = await chrome.storage.local.get(['openrouter_key']);
-    if (!openrouter_key) throw new Error('Configure a chave API OpenRouter em ⚙ Configurações');
+    if (!openrouter_key) throw new Error('Configure a chave API OpenRouter ou OpenAI em ⚙ Configurações');
 
     const { base64, mimeType } = await fetchImageAsBase64(info.srcUrl);
 
     const isOpenRouter = openrouter_key.startsWith('sk-or-');
+    const provider = isOpenRouter ? 'OpenRouter' : 'OpenAI';
     const endpoint = isOpenRouter
       ? 'https://openrouter.ai/api/v1/chat/completions'
       : 'https://api.openai.com/v1/chat/completions';
@@ -932,7 +933,7 @@ async function convertFormulaToLatex(info, tab) {
       }),
     });
 
-    if (!res.ok) throw new Error(`OpenRouter: erro ${res.status}`);
+    if (!res.ok) throw new Error(`${provider}: erro ${res.status}`);
     const data  = await res.json();
     const latex = data.choices[0].message.content.trim().replace(/\\large\b/g, '\\Large');
 
