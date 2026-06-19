@@ -1593,40 +1593,70 @@ function blockMapMain(savedBlocks) {
   const clsof = el => (el.className && el.className.toString ? el.className.toString() : '').toLowerCase();
   const bg    = el => { try { return win.getComputedStyle(el).backgroundColor; } catch (e) { return ''; } };
 
-  // Classificador baseado no catálogo dos templates PUC Minas
+  // Classificador. Sempre devolve um rótulo (nunca null): tudo aparece no mapa.
   function classify(el) {
     const id = idof(el), cls = clsof(el), tag = el.tagName;
+    const style = el.getAttribute('style') || '';
+
+    // ── IDs específicos dos templates PUC Minas ──
+    if (id === 'topo' || id === 'geral') return { icon: '▦', label: 'Container' };
     if (id === 'banner') return { icon: '🖼', label: 'Banner' };
     if (id === 'faixa') return { icon: '🏷', label: 'Faixa' };
+    if (id === 'breadcrumb') return { icon: '🧭', label: 'Trilha (breadcrumb)' };
     if (id === 'texto-introdutorio') return { icon: '📝', label: 'Texto introdutório' };
+    if (id === 'texto-introducao-menu') return { icon: '🔠', label: 'Chamada do menu' };
+    if (id === 'box-ajuda') return { icon: 'ℹ️', label: 'Box de ajuda' };
+    if (id === 'box-video') return { icon: '▶', label: 'Vídeo (espaço)' };
     if (id === 'box-curriculum' || id === 'caixa-nome') return { icon: '👤', label: 'Caixa do professor' };
     if (id === 'menu-lateral') return { icon: '📂', label: 'Menu lateral' };
-    if (id === 'sessao' || id === 'box-imagem-texto') return { icon: '🔗', label: 'Item de menu' };
+    if (id === 'menu-imagem') return { icon: '🖼', label: 'Imagem do menu' };
+    if (/^menu-unid\d+$/.test(id)) return { icon: '📂', label: 'Menu da unidade' };
+    if (id === 'conteudo') return { icon: '📄', label: 'Conteúdo principal' };
+    if (id === 'nesta-sessao') return { icon: '🏷', label: 'Título "Nesta sessão"' };
+    if (id === 'microfundamento') return { icon: '📘', label: 'Box microfundamento' };
+    if (id === 'texto-exercicio-fixacao') return { icon: '✏️', label: 'Exercício de fixação' };
+    if (id === 'atencao') return { icon: '⚠️', label: 'Caixa de atenção' };
+    if (id === 'sessao' || id === 'box-imagem-texto') return { icon: '🖼📝', label: 'Imagem + texto' };
     if (id === 'box-principal') return { icon: '📋', label: 'Box de dados' };
     if (id === 'videogeral') return { icon: '▦', label: 'Grade de cards' };
+    if (id === 'texto') return { icon: '📝', label: 'Texto' };
     if (/^mod\d+$/.test(id)) return { icon: '🃏', label: 'Card' };
-    if (id === 'topo' || id === 'geral') return { icon: '▦', label: 'Container' };
     if (/^borda-box-unidade\d+$/.test(id)) return { icon: '📚', label: 'Bloco de unidade' };
+    if (/^box-geral-unidade\d+$/.test(id)) return { icon: '📦', label: 'Coluna da unidade' };
     if (/^box-unidade\d+$/.test(id))       return { icon: '🔢', label: 'Número da unidade' };
     if (/^titulo-unid\d+$/.test(id))       return { icon: '📌', label: 'Título da unidade' };
+    if (/^tema\d+-unid\d+$/.test(id))      return { icon: '📑', label: 'Tema da unidade' };
     if (/^atividade-unid\d+$/.test(id))    return { icon: '✏️', label: 'Link de atividade' };
+    if (/^sintese-ref-unid\d+$/.test(id))  return { icon: '📋', label: 'Síntese e referências' };
     if (id === 'sintese')                  return { icon: '📋', label: 'Síntese' };
+
+    // ── Classes específicas ──
+    if (/\bpuv_box_info_compass\b/.test(cls))   return { icon: '🧭', label: 'Box informativo (bússola)' };
+    if (/\bpuv_box_info_lightbulb\b/.test(cls)) return { icon: '💡', label: 'Box reflexão' };
+    if (/\bpuv_box_info_\w+\b/.test(cls))       return { icon: '📌', label: 'Box informativo' };
     if (/\bcard\b/.test(cls)) return { icon: '🃏', label: 'Card' };
     if (/\bgrid-row\b/.test(cls)) return { icon: '▦', label: 'Linha (grid)' };
     if (/\bcol-(xs|sm|md|lg|xl)-/.test(cls)) return { icon: '▥', label: 'Coluna' };
     if (/\bcontent-box\b/.test(cls)) return { icon: '▦', label: 'Container' };
+
+    // ── Tags / mídia ──
     if (tag === 'IMG') {
-      return /border-radius:\s*50%/.test(el.getAttribute('style') || '')
+      return /border-radius:\s*50%/.test(style)
         ? { icon: '🖼', label: 'Foto (redonda)' } : { icon: '🖼', label: 'Imagem' };
     }
-    if (el.querySelector && el.querySelector('iframe')) return { icon: '▶', label: 'Vídeo' };
+    if (tag === 'IFRAME') return { icon: '▶', label: 'Vídeo' };
+    if (el.querySelector && el.querySelector('iframe') && !txt(el)) return { icon: '▶', label: 'Vídeo' };
+    if (el.querySelector && el.querySelector('img') && !txt(el)) return { icon: '🖼', label: 'Imagem' };
     if (tag === 'TABLE') return { icon: '▦', label: 'Tabela' };
     if (tag === 'UL' || tag === 'OL') return { icon: '•', label: 'Lista' };
     if (/^H[1-6]$/.test(tag)) return { icon: '🔤', label: 'Título' };
     if (tag === 'HR') return { icon: '—', label: 'Separador' };
-    if (tag === 'P' && txt(el)) return { icon: '¶', label: 'Parágrafo' };
-    const styleAttr = el.getAttribute('style') || '';
-    if (styleAttr.includes('border') && styleAttr.includes('#4d4961'))
+    if (tag === 'A') return { icon: '🔗', label: 'Link' };
+    if (tag === 'BUTTON') return { icon: '🔘', label: 'Botão' };
+    if (tag === 'P') return { icon: '¶', label: 'Parágrafo' };
+
+    // ── Cores de fundo conhecidas (catálogo antigo) ──
+    if (style.includes('border') && style.includes('#4d4961'))
       return { icon: '📚', label: 'Box de unidade' };
     const b = bg(el);
     if (b === 'rgb(77, 73, 97)')    return { icon: '📚', label: 'Box de unidade' };
@@ -1636,32 +1666,61 @@ function blockMapMain(savedBlocks) {
     if (b === 'rgb(114, 166, 142)') return { icon: '🔗', label: 'Botão de menu' };
     if (b === 'rgb(239, 239, 239)') return { icon: '📄', label: 'Bloco de texto' };
     if (b === 'rgb(223, 236, 231)') return { icon: '📋', label: 'Ficha da disciplina' };
+
+    // ── Fallback genérico: nada fica de fora ──
+    const hasBg = b && b !== 'rgba(0, 0, 0, 0)' && b !== 'transparent';
+    if (hasElementChildren(el) && (hasBg || /border|background/.test(style)))
+      return { icon: '📦', label: 'Caixa' };
+    if (hasElementChildren(el)) return { icon: '▭', label: 'Bloco' };
     if (txt(el)) return { icon: '📝', label: 'Texto' };
-    return null;
+    return { icon: '▫', label: 'Elemento' };
   }
 
-  function isContainer(el) {
-    const id = idof(el), cls = clsof(el);
-    return /\bcontent-box\b|\bgrid-row\b/.test(cls) || /\bcol-(xs|sm|md|lg|xl)-/.test(cls) ||
-      ['topo', 'geral', 'videogeral', 'box-principal', 'menu-lateral', 'box-curriculum'].includes(id) ||
-      /^borda-box-unidade\d+$/.test(id);
+  // Tem pelo menos um filho-elemento que valha a pena mostrar?
+  function hasElementChildren(el) {
+    return [...el.children].some(c => c.nodeType === 1 && !trivial(c));
   }
+  // Ruído estrutural que nunca vira linha: spans, <br>, scripts, espaçadores e vazios anônimos.
   function trivial(el) {
     const t = el.tagName;
-    return t === 'BR' || t === 'SPAN' || (t === 'P' && !txt(el));
+    if (t === 'BR' || t === 'SPAN' || t === 'SCRIPT' || t === 'STYLE') return true;
+    if (/^espaco/.test(idof(el))) return true;
+    if (t === 'P' && !txt(el) && !(el.querySelector && el.querySelector('img,iframe'))) return true;
+    const empty = !txt(el) && !(el.querySelector && el.querySelector('img,iframe')) && !el.children.length;
+    if (empty && !el.id) return true;
+    return false;
+  }
+  // Folha: aparece como UM item e a varredura não desce nela.
+  function isLeaf(el) {
+    const id = idof(el), cls = clsof(el), tag = el.tagName;
+    if (['P','H1','H2','H3','H4','H5','H6','IMG','HR','UL','OL','TABLE','A','BUTTON','IFRAME','FIGURE'].includes(tag)) return true;
+    if (id === 'sessao' || id === 'box-imagem-texto') return true;   // linha imagem+texto: 1 item
+    if (/\bpuv_box_info_/.test(cls)) return true;                    // box informativo: 1 item
+    if (el.querySelector && el.querySelector('iframe') && !txt(el)) return true; // wrapper só de vídeo
+    if (!hasElementChildren(el)) return true;                        // sem filhos mapeáveis
+    return false;
   }
 
+  // Preview da linha: texto; senão host do vídeo; senão alt da imagem.
+  function previewOf(el) {
+    const t = txt(el).slice(0, 45);
+    if (t) return t;
+    const ifr = el.tagName === 'IFRAME' ? el : (el.querySelector && el.querySelector('iframe'));
+    if (ifr) { try { return '▶ ' + new URL(ifr.src, doc.baseURI).hostname; } catch (e) { return 'vídeo incorporado'; } }
+    const im = el.tagName === 'IMG' ? el : (el.querySelector && el.querySelector('img'));
+    if (im) return (im.getAttribute('alt') || '').slice(0, 45) || 'imagem';
+    return '';
+  }
+
+  const MAX_DEPTH = 12;
   const items = [];
   (function collect(parent, depth) {
     [...parent.children].forEach(el => {
       if (el.nodeType !== 1 || trivial(el)) return;
       const cls = classify(el);
-      if (isContainer(el) && el.children.length) {
-        if (cls) items.push({ el, depth, icon: cls.icon, label: cls.label, preview: '' });
-        if (depth < 5) collect(el, depth + 1);
-      } else if (cls) {
-        items.push({ el, depth, icon: cls.icon, label: cls.label, preview: txt(el).slice(0, 45) });
-      }
+      const leaf = isLeaf(el);
+      items.push({ el, depth, icon: cls.icon, label: cls.label, preview: leaf ? previewOf(el) : '' });
+      if (!leaf && depth < MAX_DEPTH) collect(el, depth + 1);
     });
   })(body, 0);
 
@@ -1672,7 +1731,8 @@ function blockMapMain(savedBlocks) {
   let selected = null, actionsRow = null, activeRow = null;
   let dragRow = null, dragEl = null, mKey = false;
   const pulseStyle = doc.createElement('style');
-  pulseStyle.textContent = '@keyframes __svcMapPulse{0%,100%{box-shadow:0 0 0 3px #22c55e,0 0 6px 2px rgba(34,197,94,.45)}50%{box-shadow:0 0 0 6px #22c55e,0 0 24px 10px rgba(34,197,94,.9)}}';
+  pulseStyle.textContent = '@keyframes __svcMapPulse{0%,100%{box-shadow:0 0 0 3px #22c55e,0 0 6px 2px rgba(34,197,94,.45)}50%{box-shadow:0 0 0 6px #22c55e,0 0 24px 10px rgba(34,197,94,.9)}}'
+    + ' iframe{pointer-events:none!important}';   // deixa o clique no vídeo "atravessar" para o <p> que o envolve
   (doc.head || doc.documentElement).appendChild(pulseStyle);
   function paint(el, color, strong) {
     if (!el) return;
@@ -1731,6 +1791,147 @@ function blockMapMain(savedBlocks) {
     else flash('Clipboard indisponível.');
   }
 
+  // ── Integração com o Canvas Studio (sem API: dispara o popup nativo do editor) ──
+  // Coloca o cursor do editor logo DEPOIS do elemento, pra o vídeo do Studio cair colado abaixo dele.
+  function placeCursorAfter(el) {
+    try {
+      const rng = doc.createRange();
+      rng.setStartAfter(el); rng.collapse(true);
+      ed.selection.setRng(rng);
+      if (ed.nodeChanged) ed.nodeChanged();
+    } catch (e) {
+      try { ed.selection.select(el); ed.selection.collapse(false); } catch (_) {}
+    }
+  }
+  // Coloca o cursor DENTRO de um nó (no fim do conteúdo dele).
+  function placeCursorInside(node) {
+    try {
+      const rng = doc.createRange();
+      rng.selectNodeContents(node);
+      rng.collapse(false);
+      ed.selection.setRng(rng);
+      if (ed.nodeChanged) ed.nodeChanged();
+    } catch (e) {}
+  }
+  // Acha a área "revelável" do bloco: o conteúdo escondido de um <details> (#revelar).
+  function findRevealArea(el) {
+    if (!el) return null;
+    if (idof(el) === 'revelar') return el;
+    const byId = el.querySelector && el.querySelector('#revelar, [id^="revelar"]');
+    if (byId) return byId;
+    const det = el.tagName === 'DETAILS' ? el : (el.querySelector && el.querySelector('details'));
+    if (det) return [...det.children].find(c => c.tagName !== 'SUMMARY') || det;
+    return null;
+  }
+  // Quando um vídeo entrar na área escondida, recolhe o <details> de novo (vídeo fica oculto).
+  function collapseWhenVideoArrives(det, reveal) {
+    if (!det || !reveal || typeof MutationObserver === 'undefined') return;
+    const obs = new MutationObserver(() => {
+      if (reveal.querySelector('iframe')) {
+        det.removeAttribute('open');
+        if (ed.setDirty) ed.setDirty(true);
+        obs.disconnect();
+      }
+    });
+    obs.observe(reveal, { childList: true, subtree: true });
+    setTimeout(() => obs.disconnect(), 180000);   // não observa pra sempre
+  }
+  // Centraliza o vídeo do Studio (que entra alinhado à esquerda por padrão).
+  function centerVideo(iframe) {
+    try {
+      iframe.style.display = 'block';
+      iframe.style.marginLeft = 'auto';
+      iframe.style.marginRight = 'auto';
+      const p = iframe.closest && iframe.closest('p');
+      if (p && body.contains(p)) p.style.textAlign = 'center';
+      if (ed.setDirty) ed.setDirty(true);
+    } catch (e) {}
+  }
+  // Cria a linha do vídeo recém-inserido pelo Studio no painel do mapa.
+  function addVideoRow(iframe, sourceRow, depth) {
+    let videoEl = iframe;
+    const p = iframe.closest && iframe.closest('p');
+    if (p && body.contains(p)) videoEl = p;
+    centerVideo(iframe);                                        // centraliza por padrão
+    if (items.find(it => it.el === videoEl)) return;            // já listado
+    const preview = previewOf(videoEl);
+    const row = buildRow({ el: videoEl, icon: '▶', label: 'Vídeo', preview, depth: depth || 0, isDup: true, tag: 'novo' });
+    if (sourceRow && sourceRow.parentNode) sourceRow.insertAdjacentElement('afterend', row);
+    else panel.appendChild(row);
+    items.push({ el: videoEl, row, depth: depth || 0, icon: '▶', label: 'Vídeo', preview });
+    try { videoEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+    flash('▶ Vídeo adicionado ao mapa!');
+  }
+  // Observa o editor e, quando o Studio inserir um vídeo novo, cria a linha dele no mapa.
+  function watchForStudioVideo(sourceRow, depth) {
+    if (typeof MutationObserver === 'undefined') return;
+    const before = new Set([...body.querySelectorAll('iframe')]);
+    const obs = new MutationObserver(() => {
+      const fresh = [...body.querySelectorAll('iframe')].find(f => !before.has(f));
+      if (!fresh) return;
+      obs.disconnect();
+      addVideoRow(fresh, sourceRow, depth);
+    });
+    obs.observe(body, { childList: true, subtree: true });
+    setTimeout(() => obs.disconnect(), 180000);
+  }
+  // Acha um gatilho dentro de `root` cujo rótulo (aria-label/title/texto) bate com `re`.
+  // NÃO inclui <a>: evita clicar no link "Studio" da navegação lateral do Canvas (que sai da página).
+  function findIn(root, re, useText) {
+    const sel = 'button,[role="button"],[role="menuitem"],.tox-tbtn,.tox-mbtn,.tox-collection__item';
+    const hit = s => s && re.test(s);
+    return [...root.querySelectorAll(sel)].find(b =>
+      hit(b.getAttribute('aria-label')) || hit(b.getAttribute('title')) || (useText && hit((b.textContent || '').trim())));
+  }
+  // Item "Studio" do menu flutuante do editor (renderiza em .tox-tinymce-aux, fora do .tox-tinymce).
+  function findStudioMenuItem() {
+    return [...document.querySelectorAll('.tox-collection__item,[role="menuitem"]')].find(it => {
+      const s = (it.getAttribute('aria-label') || it.getAttribute('title') || it.textContent || '').trim();
+      return /studio/i.test(s);
+    });
+  }
+  // Tenta abrir o popup do Studio a partir da barra do editor. cb(true) se disparou algo.
+  function tryOpenStudio(cb) {
+    const tox = document.querySelector('.tox-tinymce') || document.body;
+    // 1) Studio já visível como botão/menu na barra do editor.
+    const direct = findIn(tox, /studio/i, true);
+    if (direct) { direct.click(); return cb(true); }
+    // 2) Abre o menu de apps/ferramentas (ícone de plug) DENTRO da barra do editor.
+    const apps = findIn(tox, /\b(apps?|aplicativ|ferramentas?|tools?|plugins?|external)\b/i, false);
+    if (!apps) return cb(false);
+    apps.click();
+    // 3) O item "Studio" aparece no menu flutuante logo depois — procura por alguns instantes.
+    let tries = 0;
+    (function poll() {
+      const item = findStudioMenuItem();
+      if (item) { item.click(); return cb(true); }
+      if (++tries > 25) return cb(false);
+      setTimeout(poll, 120);
+    })();
+  }
+  function studioInsert(el, sourceRow) {
+    if (ed.focus) ed.focus();
+    const reveal = findRevealArea(el);
+    let rowDepth = (sourceRow && sourceRow.__depth) || 0;
+    if (reveal) {
+      const det = (reveal.closest && reveal.closest('details')) || (reveal.tagName === 'DETAILS' ? reveal : null);
+      if (det && !det.hasAttribute('open')) det.setAttribute('open', 'open');   // abre pra poder inserir dentro
+      const target = [...reveal.querySelectorAll('p')].find(p => !txt(p)) || reveal;
+      placeCursorInside(target);
+      if (det) collapseWhenVideoArrives(det, reveal);
+      rowDepth += 1;
+    } else {
+      placeCursorAfter(el);
+    }
+    watchForStudioVideo(sourceRow, rowDepth);
+    tryOpenStudio(ok => {
+      const onde = reveal ? 'dentro do bloco (vai ficar escondido)' : 'colado abaixo deste bloco';
+      flash(ok
+        ? '🎬 Studio aberto — escolha o vídeo; ele entra ' + onde + '.'
+        : 'Cursor posicionado ' + (reveal ? 'dentro do bloco' : 'abaixo do bloco') + '. Clique no botão Studio na barra do editor.');
+    });
+  }
+
   const panel = document.createElement('div');
   Object.assign(panel.style, { position:'fixed', top:'0', left:'0', width:'300px', maxHeight:'100vh',
     overflowY:'auto', background:'#1e1e2e', color:'#e2e8f0', font:'12px system-ui,sans-serif',
@@ -1749,7 +1950,7 @@ function blockMapMain(savedBlocks) {
 
   const hint = document.createElement('div');
   Object.assign(hint.style, { padding: '3px 12px 5px', fontSize: '10px', opacity: '.4', background: '#11111b', borderBottom: '1px solid #313244' });
-  hint.textContent = 'Segure M + arraste para reordenar';
+  hint.textContent = 'Clique num elemento da página para achá-lo aqui · Segure M + arraste para reordenar';
   panel.appendChild(hint);
 
   const dropLine = document.createElement('div');
@@ -1824,7 +2025,7 @@ function blockMapMain(savedBlocks) {
     row.__depth = depth;
     row.__el = el;
     row.dataset.mapRow = '1';
-    Object.assign(row.style, { padding: '6px 12px 6px ' + (12 + depth * 14) + 'px', cursor: 'pointer',
+    Object.assign(row.style, { padding: '6px 12px 6px ' + (12 + Math.min(depth, 7) * 12) + 'px', cursor: 'pointer',
       borderBottom: '1px solid #28283b', display: 'flex', alignItems: 'center', gap: '6px',
       background: isDup ? 'rgba(239,68,68,0.18)' : '' });
     const info = document.createElement('div');
@@ -1874,15 +2075,16 @@ function blockMapMain(savedBlocks) {
   function openActions(afterRow, el) {
     if (actionsRow) actionsRow.remove();
     actionsRow = document.createElement('div');
-    Object.assign(actionsRow.style, { display: 'flex', gap: '6px', padding: '6px 12px', background: '#181825' });
+    Object.assign(actionsRow.style, { display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '6px 12px', background: '#181825' });
     const mk = (label, fn) => {
       const b = document.createElement('button'); b.textContent = label;
-      Object.assign(b.style, { flex: '1', padding: '5px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: '#313244', color: '#e2e8f0', fontSize: '11px' });
+      Object.assign(b.style, { flex: '1 1 64px', minWidth: '64px', padding: '5px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: '#313244', color: '#e2e8f0', fontSize: '11px' });
       b.onclick = fn; return b;
     };
     actionsRow.appendChild(mk('📑 Duplicar', () => dupe(el, afterRow)));
     actionsRow.appendChild(mk('📋 Copiar', () => copyHtml(el)));
     actionsRow.appendChild(mk('➕ Inserir', () => openInsertPicker(afterRow, el)));
+    actionsRow.appendChild(mk('🎬 Studio', () => studioInsert(el, afterRow)));
     actionsRow.appendChild(mk('💾 Salvar', () => saveBlock(el)));
     afterRow.insertAdjacentElement('afterend', actionsRow);
   }
@@ -1997,7 +2199,7 @@ function blockMapMain(savedBlocks) {
       target = target.parentElement;
     }
   }
-  body.addEventListener('click', onEditorClick);
+  body.addEventListener('click', onEditorClick, true);
 
   items.forEach(it => {
     it.row = buildRow({ el: it.el, icon: it.icon, label: it.label, preview: it.preview, depth: it.depth, isDup: false });
@@ -2037,7 +2239,7 @@ function blockMapMain(savedBlocks) {
     document.removeEventListener('mousemove', onDragMove, true);
     document.removeEventListener('mouseup', onDragDrop, true);
     doc.removeEventListener('keydown', onKey, true);
-    body.removeEventListener('click', onEditorClick);
+    body.removeEventListener('click', onEditorClick, true);
     cancelDrag();
     panel.remove();
     window.__svcMapCleanup = null;
