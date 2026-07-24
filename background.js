@@ -210,9 +210,17 @@ function copySmartClean(tabId) {
           el.appendChild(frag);
           return el;
         }
+        if (tag === 'A') {
+          const href = node.getAttribute('href');
+          if (!href) return frag;
+          const a = document.createElement('a');
+          a.setAttribute('href', href);
+          a.appendChild(frag);
+          return a;
+        }
         if (BLOCK.has(tag)) {
           const p = document.createElement('p');
-          p.setAttribute('style', `color:${COLOR}`);
+          p.setAttribute('style', `color:${COLOR};text-align:justify`);
           p.appendChild(frag);
           return p;
         }
@@ -229,14 +237,14 @@ function copySmartClean(tabId) {
       // Envolve nós inline e texto do topo em <p>
       const out = document.createElement('div');
       let buf   = [];
-      const INLINE_NAMES = new Set(['BR', 'STRONG', 'B', 'EM', 'I']);
+      const INLINE_NAMES = new Set(['BR', 'STRONG', 'B', 'EM', 'I', 'A']);
 
       function flushBuf() {
         if (!buf.length) return;
-        const hasText = buf.some(n => n.nodeType === 3 && n.textContent.trim());
+        const hasText = buf.some(n => n.textContent && n.textContent.trim());
         if (hasText) {
           const p = document.createElement('p');
-          p.setAttribute('style', `color:${COLOR}`);
+          p.setAttribute('style', `color:${COLOR};text-align:justify`);
           buf.forEach(n => p.appendChild(n));
           out.appendChild(p);
         }
@@ -306,6 +314,94 @@ function copySmartClean(tabId) {
   });
 }
 
+// Justifica o parágrafo atual no editor rico do Canvas (TinyMCE).
+// Não exige seleção — como os botões nativos de alinhamento, age sobre
+// o bloco onde o cursor está.
+function justifyText(tabId) {
+  chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      function showToast(text, bg) {
+        document.getElementById('__svc-toast__')?.remove();
+        const el = document.createElement('div');
+        el.id = '__svc-toast__';
+        el.textContent = text;
+        Object.assign(el.style, {
+          position: 'fixed', bottom: '24px', right: '24px',
+          background: bg, color: '#fff',
+          padding: '10px 16px', borderRadius: '6px',
+          fontFamily: 'system-ui', fontSize: '13px',
+          zIndex: '2147483647', boxShadow: '0 2px 8px rgba(0,0,0,.4)',
+        });
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 3500);
+      }
+
+      // Remove qualquer alinhamento (esquerda/centro/direita) herdado —
+      // inline style, atributo align legado ou classes de alinhamento comuns
+      // (Word, Quill etc.) — para que só reste o justificado.
+      function clearAlignment(el) {
+        el.style.removeProperty('text-align');
+        if (!el.style.length) el.removeAttribute('style');
+        el.removeAttribute('align');
+        el.classList.remove(
+          'text-left', 'text-center', 'text-right', 'text-justify',
+          'ql-align-left', 'ql-align-center', 'ql-align-right', 'ql-align-justify'
+        );
+        if (!el.classList.length) el.removeAttribute('class');
+      }
+
+      function forceJustify(root, boundary) {
+        clearAlignment(root);
+        root.querySelectorAll('[style*="text-align"], [align]').forEach(clearAlignment);
+
+        // Sobe por wrappers (ex: <div><div><p>) que envolvem SÓ este bloco
+        // (sem irmãos) e limpa o alinhamento deles também — sem isso, um
+        // <div style="text-align:right"> pai continua "vazando" a
+        // formatação e o Canvas mostra Direita + Justificado marcados ao
+        // mesmo tempo. Para no primeiro ancestral com mais de 1 filho, pra
+        // não mexer em conteúdo não selecionado que divida o mesmo container.
+        let ancestor = root.parentElement;
+        while (ancestor && ancestor !== boundary && ancestor.children.length === 1) {
+          clearAlignment(ancestor);
+          ancestor = ancestor.parentElement;
+        }
+
+        root.style.textAlign = 'justify';
+      }
+
+      if (typeof tinymce !== 'undefined' && tinymce.activeEditor) {
+        const editor = tinymce.activeEditor;
+        const body   = editor.getBody();
+        editor.execCommand('JustifyFull');
+        editor.selection.getSelectedBlocks().forEach(block => forceJustify(block, body));
+        showToast('✓ Texto justificado!', '#1d4ed8');
+        return;
+      }
+
+      const active = document.activeElement;
+      if (active && active.isContentEditable) {
+        document.execCommand('justifyFull');
+
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount) {
+          let node = sel.getRangeAt(0).commonAncestorContainer;
+          if (node.nodeType === 3) node = node.parentElement;
+          const BLOCK_TAGS = ['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE', 'TD', 'TH'];
+          while (node && node !== active && !BLOCK_TAGS.includes(node.tagName)) node = node.parentElement;
+          if (node) forceJustify(node, active);
+        }
+
+        showToast('✓ Texto justificado!', '#1d4ed8');
+        return;
+      }
+
+      showToast('⚠ Clique dentro do editor antes de justificar.', '#b45309');
+    },
+    world: 'MAIN',
+  });
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   refreshIcon();
@@ -355,7 +451,18 @@ chrome.runtime.onInstalled.addListener(() => {
     title: '🔤 Adicionar ponto final nas frases',
     contexts: ['selection'],
   });
+  chrome.contextMenus.create({
+    id: 'justify-text',
+    title: '📏 Justificar texto (Canvas)',
+    contexts: ['editable'],
+  });
 });
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== 'justify-text') return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) justifyText(tab.id);
+});
+
 chrome.runtime.onStartup.addListener(async () => {
   // Navegador reiniciou com um card "rodando" => foi fechado por desligamento/
   // crash (no fechamento limpo das janelas, windows.onRemoved já suspenderia).
@@ -468,6 +575,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
   if (info.menuItemId === 'smart-copy') {
     copySmartClean(tab.id);
+  }
+  if (info.menuItemId === 'justify-text') {
+    justifyText(tab.id);
   }
   if (info.menuItemId === 'download-round') {
     (async () => {

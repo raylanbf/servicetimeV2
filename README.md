@@ -220,7 +220,6 @@ Acessível pelo botão **⚙** no topo do painel.
 servicetime-v2/
 ├── manifest.json        # Manifest V3 — permissões e configuração
 ├── background.js        # Service Worker — ícone dinâmico, menu de contexto e uploads
-├── content.js           # Script de conteúdo — operações de clipboard
 ├── popup.html           # Interface do painel lateral
 ├── popup.js             # Lógica principal
 ├── popup.css            # Estilos (tema escuro)

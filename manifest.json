@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Service Timer",
-  "version": "3.3",
+  "version": "3.4",
   "description": "Controle de tempo por tipo de serviço",
   "action": {
     "default_title": "Service Timer",
@@ -25,12 +25,24 @@
     "service_worker": "background.js"
   },
   "permissions": ["storage", "tabs", "contextMenus", "scripting", "downloads", "windows", "clipboardWrite", "sidePanel", "alarms"],
+  "commands": {
+    "justify-text": {
+      "suggested_key": { "default": "Ctrl+Shift+J" },
+      "description": "Justificar texto no editor (Canvas)"
+    }
+  },
   "host_permissions": ["https://script.google.com/*", "<all_urls>"],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": ["highlighter.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["canvas-justify.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
     }
   ],
   "web_accessible_resources": [
