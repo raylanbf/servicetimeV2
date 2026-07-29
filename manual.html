@@ -247,10 +247,12 @@
   <a class="nav-item" href="#sheets">Google Sheets</a>
   <a class="nav-item" href="#canvas">Canvas LMS</a>
   <a class="nav-item" href="#canvas-revisions">↳ Histórico de edições</a>
+  <a class="nav-item" href="#canvas-checklist">↳ Checklist de publicação</a>
   <a class="nav-item" href="#canvas-editor">↳ Edição de página</a>
   <a class="nav-item" href="#canvas-editor-dup">　· Duplicar bloco</a>
   <a class="nav-item" href="#canvas-editor-move">　· Reorganizar blocos</a>
   <a class="nav-item" href="#canvas-editor-map">　· Mapa de elementos</a>
+  <a class="nav-item" href="#canvas-blocos">　· Blocos salvos</a>
 
   <div class="nav-section">Ferramentas</div>
   <a class="nav-item" href="#contexto">Menu de contexto</a>
@@ -462,6 +464,96 @@ PROVA FINAL</pre>
     </div>
   </section>
 
+  <!-- ── Checklist de publicação ── -->
+  <section id="canvas-checklist">
+    <h2><span class="icon">📋</span>Checklist de publicação</h2>
+    <p>Audita um ou vários cursos de uma vez, apontando pendências antes da publicação. Acesse pelo painel em <strong>🎓 Canvas LMS → 📋 Checklist de publicação</strong>.</p>
+
+    <ol class="steps">
+      <li>Deixe qualquer página do Canvas aberta na aba ativa — é ela que autentica as consultas</li>
+      <li>Cole os <strong>códigos dos cursos</strong>, um por linha. O botão <strong>+ aba atual</strong> insere o curso que está aberto</li>
+      <li>Ligue os verificadores opcionais que quiser</li>
+      <li>Clique em <strong>▶ Rodar verificações</strong></li>
+    </ol>
+
+    <p>Cada curso vira um card com um resumo — <strong>✅</strong> sem pendências · <strong>⚠️</strong> pontos de atenção · <strong>❌</strong> falha na consulta · <strong>–</strong> verificação desligada. Cards com pendência abrem sozinhos ao terminar; clique no cabeçalho para expandir ou recolher.</p>
+
+    <h3>O que é verificado</h3>
+    <table>
+      <thead><tr><th>Verificação</th><th>Opcional</th><th>O que reporta</th></tr></thead>
+      <tbody>
+        <tr><td>🎬 Módulo "Novos Vídeos"</td><td>—</td><td>Quantos itens há no módulo, quando ele existe</td></tr>
+        <tr><td>📄 Lorem Ipsum</td><td>Toggle</td><td>Páginas com texto de preenchimento esquecido, listadas pelo título</td></tr>
+        <tr><td>▶️ Páginas sem vídeo</td><td>Toggle</td><td>Páginas que deveriam ter vídeo e não têm</td></tr>
+        <tr><td>📢 Avisos antigos</td><td>—</td><td>Avisos existentes, com data de criação e de publicação agendada</td></tr>
+        <tr><td>💬 Fóruns antigos</td><td>—</td><td>Fóruns remanescentes no curso</td></tr>
+        <tr><td>📊 Testes e pontuações</td><td>—</td><td>Conferência das regras de pontuação (abaixo)</td></tr>
+        <tr><td>📌 Páginas não publicadas</td><td>Toggle</td><td>Quantidade de páginas dos módulos ainda despublicadas</td></tr>
+        <tr><td>⚙️ Itens sem requisito</td><td>Toggle</td><td>Itens visíveis sem requisito de conclusão</td></tr>
+        <tr><td>🔗 Links quebrados</td><td>Toggle</td><td>Resultado do validador de links nativo do Canvas</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Regras de testes e pontuações</h3>
+    <table>
+      <thead><tr><th>Item</th><th>Esperado</th></tr></thead>
+      <tbody>
+        <tr><td>Prova Final</td><td>40 pontos · 10 perguntas · 2 tentativas · publicada · SIS habilitado · respostas embaralhadas</td></tr>
+        <tr><td>Demais atividades</td><td>60 pontos somados · todas publicadas · SIS habilitado</td></tr>
+        <tr><td>Total do curso</td><td>100 pontos</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Escopo: apenas o que está nos módulos</h3>
+    <p>As três verificações que olham páginas — <strong>Lorem Ipsum</strong>, <strong>Páginas sem vídeo</strong> e <strong>Páginas não publicadas</strong> — consideram somente as páginas <strong>vinculadas a algum módulo</strong>.</p>
+
+    <div class="callout blue">
+      Uma página criada e depois retirada do módulo continua existindo no curso, mas deixa de ser auditada — rascunhos descartados não geram alarme falso.
+    </div>
+
+    <h3>▶️ Páginas sem vídeo</h3>
+    <p>Aponta as páginas dos módulos que não têm vídeo do próprio Canvas:</p>
+
+    <table>
+      <thead><tr><th>Conta como vídeo</th><th>Não conta</th></tr></thead>
+      <tbody>
+        <tr><td>Embed do Canvas Studio — inclusive quando o iframe foi copiado de outra página</td><td>YouTube e Vimeo</td></tr>
+        <tr><td>Player de mídia nativo (upload pelo editor)</td><td>Padlet, Genially e outros iframes</td></tr>
+        <tr><td>Gravação feita pelo próprio editor</td><td>Ferramentas LTI que não são de mídia</td></tr>
+      </tbody>
+    </table>
+
+    <p>As páginas que não precisam ter vídeo ficam em <strong>Configurações → Canvas LMS → Páginas sem vídeo</strong>, no mesmo formato de nome parcial das exceções de recuo. A extensão já vem com:</p>
+
+    <pre>Apresentação da Disciplina
+Plano de Ensino
+Referências Bibliográficas
+Orientações de Estudo
+Material Complementar
+Atividade Objetiva
+Como você avalia esta disciplina?
+PROVA FINAL</pre>
+
+    <p>Apague as linhas que não fizerem sentido para os seus cursos e salve — a sua lista passa a valer, inclusive vazia.</p>
+
+    <h3>Custo e limites</h3>
+    <p>Os verificadores marcados como lentos exigem uma consulta por página do curso. Os cursos rodam em paralelo, então uma lista grande com tudo ligado dispara centenas de requisições de uma vez.</p>
+
+    <div class="callout yellow">
+      Rode em lotes de <strong>3 a 5 cursos</strong> ao ligar os verificadores lentos. O Canvas limita a quantidade de consultas por usuário — ao estourar, as suas próprias requisições falham por alguns minutos. A extensão desacelera sozinha quando o limite se aproxima e repete as chamadas recusadas.
+    </div>
+
+    <p>A validação de links é a mais demorada: ela dispara o job do Canvas e aguarda o resultado, o que leva até <strong>3 minutos por curso</strong>, um curso de cada vez.</p>
+
+    <div class="callout">
+      O checklist apenas <strong>lê</strong> o curso. A única exceção é a validação de links, que aciona o mesmo verificador nativo disponível nas configurações do Canvas — nada é publicado, alterado ou removido.
+    </div>
+
+    <div class="callout yellow">
+      O resultado não é salvo: fechar o painel lateral durante a execução descarta a rodada.
+    </div>
+  </section>
+
   <!-- ── Edição de página ── -->
   <section id="canvas-editor">
     <h2><span class="icon">✏️</span>Edição de página</h2>
@@ -625,6 +717,32 @@ PROVA FINAL</pre>
     </div>
   </section>
 
+  <!-- ── Blocos salvos ── -->
+  <section id="canvas-blocos">
+    <h2><span class="icon">📦</span>Blocos salvos</h2>
+    <p>Biblioteca de trechos de HTML reutilizáveis — box de Libras, caixa de atenção, card de unidade. Acesse em <strong>🎓 Canvas LMS → 📦 Blocos salvos</strong>.</p>
+
+    <h3>Como salvar</h3>
+    <ul>
+      <li><strong>Pela biblioteca</strong> — dê um nome e cole o HTML no formulário</li>
+      <li><strong>Pelo mapa de elementos</strong> — selecione um bloco da página e clique em <strong>💾 Salvar</strong>; o HTML é capturado direto do editor</li>
+    </ul>
+    <p>Clique em um bloco da lista para editá-lo; o <strong>✕</strong> remove.</p>
+
+    <h3>Como inserir na página</h3>
+    <table>
+      <thead><tr><th>Ferramenta</th><th>Como</th></tr></thead>
+      <tbody>
+        <tr><td>🗺 Mapa de elementos</td><td>Selecione a linha de referência, clique em <strong>➕ Inserir</strong>, escolha o bloco e depois <strong>⬆ Antes</strong> ou <strong>⬇ Depois</strong></td></tr>
+        <tr><td>✋ Reorganizar blocos</td><td>Escolha o bloco no seletor <strong>📦 inserir bloco salvo…</strong> da barra superior e clique num bloco da página — metade de cima insere antes, metade de baixo insere depois</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      A inserção passa pelo undoManager do TinyMCE — <strong>Ctrl+Z</strong> desfaz. Ao salvar, atributos do TinyMCE e do Dark Reader são descartados, mas ids, classes e estilos do template são preservados.
+    </div>
+  </section>
+
   <!-- ── Menu de contexto ── -->
   <section id="contexto">
     <h2><span class="icon">🖱</span>Menu de contexto</h2>
@@ -637,6 +755,7 @@ PROVA FINAL</pre>
         <tr><td>🔠 Copiar em CAIXA ALTA</td><td>Converte o texto selecionado para maiúsculas, mantendo negrito e itálico</td></tr>
         <tr><td>🧹 Copiar texto limpo</td><td>Remove atributos e estilos, mantém negrito, itálico e listas</td></tr>
         <tr><td>✨ Copia Inteligente</td><td>Cópia avançada para editores rich text — veja seção dedicada abaixo</td></tr>
+        <tr><td>🔤 Adicionar ponto final nas frases</td><td>Fecha com ponto as linhas selecionadas que terminam sem pontuação. Funciona no editor do Canvas, em campos de texto e em áreas editáveis; linhas que já terminam em <code>. ! ? ; : …</code> ficam intactas</td></tr>
       </tbody>
     </table>
 
@@ -658,6 +777,22 @@ PROVA FINAL</pre>
         <tr><td>🖊 Remover destaques da página</td><td>Remove todos os trechos marcados pelo marca-texto de uma só vez</td></tr>
       </tbody>
     </table>
+
+    <h3>Justificar texto <span class="chip chip-page">campo editável</span></h3>
+    <p>O TinyMCE do Canvas não traz o botão de justificar na barra — só em <strong>Formato → Alinhamento → Justificar</strong>. A extensão oferece três caminhos para o mesmo resultado:</p>
+
+    <table>
+      <thead><tr><th>Caminho</th><th>Quando usar</th></tr></thead>
+      <tbody>
+        <tr><td>Botão na barra do editor</td><td>Inserido automaticamente na toolbar sempre que um editor do Canvas é aberto</td></tr>
+        <tr><td><strong>Ctrl+Shift+J</strong></td><td>Atalho de teclado, com o cursor dentro do editor</td></tr>
+        <tr><td>📏 Justificar texto (Canvas)</td><td>Menu de contexto, clicando com o botão direito dentro do campo</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout blue">
+      Não é preciso selecionar o texto: assim como os botões nativos de alinhamento, a ação vale para o parágrafo onde o cursor está. Alinhamentos herdados de <code>&lt;div&gt;</code> pai são limpos, para o Canvas não exibir "Direita" e "Justificado" marcados ao mesmo tempo.
+    </div>
   </section>
 
   <!-- ── Marca-texto ── -->
@@ -807,6 +942,7 @@ PROVA FINAL</pre>
       <thead><tr><th>Campo</th><th>Descrição</th></tr></thead>
       <tbody>
         <tr><td>Páginas sem recuo</td><td>Nomes parciais (um por linha) das páginas que não devem receber indentação ao aplicar o recuo nos módulos</td></tr>
+        <tr><td>Páginas sem vídeo</td><td>Nomes parciais (um por linha) das páginas que não precisam ter vídeo — ficam fora da verificação <strong>▶️ Páginas sem vídeo</strong> do checklist</td></tr>
       </tbody>
     </table>
 
