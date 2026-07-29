@@ -16,6 +16,18 @@ const DEFAULT_CANVAS_EXCEPTIONS = [
   'PROVA FINAL',
 ];
 
+// Páginas que, por padrão, não precisam ter vídeo — editável em ⚙ Configurações.
+const DEFAULT_CANVAS_NO_VIDEO = [
+  'Apresentação da Disciplina',
+  'Plano de Ensino',
+  'Referências Bibliográficas',
+  'Orientações de Estudo',
+  'Material Complementar',
+  'Atividade Objetiva',
+  'Como você avalia esta disciplina?',
+  'PROVA FINAL',
+];
+
 const APPS_SCRIPT =
 `function doPost(e) {
   try {
@@ -862,6 +874,7 @@ function buildSettings() {
   };
 
   $('settings-canvas-exceptions').value = (S.canvasExceptions || []).join('\n');
+  $('settings-canvas-no-video').value   = (S.canvasNoVideo || []).join('\n');
 
   $('btn-save-settings').onclick = async () => {
     const name = $('settings-name').value.trim();
@@ -869,12 +882,12 @@ function buildSettings() {
     const w          = parseInt($('settings-video-w').value, 10) || 620;
     const h          = parseInt($('settings-video-h').value, 10) || 398;
     const key        = $('settings-openrouter').value.trim();
-    const exceptions = $('settings-canvas-exceptions').value
-      .split('\n').map(s => s.trim()).filter(Boolean);
+    const toLines = el => $(el).value.split('\n').map(s => s.trim()).filter(Boolean);
     await persist({
       usuario: name, webhook_url: $('settings-url').value.trim(),
       video_width: w, video_height: h, openrouter_key: key,
-      canvasExceptions: exceptions,
+      canvasExceptions: toLines('settings-canvas-exceptions'),
+      canvasNoVideo:    toLines('settings-canvas-no-video'),
     });
     $('user-label').textContent = '👤  ' + name;
     show('main');
@@ -2258,6 +2271,7 @@ function blockMapMain(savedBlocks) {
 const CHECKLIST_ITEMS = [
   { id: 'novos-videos', name: 'Módulo "Novos Vídeos"',   icon: '🎬' },
   { id: 'lorem-ipsum',  name: 'Lorem Ipsum nas páginas', icon: '📄' },
+  { id: 'paginas-sem-video', name: 'Páginas sem vídeo',  icon: '▶️' },
   { id: 'avisos',       name: 'Avisos antigos',           icon: '📢' },
   { id: 'foruns',       name: 'Fóruns antigos',           icon: '💬' },
   { id: 'testes',       name: 'Testes e pontuações',      icon: '📊' },
@@ -2371,11 +2385,11 @@ function updateCourseBadge(courseId) {
   }
 }
 
-// Checks 1-7 consolidados num único executeScript por curso
-async function clRunChecks1to5(tabId, courseId, includeLoremIpsum, includePageNaoPublicadas, includeRequisitosConclusao) {
+// Todos os checks (menos o de links) num único executeScript por curso
+async function clRunCourseChecks(tabId, courseId, opts) {
   const result = await chrome.scripting.executeScript({
     target: { tabId },
-    func: async (courseId, includeLoremIpsum, includePageNaoPublicadas, includeRequisitosConclusao) => {
+    func: async (courseId, includeLoremIpsum, includePageNaoPublicadas, includeRequisitosConclusao, includeSemVideo, noVideoExceptions) => {
       const delay = ms => new Promise(r => setTimeout(r, ms));
 
       // Fetch com proteção de rate limit do Canvas
@@ -2406,11 +2420,98 @@ async function clRunChecks1to5(tabId, courseId, includeLoremIpsum, includePageNa
         return out;
       }
 
+      // Módulos e seus itens são usados por vários checks — busca uma vez só,
+      // senão cada check refaz as mesmas dezenas de chamadas e estoura o rate limit.
+      let _modules = null;
+      async function getModules() {
+        if (!_modules) _modules = await fetchAll(`/api/v1/courses/${courseId}/modules?per_page=100`);
+        return _modules;
+      }
+
+      let _modulesWithItems = null;
+      async function getModulesWithItems() {
+        if (_modulesWithItems) return _modulesWithItems;
+        const acc = [];
+        for (const mod of await getModules()) {
+          acc.push({ mod, items: await fetchAll(`/api/v1/courses/${courseId}/modules/${mod.id}/items?per_page=100`) });
+        }
+        _modulesWithItems = acc;
+        return acc;
+      }
+
+      // Páginas alcançáveis pelo aluno: só as vinculadas a algum módulo.
+      // O índice /pages traz também páginas soltas — rascunhos removidos do
+      // módulo, mas ainda existentes no curso — que não devem ser auditadas.
+      // Dedupe por page_url: a mesma página pode estar em mais de um módulo.
+      async function getModulePages() {
+        const seen = new Map();
+        for (const { mod, items } of await getModulesWithItems()) {
+          for (const item of items) {
+            if (item.type !== 'Page' || !item.page_url || seen.has(item.page_url)) continue;
+            seen.set(item.page_url, { url: item.page_url, title: item.title, module: mod.name });
+          }
+        }
+        return [...seen.values()];
+      }
+
+      // O corpo de cada página é o download mais caro do checklist e serve a mais
+      // de um check (Lorem Ipsum, vídeo) — baixa uma vez só. `failed` marca o que
+      // não deu para ler, para nenhum check tratar erro como resultado válido.
+      let _pageBodies = null;
+      async function getModulePagesWithBody() {
+        if (_pageBodies) return _pageBodies;
+        const pages = await getModulePages();
+        const acc = [];
+        for (let i = 0; i < pages.length; i += 3) {        // lotes de 3 para não sobrecarregar
+          const results = await Promise.all(pages.slice(i, i + 3).map(async p => {
+            try {
+              const res = await safeFetch(`/api/v1/courses/${courseId}/pages/${p.url}`);
+              if (!res.ok) return { ...p, failed: true };
+              const d = await res.json();
+              return { ...p, title: d.title || p.title, itemTitle: p.title, body: d.body || '' };
+            } catch { return { ...p, failed: true }; }
+          }));
+          acc.push(...results);
+          if (i + 3 < pages.length) await delay(150);      // pausa entre lotes
+        }
+        _pageBodies = acc;
+        return acc;
+      }
+
+      // Só conta vídeo do próprio Canvas: player de mídia nativo (upload ou gravação
+      // pelo editor) e embed do Studio — inclusive quando o iframe foi copiado de
+      // outra página e colado aqui, já que a assinatura do src viaja junto.
+      // Vídeo de terceiros (YouTube, Vimeo) e iframes que não são mídia (Padlet,
+      // formulários) NÃO contam.
+      const CANVAS_MEDIA_SRC = /media_objects_iframe|media_attachments_iframe|instructuremedia|custom_arc_media_id|\/media_objects\//i;
+      function hasCanvasVideo(html) {
+        if (!html) return false;
+        try {
+          const parsed = new DOMParser().parseFromString(html, 'text/html');
+          // Player nativo, gravação pelo RCE ou comentário de mídia (formato antigo)
+          if (parsed.querySelector('video, [data-media-id], [data-media_comment_id], [data-media-type="video"], .instructure_inline_media_comment')) return true;
+          // iframe só vale se o src apontar para mídia do Canvas ou para o Studio
+          return [...parsed.querySelectorAll('iframe')]
+            .some(f => CANVAS_MEDIA_SRC.test(f.getAttribute('src') || ''));
+        } catch (e) {
+          return CANVAS_MEDIA_SRC.test(html);
+        }
+      }
+
+      // Mesma regra do recuo dos módulos: comparação parcial, sem diferenciar maiúsculas.
+      function isNoVideoException(title) {
+        const t = (title || '').toLowerCase();
+        return (noVideoExceptions || []).some(exc => {
+          const e = exc.toLowerCase().trim();
+          return e && t.includes(e);
+        });
+      }
+
       const out = {};
 
       // 1: Novos Vídeos
       try {
-        const modules = await fetchAll(`/api/v1/courses/${courseId}/modules?per_page=100`);
+        const modules = await getModules();
         const mod = modules.find(m => {
           const n = m.name.toLowerCase()
             .replace(/[áàãâä]/g, 'a').replace(/[éèêë]/g, 'e')
@@ -2429,22 +2530,28 @@ async function clRunChecks1to5(tabId, courseId, includeLoremIpsum, includePageNa
         out.loremIpsum = { skipped: true };
       } else {
         try {
-          const pages = await fetchAll(`/api/v1/courses/${courseId}/pages?per_page=100`);
-          const found = [];
-          for (let i = 0; i < pages.length; i += 3) {      // lotes de 3 para não sobrecarregar
-            const results = await Promise.all(pages.slice(i, i + 3).map(async p => {
-              try {
-                const res = await safeFetch(`/api/v1/courses/${courseId}/pages/${p.url}`);
-                if (!res.ok) return null;
-                const d = await res.json();
-                return (d.body || '').toLowerCase().includes('lorem ipsum') ? p.title : null;
-              } catch { return null; }
-            }));
-            found.push(...results.filter(Boolean));
-            if (i + 3 < pages.length) await delay(150);    // pausa entre lotes
-          }
-          out.loremIpsum = { found };
+          const pages = await getModulePagesWithBody();
+          const found = pages
+            .filter(p => !p.failed && (p.body || '').toLowerCase().includes('lorem ipsum'))
+            .map(p => p.title);
+          out.loremIpsum = { found, scanned: pages.length };
         } catch (e) { out.loremIpsum = { error: e.message }; }
+      }
+
+      // 2b: Páginas sem vídeo (apenas se habilitado)
+      if (!includeSemVideo) {
+        out.semVideo = { skipped: true };
+      } else {
+        try {
+          const pages = await getModulePagesWithBody();
+          const found = [], excecoes = [];
+          for (const p of pages) {
+            if (p.failed) continue;
+            if (isNoVideoException(p.title) || isNoVideoException(p.itemTitle)) { excecoes.push(p.title); continue; }
+            if (!hasCanvasVideo(p.body)) found.push(p.title);
+          }
+          out.semVideo = { found, scanned: pages.length - excecoes.length, ignoradas: excecoes.length };
+        } catch (e) { out.semVideo = { error: e.message }; }
       }
 
       // 3: Avisos
@@ -2489,11 +2596,9 @@ async function clRunChecks1to5(tabId, courseId, includeLoremIpsum, includePageNa
       // 6: Páginas não publicadas nos módulos
       if (includePageNaoPublicadas) {
         try {
-          const modules = await fetchAll(`/api/v1/courses/${courseId}/modules?per_page=100`);
           const unpublished = [];
 
-          for (const mod of modules) {
-            const items = await fetchAll(`/api/v1/courses/${courseId}/modules/${mod.id}/items?per_page=100`);
+          for (const { mod, items } of await getModulesWithItems()) {
             const pageItems = items.filter(item => item.type === 'Page');
 
             for (let i = 0; i < pageItems.length; i += 5) {
@@ -2520,12 +2625,10 @@ async function clRunChecks1to5(tabId, courseId, includeLoremIpsum, includePageNa
       // 7: Itens sem requisito de conclusão
       if (includeRequisitosConclusao) {
         try {
-          const modules = await fetchAll(`/api/v1/courses/${courseId}/modules?per_page=100`);
           const itemsWithoutRequirement = {};
 
-          for (const mod of modules) {
+          for (const { mod, items } of await getModulesWithItems()) {
             if (mod.published === false) continue;   // módulo oculto não aparece na tela
-            const items = await fetchAll(`/api/v1/courses/${courseId}/modules/${mod.id}/items?per_page=100`);
             // conta só os itens que aparecem na tela: ignora ocultos (published:false).
             // Itens excluídos não são retornados pela API de module items.
             const visiveis = items.filter(item => item.published !== false);
@@ -2543,14 +2646,17 @@ async function clRunChecks1to5(tabId, courseId, includeLoremIpsum, includePageNa
 
       return out;
     },
-    args: [courseId, includeLoremIpsum, includePageNaoPublicadas, includeRequisitosConclusao],
+    args: [courseId, opts.lorem, opts.paginasNaoPublicadas, opts.requisitos, opts.semVideo, opts.noVideoExceptions],
   });
   return result[0]?.result || null;
 }
 
-function applyCourseResults(courseId, data) {
+function applyCourseResults(courseId, data, skipped = new Set()) {
   if (!data) {
-    CHECKLIST_ITEMS.slice(0, 7).forEach(item => setCourseCheck(courseId, item.id, 'error', 'Sem resposta da API'));
+    CHECKLIST_ITEMS.forEach(item => {
+      if (item.id === 'links' || skipped.has(item.id)) return;
+      setCourseCheck(courseId, item.id, 'error', 'Sem resposta da API');
+    });
     return;
   }
 
@@ -2566,12 +2672,31 @@ function applyCourseResults(courseId, data) {
   if (!li?.skipped) {
     if (li?.error) {
       setCourseCheck(courseId, 'lorem-ipsum', 'error', 'Erro: ' + li.error);
+    } else if (!li?.scanned) {
+      setCourseCheck(courseId, 'lorem-ipsum', 'ok', 'Nenhuma página vinculada aos módulos');
     } else if (!li?.found?.length) {
-      setCourseCheck(courseId, 'lorem-ipsum', 'ok', 'Nenhuma página com Lorem Ipsum');
+      setCourseCheck(courseId, 'lorem-ipsum', 'ok', `Nenhuma página com Lorem Ipsum · ${li.scanned} página(s) dos módulos`);
     } else {
       const lines = li.found.slice(0, 5).map(t => `📄 ${t}`);
       if (li.found.length > 5) lines.push(`... e mais ${li.found.length - 5}`);
-      setCourseCheck(courseId, 'lorem-ipsum', 'warn', [`${li.found.length} página(s):`, ...lines]);
+      setCourseCheck(courseId, 'lorem-ipsum', 'warn', [`${li.found.length} de ${li.scanned} página(s) dos módulos:`, ...lines]);
+    }
+  }
+
+  // 2b: Páginas sem vídeo
+  const sv = data.semVideo;
+  if (!sv?.skipped) {
+    const ignoradas = sv?.ignoradas ? ` · ${sv.ignoradas} na lista de exceções` : '';
+    if (sv?.error) {
+      setCourseCheck(courseId, 'paginas-sem-video', 'error', 'Erro: ' + sv.error);
+    } else if (!sv?.scanned) {
+      setCourseCheck(courseId, 'paginas-sem-video', 'ok', 'Nenhuma página a verificar' + ignoradas);
+    } else if (!sv?.found?.length) {
+      setCourseCheck(courseId, 'paginas-sem-video', 'ok', `${sv.scanned} página(s) com vídeo${ignoradas}`);
+    } else {
+      const lines = sv.found.slice(0, 5).map(t => `▶️ ${t}`);
+      if (sv.found.length > 5) lines.push(`... e mais ${sv.found.length - 5}`);
+      setCourseCheck(courseId, 'paginas-sem-video', 'warn', [`${sv.found.length} de ${sv.scanned} página(s) sem vídeo${ignoradas}:`, ...lines]);
     }
   }
 
@@ -2606,7 +2731,41 @@ function applyCourseResults(courseId, data) {
   }
 
   // 5: Testes
-  const quizzes = data.testes;
+  applyTestesResult(courseId, data.testes);
+
+  // 6: Páginas não publicadas
+  const pnp = data.paginasNaoPublicadas;
+  if (!pnp?.skipped) {
+    if (pnp?.error) {
+      setCourseCheck(courseId, 'paginas-nao-publicadas', 'error', 'Erro: ' + pnp.error);
+    } else if (!pnp?.unpublished?.length) {
+      setCourseCheck(courseId, 'paginas-nao-publicadas', 'ok', 'Nenhuma página não publicada');
+    } else {
+      setCourseCheck(courseId, 'paginas-nao-publicadas', 'warn', `${pnp.unpublished.length} página(s) não publicada(s)`);
+    }
+  }
+
+  // 7: Itens sem requisito de conclusão
+  const rc = data.requisitosConclisao;
+  if (!rc?.skipped) {
+    if (rc?.error) {
+      setCourseCheck(courseId, 'requisitos-conclusao', 'error', 'Erro: ' + rc.error);
+    } else {
+      const itemsWithoutReq = rc?.itemsWithoutRequirement || {};
+      const totalItens = Object.values(itemsWithoutReq).reduce((s, n) => s + n, 0);
+      if (totalItens === 0) {
+        setCourseCheck(courseId, 'requisitos-conclusao', 'ok', 'Todos os itens têm requisito de conclusão');
+      } else {
+        setCourseCheck(courseId, 'requisitos-conclusao', 'warn', `${totalItens} item${totalItens > 1 ? 'ns' : ''} sem requisito de conclusão`);
+      }
+    }
+  }
+}
+
+// Regras de pontuação/publicação dos testes. Separado porque sai cedo em caso de
+// erro — antes esse `return` estava no meio de applyCourseResults e deixava os
+// checks seguintes presos no spinner quando /quizzes falhava.
+function applyTestesResult(courseId, quizzes) {
   if (!quizzes || quizzes?.error) {
     setCourseCheck(courseId, 'testes', 'error', quizzes?.error ? 'Erro: ' + quizzes.error : 'Sem dados');
     return;
@@ -2656,34 +2815,6 @@ function applyCourseResults(courseId, data) {
     ]);
   } else {
     setCourseCheck(courseId, 'testes', 'warn', issues);
-  }
-
-  // 6: Páginas não publicadas
-  const pnp = data.paginasNaoPublicadas;
-  if (!pnp?.skipped) {
-    if (pnp?.error) {
-      setCourseCheck(courseId, 'paginas-nao-publicadas', 'error', 'Erro: ' + pnp.error);
-    } else if (!pnp?.unpublished?.length) {
-      setCourseCheck(courseId, 'paginas-nao-publicadas', 'ok', 'Nenhuma página não publicada');
-    } else {
-      setCourseCheck(courseId, 'paginas-nao-publicadas', 'warn', `${pnp.unpublished.length} página(s) não publicada(s)`);
-    }
-  }
-
-  // 7: Itens sem requisito de conclusão
-  const rc = data.requisitosConclisao;
-  if (!rc?.skipped) {
-    if (rc?.error) {
-      setCourseCheck(courseId, 'requisitos-conclusao', 'error', 'Erro: ' + rc.error);
-    } else {
-      const itemsWithoutReq = rc?.itemsWithoutRequirement || {};
-      const totalItens = Object.values(itemsWithoutReq).reduce((s, n) => s + n, 0);
-      if (totalItens === 0) {
-        setCourseCheck(courseId, 'requisitos-conclusao', 'ok', 'Todos os itens têm requisito de conclusão');
-      } else {
-        setCourseCheck(courseId, 'requisitos-conclusao', 'warn', `${totalItens} item${totalItens > 1 ? 'ns' : ''} sem requisito de conclusão`);
-      }
-    }
   }
 }
 
@@ -2774,10 +2905,23 @@ async function runChecklist() {
     return;
   }
 
-  const includeLoremIpsum      = $('cl-toggle-lorem').checked;
-  const includeLinks           = $('cl-toggle-links').checked;
-  const includePageNaoPublicadas = $('cl-toggle-paginas-nao-pub').checked;
-  const includeRequisitosConclusao = $('cl-toggle-requisitos').checked;
+  const opts = {
+    lorem:                $('cl-toggle-lorem').checked,
+    semVideo:             $('cl-toggle-video').checked,
+    paginasNaoPublicadas: $('cl-toggle-paginas-nao-pub').checked,
+    requisitos:           $('cl-toggle-requisitos').checked,
+    noVideoExceptions:    S.canvasNoVideo || [],
+  };
+  const includeLinks = $('cl-toggle-links').checked;
+
+  // Checks desligados ficam com "–" e não podem ser sobrescritos pelo caminho de erro
+  const skipped = new Set();
+  if (!opts.lorem)                skipped.add('lorem-ipsum');
+  if (!opts.semVideo)             skipped.add('paginas-sem-video');
+  if (!opts.paginasNaoPublicadas) skipped.add('paginas-nao-publicadas');
+  if (!opts.requisitos)           skipped.add('requisitos-conclusao');
+  if (!includeLinks)              skipped.add('links');
+
   $('btn-run-checklist').disabled = true;
   $('btn-run-checklist').innerHTML = '<span class="spinner"></span>Verificando...';
 
@@ -2789,10 +2933,7 @@ async function runChecklist() {
 
   courseIds.forEach(id => {
     results.appendChild(buildCourseCard(id));
-    if (!includeLoremIpsum)           setCourseCheck(id, 'lorem-ipsum',           'skip');
-    if (!includePageNaoPublicadas)    setCourseCheck(id, 'paginas-nao-publicadas', 'skip');
-    if (!includeRequisitosConclusao)  setCourseCheck(id, 'requisitos-conclusao',   'skip');
-    if (!includeLinks)                setCourseCheck(id, 'links',                  'skip');
+    skipped.forEach(checkId => setCourseCheck(id, checkId, 'skip'));
   });
 
   let done = 0;
@@ -2800,11 +2941,11 @@ async function runChecklist() {
     // Escalonamento: cada curso começa 300ms depois do anterior
     if (index > 0) await new Promise(r => setTimeout(r, index * 300));
     try {
-      const data = await clRunChecks1to5(tabId, id, includeLoremIpsum, includePageNaoPublicadas, includeRequisitosConclusao);
-      applyCourseResults(id, data);
+      const data = await clRunCourseChecks(tabId, id, opts);
+      applyCourseResults(id, data, skipped);
     } catch (err) {
-      CHECKLIST_ITEMS.slice(0, 7).forEach(item => {
-        if (!includeLoremIpsum && item.id === 'lorem-ipsum') return;
+      CHECKLIST_ITEMS.forEach(item => {
+        if (item.id === 'links' || skipped.has(item.id)) return;
         setCourseCheck(id, item.id, 'error', 'Erro: ' + err.message);
       });
     }
@@ -2850,6 +2991,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     savedBlocks:   saved.savedBlocks   || [],
     sheetsEnabled:      saved.sheetsEnabled      || false,
     canvasExceptions:   saved.canvasExceptions   ?? DEFAULT_CANVAS_EXCEPTIONS,
+    canvasNoVideo:      saved.canvasNoVideo      ?? DEFAULT_CANVAS_NO_VIDEO,
   };
 
   // Bindings estáticos

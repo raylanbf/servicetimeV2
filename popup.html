@@ -194,6 +194,11 @@
       <textarea id="settings-canvas-exceptions" class="comment-textarea" placeholder="Orientação do professor&#10;Material complementar&#10;Apresentação" style="min-height:88px;font-size:11px;margin-bottom:4px"></textarea>
       <span class="small muted">Ex: "Orientação" cobre "Unidade 1 Orientação do professor"</span>
     </div>
+    <div class="cfg-group">
+      <label class="cfg-label">Páginas sem vídeo (uma por linha, nome parcial)</label>
+      <textarea id="settings-canvas-no-video" class="comment-textarea" placeholder="Plano de Ensino&#10;Referências&#10;Síntese" style="min-height:88px;font-size:11px;margin-bottom:4px"></textarea>
+      <span class="small muted">Páginas que não precisam ter vídeo — ficam fora da verificação do checklist</span>
+    </div>
   </div>
 
   <button id="btn-clear-registros" class="btn btn-red btn-full">🗑  Limpar todos os registros</button>
@@ -286,6 +291,13 @@
     <span class="small muted">Verificar Lorem Ipsum <span class="small" style="opacity:.6">(lento)</span></span>
     <label class="toggle">
       <input type="checkbox" id="cl-toggle-lorem">
+      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+    </label>
+  </div>
+  <div class="row-between mt4">
+    <span class="small muted">Páginas sem vídeo <span class="small" style="opacity:.6">(lento)</span></span>
+    <label class="toggle">
+      <input type="checkbox" id="cl-toggle-video">
       <span class="toggle-track"><span class="toggle-thumb"></span></span>
     </label>
   </div>
