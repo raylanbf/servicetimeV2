@@ -2266,6 +2266,536 @@ function blockMapMain(savedBlocks) {
   document.body.appendChild(panel);
 }
 
+// ── Edição em escala (localizar e substituir multi-curso) ────────────
+
+const BULK_MAX_COURSES = 10;
+
+let _bulkPages    = [];    // páginas listadas do curso base
+let _bulkSelected = null;  // { url, title }
+let _bulkPreview  = null;  // último resultado de prévia, reusado no apply
+let _bulkListedIn = null;  // curso que gerou a lista exibida em _bulkPages
+
+function bulkStatus(msg, color) {
+  const el = $('bulk-list-status');
+  el.textContent = msg;
+  el.style.color = color || '#94a3b8';
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function bulkReset() {
+  _bulkPages    = [];
+  _bulkSelected = null;
+  _bulkPreview  = null;
+  _bulkListedIn = null;
+  $('bulk-page-section').style.display    = 'none';
+  $('bulk-replace-section').style.display = 'none';
+  $('btn-bulk-apply').style.display       = 'none';
+  $('bulk-results').innerHTML = '';
+  bulkStatus('');
+}
+
+function bulkCourseIds() {
+  return parseCourseIds($('bulk-courses-input').value);
+}
+
+// Executa `fn` na aba ativa do Canvas — todas as chamadas usam a sessão da aba,
+// então não é preciso token de API.
+async function bulkExec(fn, args) {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab  = tabs[0];
+  if (!tab || !/\/courses\//.test(tab.url || '')) {
+    throw new Error('Abra uma aba do Canvas (qualquer curso) para usar esta ferramenta.');
+  }
+  const res = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: fn, args });
+  const out = res[0]?.result;
+  if (out && out.__error) throw new Error(out.__error);
+  return out;
+}
+
+// ── Listagem de páginas do primeiro curso ────────────────────────────
+function bulkListPagesMain(courseId) {
+  return (async () => {
+    try {
+      const out = [];
+      let next = `/api/v1/courses/${courseId}/pages?per_page=100`;
+      while (next) {
+        const res = await fetch(next);
+        if (!res.ok) return { __error: `Curso ${courseId}: HTTP ${res.status}` };
+        const data = await res.json();
+        if (Array.isArray(data)) out.push(...data);
+        const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
+        next = m ? m[1] : null;
+      }
+      return out.map(pg => ({ url: pg.url, title: pg.title, published: !!pg.published }));
+    } catch (err) {
+      return { __error: err.message };
+    }
+  })();
+}
+
+async function doBulkListPages() {
+  const ids = bulkCourseIds();
+  if (!ids.length) { bulkStatus('✗ Informe ao menos um código de curso.', '#f87171'); return; }
+  if (ids.length > BULK_MAX_COURSES) {
+    bulkStatus(`✗ Máximo de ${BULK_MAX_COURSES} cursos — você informou ${ids.length}.`, '#f87171');
+    return;
+  }
+
+  const btn = $('btn-bulk-list');
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="spinner"></span>Listando...';
+  $('bulk-results').innerHTML = '';
+  $('btn-bulk-apply').style.display = 'none';
+
+  try {
+    const pages = await bulkExec(bulkListPagesMain, [ids[0]]);
+    _bulkPages    = pages;
+    _bulkSelected = null;
+    _bulkListedIn = ids[0];
+    $('bulk-replace-section').style.display = 'none';
+    if (!pages.length) {
+      bulkStatus(`Nenhuma página no curso #${ids[0]}.`, '#f97316');
+      $('bulk-page-section').style.display = 'none';
+    } else {
+      const extra = ids.length > 1 ? ` · a mesma página será buscada nos outros ${ids.length - 1}` : '';
+      bulkStatus(`${pages.length} página(s) no curso #${ids[0]}${extra}`, '#4ade80');
+      $('bulk-page-filter').value = '';
+      buildBulkPages();
+      $('bulk-page-section').style.display = 'block';
+    }
+  } catch (err) {
+    bulkStatus('✗ ' + err.message, '#f87171');
+  }
+
+  btn.disabled    = false;
+  btn.textContent = '🔍  Listar páginas';
+}
+
+function buildBulkPages() {
+  const term = $('bulk-page-filter').value.trim().toLowerCase();
+  const list = $('bulk-pages-list');
+  list.innerHTML = '';
+
+  const shown = _bulkPages.filter(pg => !term || pg.title.toLowerCase().includes(term));
+  if (!shown.length) {
+    const empty = document.createElement('div');
+    empty.className = 'small muted';
+    empty.style.padding = '6px';
+    empty.textContent = 'Nenhuma página com esse nome.';
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const pg of shown) {
+    const row = document.createElement('div');
+    row.className = 'bulk-page-item' + (_bulkSelected?.url === pg.url ? ' selected' : '');
+
+    const title = document.createElement('span');
+    title.className = 'bulk-page-title';
+    title.textContent = pg.title;
+    row.appendChild(title);
+
+    if (!pg.published) {
+      const tag = document.createElement('span');
+      tag.className = 'bulk-page-unpub';
+      tag.textContent = 'não publicada';
+      row.appendChild(tag);
+    }
+
+    row.addEventListener('click', () => {
+      _bulkSelected = { url: pg.url, title: pg.title };
+      _bulkPreview  = null;
+      $('bulk-results').innerHTML = '';
+      $('btn-bulk-apply').style.display = 'none';
+      $('bulk-replace-section').style.display = 'block';
+      buildBulkPages();
+    });
+
+    list.appendChild(row);
+  }
+}
+
+// ── Núcleo: substituição preservando a estrutura do HTML ─────────────
+// Roda na aba do Canvas. Nunca reserializa o documento: opera sobre a string
+// do HTML original e só toca os trechos que estão FORA de tags, para que
+// atributos, cores, negrito, itálico e links permaneçam byte a byte iguais.
+function bulkReplaceMain(courseIds, pageRef, find, repl, caseSensitive, dryRun) {
+  return (async () => {
+    const delay = ms => new Promise(r => setTimeout(r, ms));
+
+    async function safeFetch(url, opts = {}) {
+      for (let attempt = 0; attempt <= 2; attempt++) {
+        const res = await fetch(url, opts);
+        if (res.status === 429) { await delay(2000 * (attempt + 1)); continue; }
+        const remaining = parseFloat(res.headers.get('X-Rate-Limit-Remaining') || '999');
+        if (remaining < 30) await delay(800);
+        return res;
+      }
+      throw new Error('Rate limit esgotado após 3 tentativas');
+    }
+
+    const rawCsrf = document.cookie.split(';').map(c => c.trim())
+      .find(c => c.startsWith('_csrf_token='));
+    const csrf = rawCsrf
+      ? decodeURIComponent(rawCsrf.split('=').slice(1).join('='))
+      : decodeURIComponent(document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
+
+    function escRe(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+    // O Canvas grava vários caracteres como entidade HTML. Buscar "P&D" ou
+    // "aluno's" literalmente não acharia "P&amp;D" / "aluno&#39;s", então cada
+    // um desses caracteres vira uma alternativa que casa as duas formas.
+    const ENT_ALT = {
+      '&': '(?:&|&amp;)',
+      '<': '(?:<|&lt;)',
+      '>': '(?:>|&gt;)',
+      '"': '(?:"|&quot;|&#34;|“|”)',
+      "'": "(?:'|’|&#39;|&apos;|&rsquo;)",
+      '’': "(?:’|'|&#39;|&apos;|&rsquo;)",
+      '“': '(?:“|"|&quot;|&ldquo;)',
+      '”': '(?:”|"|&quot;|&rdquo;)',
+      '–': '(?:–|&ndash;|&#8211;)',
+      '—': '(?:—|&mdash;|&#8212;)',
+    };
+
+    // Converte um trecho literal em regex, char a char — assim a alternativa
+    // gerada para um caractere nunca é reprocessada pela do caractere seguinte.
+    function litToRe(chunk) {
+      let out = '';
+      for (const ch of chunk) out += (ENT_ALT[ch] || escRe(ch));
+      return out;
+    }
+
+    // O texto novo entra como TEXTO, nunca como marcação: um "<" digitado pelo
+    // usuário viraria uma tag no corpo da página e mudaria a estrutura.
+    function escHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // Espaço no termo buscado casa também com &nbsp; / &#160; / NBSP literal,
+    // que é como o Canvas costuma gravar espaços vindos do editor.
+    function buildPattern(term, cs) {
+      // Sem trim: espaco no inicio/fim do termo tambem conta na busca. Cada
+      // corrida de espacos vira um padrao flexivel para casar &nbsp; tambem.
+      const src = term.split(/\s+/).map(litToRe)
+        .join('(?:\\s|&nbsp;|&#160;|&#xA0;|\\u00a0)+');
+      return new RegExp(src, cs ? 'g' : 'gi');
+    }
+
+    // Fatia o HTML em segmentos de texto (fora de tags) e devolve os índices.
+    // Conteúdo de <script>/<style> e comentários são ignorados.
+    function textSegments(html) {
+      const segs = [];
+      let i = 0;
+      while (i < html.length) {
+        const lt = html.indexOf('<', i);
+        if (lt === -1) { if (i < html.length) segs.push([i, html.length]); break; }
+        if (lt > i) segs.push([i, lt]);
+
+        if (html.startsWith('<!--', lt)) {
+          const end = html.indexOf('-->', lt + 4);
+          i = end === -1 ? html.length : end + 3;
+          continue;
+        }
+        const gt = html.indexOf('>', lt);
+        if (gt === -1) { i = html.length; break; }
+
+        const tagName = (html.slice(lt + 1, gt).match(/^\/?\s*([a-zA-Z0-9-]+)/) || [])[1];
+        const lower   = (tagName || '').toLowerCase();
+        if (lower === 'script' || lower === 'style') {
+          const closeRe = new RegExp('</\\s*' + lower + '\\s*>', 'i');
+          const rest    = html.slice(gt + 1);
+          const m       = rest.match(closeRe);
+          i = m ? gt + 1 + m.index + m[0].length : html.length;
+          continue;
+        }
+        i = gt + 1;
+      }
+      return segs;
+    }
+
+    function contextOf(text, start, end) {
+      return {
+        pre:  text.slice(Math.max(0, start - 35), start),
+        hit:  text.slice(start, end),
+        post: text.slice(end, Math.min(text.length, end + 35)),
+      };
+    }
+
+    // Substitui `find` por `repl` só nos segmentos de texto do HTML.
+    function replaceInHtml(html, term, rawReplacement, cs) {
+      const replacement = escHtml(rawReplacement);
+      const re          = buildPattern(term, cs);
+      const segs    = textSegments(html);
+      const samples = [];
+      let out = '', cursor = 0, hits = 0;
+
+      for (const [a, b] of segs) {
+        const chunk = html.slice(a, b);
+        re.lastIndex = 0;
+        if (!re.test(chunk)) continue;
+
+        out += html.slice(cursor, a);
+        re.lastIndex = 0;
+        let last = 0, piece = '', m;
+        while ((m = re.exec(chunk)) !== null) {
+          piece += chunk.slice(last, m.index) + replacement;
+          if (samples.length < 3) samples.push(contextOf(chunk, m.index, m.index + m[0].length));
+          last = m.index + m[0].length;
+          hits++;
+          if (m[0] === '') re.lastIndex++;
+        }
+        piece += chunk.slice(last);
+        out   += piece;
+        cursor = b;
+      }
+      out += html.slice(cursor);
+      return { html: out, hits, samples };
+    }
+
+    // Quantas vezes o termo aparece no texto puro da página. Se for maior que
+    // os hits do HTML, a ocorrência está partida por uma tag (<strong>, <em>,
+    // <a>…) — nesse caso NÃO mexemos, para não alterar a formatação, e apenas
+    // avisamos.
+    function plainCount(html, term, cs) {
+      const doc  = new DOMParser().parseFromString(html, 'text/html');
+      const text = (doc.body.textContent || '').replace(/\u00a0/g, ' ');
+      const re   = buildPattern(term, cs);
+      return (text.match(re) || []).length;
+    }
+
+    const results = [];
+
+    for (const courseId of courseIds) {
+      const entry = { courseId, status: 'zero', hits: 0, samples: [], note: '', title: '' };
+      try {
+        // Tenta pelo slug; se não existir nesse curso, procura pelo título.
+        const direct = await safeFetch(`/api/v1/courses/${courseId}/pages/${encodeURIComponent(pageRef.url)}`);
+        let page = direct.ok ? await direct.json() : null;
+
+        if (!page) {
+          const all = [];
+          let next  = `/api/v1/courses/${courseId}/pages?per_page=100`;
+          while (next) {
+            const lr = await safeFetch(next);
+            if (!lr.ok) throw new Error(`HTTP ${lr.status} ao listar páginas`);
+            const data = await lr.json();
+            if (Array.isArray(data)) all.push(...data);
+            const m = (lr.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
+            next = m ? m[1] : null;
+          }
+          const wanted = pageRef.title.trim().toLowerCase();
+          const found  = all.find(pg => (pg.title || '').trim().toLowerCase() === wanted);
+          if (!found) {
+            entry.status = 'warn';
+            entry.note   = 'Página não encontrada neste curso.';
+            results.push(entry);
+            continue;
+          }
+          const pr = await safeFetch(`/api/v1/courses/${courseId}/pages/${encodeURIComponent(found.url)}`);
+          if (!pr.ok) throw new Error(`HTTP ${pr.status} ao abrir a página`);
+          page = await pr.json();
+        }
+
+        entry.title = page.title || pageRef.title;
+        const body  = page.body || '';
+        const { html: newHtml, hits, samples } = replaceInHtml(body, find, repl, caseSensitive);
+        entry.hits    = hits;
+        entry.samples = samples;
+
+        if (hits === 0) {
+          const plain = plainCount(body, find, caseSensitive);
+          if (plain > 0) {
+            entry.status = 'warn';
+            entry.note   = `${plain} ocorrência(s) partida(s) por formatação (negrito, itálico, link…) — não alteradas para preservar a estrutura.`;
+          } else {
+            entry.status = 'zero';
+            entry.note   = 'Texto não encontrado nesta página.';
+          }
+          results.push(entry);
+          continue;
+        }
+
+        const split = plainCount(body, find, caseSensitive) - hits;
+        if (split > 0) {
+          entry.note = `${split} ocorrência(s) partida(s) por formatação foram ignoradas.`;
+        }
+
+        if (!dryRun) {
+          const pr = await safeFetch(`/api/v1/courses/${courseId}/pages/${encodeURIComponent(page.url)}`, {
+            method:  'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            body:    JSON.stringify({ wiki_page: { body: newHtml } }),
+          });
+          if (!pr.ok) throw new Error(`HTTP ${pr.status} ao gravar`);
+        }
+        entry.status = 'ok';
+      } catch (err) {
+        entry.status = 'error';
+        entry.note   = err.message;
+      }
+      results.push(entry);
+    }
+
+    return results;
+  })();
+}
+
+function buildBulkResults(results, applied) {
+  const box = $('bulk-results');
+  box.innerHTML = '';
+
+  const okCourses = results.filter(r => r.status === 'ok').length;
+  const total     = results.reduce((n, r) => n + (r.status === 'ok' ? r.hits : 0), 0);
+
+  const head = document.createElement('div');
+  head.className = 'small';
+  head.style.marginBottom = '6px';
+  if (applied) {
+    head.style.color = total ? '#4ade80' : '#94a3b8';
+    head.textContent = total
+      ? `✅ ${total} substituição(ões) gravada(s) em ${okCourses} curso(s).`
+      : 'Nada foi alterado.';
+  } else {
+    head.style.color = total ? '#60a5fa' : '#f97316';
+    head.textContent = total
+      ? `Prévia — ${total} ocorrência(s) em ${okCourses} curso(s). Nada foi gravado ainda.`
+      : 'Prévia — nenhuma ocorrência encontrada.';
+  }
+  box.appendChild(head);
+
+  for (const r of results) {
+    const row = document.createElement('div');
+    row.className = 'bulk-course-row ' + r.status;
+
+    const h = document.createElement('div');
+    h.className = 'bulk-course-row-head';
+    const icon = { ok: '✅', zero: '—', warn: '⚠', error: '✗' }[r.status] || '—';
+    h.innerHTML =
+      `<span>${icon}</span><span>Curso #${clEsc(r.courseId)}</span>` +
+      (r.hits ? `<span class="bulk-count">${r.hits}×</span>` : '');
+    row.appendChild(h);
+
+    if (r.note) {
+      const note = document.createElement('div');
+      note.className = 'bulk-course-note';
+      note.textContent = r.note;
+      row.appendChild(note);
+    }
+
+    for (const sm of r.samples || []) {
+      const sample = document.createElement('div');
+      sample.className = 'bulk-sample';
+      sample.innerHTML = `…${clEsc(sm.pre)}<mark>${clEsc(sm.hit)}</mark>${clEsc(sm.post)}…`;
+      row.appendChild(sample);
+    }
+
+    box.appendChild(row);
+  }
+}
+
+async function doBulkPreview() {
+  const ids  = bulkCourseIds();
+  const find = $('bulk-find').value;
+  if (!ids.length) { bulkStatus('✗ Informe ao menos um código de curso.', '#f87171'); return; }
+  if (ids.length > BULK_MAX_COURSES) {
+    bulkStatus(`✗ Máximo de ${BULK_MAX_COURSES} cursos — você informou ${ids.length}.`, '#f87171');
+    return;
+  }
+  if (!_bulkSelected) { bulkStatus('✗ Escolha uma página na lista.', '#f87171'); return; }
+  if (!find.trim())   { bulkStatus('✗ Informe o texto original.', '#f87171'); return; }
+
+  const btn = $('btn-bulk-preview');
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="spinner"></span>Verificando...';
+  $('btn-bulk-apply').style.display = 'none';
+  $('bulk-progress').textContent   = `Lendo ${ids.length} curso(s)...`;
+  $('bulk-progress').style.display = 'block';
+  bulkStatus('');
+
+  try {
+    const repl    = $('bulk-repl').value;
+    const cs      = $('bulk-toggle-case').checked;
+    const results = await bulkExec(bulkReplaceMain, [ids, _bulkSelected, find, repl, cs, true]);
+
+    _bulkPreview = { ids, find, repl, cs, results };
+    buildBulkResults(results, false);
+    if (results.some(r => r.status === 'ok')) $('btn-bulk-apply').style.display = 'block';
+  } catch (err) {
+    bulkStatus('✗ ' + err.message, '#f87171');
+  }
+
+  $('bulk-progress').style.display = 'none';
+  btn.disabled    = false;
+  btn.textContent = '👁  Ver prévia';
+}
+
+// Modal próprio em vez de confirm(): diálogos nativos do navegador não são
+// exibidos de forma confiável dentro do side panel, e o clique acabaria sem
+// efeito nenhum.
+function askBulkConfirm(total, courseIds, pageTitle, find, repl) {
+  return new Promise(resolve => {
+    const modal = $('modal-bulk-confirm');
+
+    $('bulk-confirm-sub').textContent =
+      `${total} ocorrência(s) em ${courseIds.length} curso(s). Grava direto no Canvas.`;
+
+    $('bulk-confirm-detail').innerHTML =
+      `<div class="bc-row"><span class="bc-label">Página:</span> ${clEsc(pageTitle)}</div>` +
+      `<div class="bc-row"><span class="bc-label">De:</span> <code>${clEsc(find)}</code></div>` +
+      `<div class="bc-row"><span class="bc-label">Para:</span> <code>${repl ? clEsc(repl) : '(vazio — remove)'}</code></div>` +
+      `<div class="bc-row"><span class="bc-label">Cursos:</span> ` +
+      `<span class="bc-courses">${courseIds.map(id => '#' + clEsc(id)).join(', ')}</span></div>`;
+
+    modal.style.display = 'flex';
+
+    function finish(value) {
+      modal.style.display = 'none';
+      document.removeEventListener('keydown', onKey);
+      resolve(value);
+    }
+    function onKey(e) { if (e.key === 'Escape') finish(false); }
+
+    $('btn-bulk-confirm-ok').onclick     = () => finish(true);
+    $('btn-bulk-confirm-cancel').onclick = () => finish(false);
+    document.addEventListener('keydown', onKey);
+  });
+}
+
+async function doBulkApply() {
+  if (!_bulkPreview) { bulkStatus('✗ Rode a prévia antes de aplicar.', '#f87171'); return; }
+  const { find, repl, cs, results } = _bulkPreview;
+  const total = results.reduce((n, r) => n + (r.status === 'ok' ? r.hits : 0), 0);
+
+  // Só grava nos cursos onde a prévia realmente encontrou ocorrências: os
+  // demais não têm nada a alterar e não precisam de uma chamada PUT.
+  const targets = results.filter(r => r.status === 'ok').map(r => r.courseId);
+  if (!targets.length) { bulkStatus('✗ Nenhum curso com ocorrências para aplicar.', '#f87171'); return; }
+
+  const ok = await askBulkConfirm(total, targets, _bulkSelected.title, find, repl);
+  if (!ok) return;
+
+  const btn = $('btn-bulk-apply');
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="spinner"></span>Gravando...';
+  $('bulk-progress').textContent   = `Gravando em ${targets.length} curso(s)...`;
+  $('bulk-progress').style.display = 'block';
+
+  try {
+    const applied = await bulkExec(bulkReplaceMain, [targets, _bulkSelected, find, repl, cs, false]);
+    buildBulkResults(applied, true);
+    _bulkPreview = null;
+    btn.style.display = 'none';
+  } catch (err) {
+    bulkStatus('✗ ' + err.message, '#f87171');
+    btn.style.display = 'block';
+  }
+
+  $('bulk-progress').style.display = 'none';
+  btn.disabled  = false;
+  btn.innerHTML = '✅  Aplicar substituição';
+}
+
 // ── Checklist de publicação (multi-curso) ────────────────────────────
 
 const CHECKLIST_ITEMS = [
@@ -3039,6 +3569,59 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-canvas-blocks').addEventListener('click', () => { buildBlocks(); show('blocks'); });
   $('btn-back-blocks').addEventListener('click', () => show('canvas'));
   $('btn-canvas-revisions').addEventListener('click', () => show('canvas-revisions'));
+
+  // ── Edição em escala ──────────────────────────────────────────────
+  $('btn-canvas-bulk').addEventListener('click', async () => {
+    show('canvas-bulk');
+    const input = $('bulk-courses-input');
+    if (!input.value.trim()) {
+      const id = await getCanvasCourseId();
+      if (id) input.value = id;
+    }
+  });
+  $('btn-back-canvas-bulk').addEventListener('click', () => show('canvas'));
+
+  $('btn-bulk-use-tab').addEventListener('click', async () => {
+    const id = await getCanvasCourseId();
+    if (!id) { bulkStatus('✗ Nenhum curso Canvas detectado na aba ativa.', '#f87171'); return; }
+    const input    = $('bulk-courses-input');
+    const existing = parseCourseIds(input.value);
+    if (existing.includes(id)) return;
+    if (existing.length >= BULK_MAX_COURSES) {
+      bulkStatus(`✗ Limite de ${BULK_MAX_COURSES} cursos atingido.`, '#f87171');
+      return;
+    }
+    input.value = (input.value.trim() ? input.value.trim() + '\n' : '') + id;
+  });
+
+  $('btn-bulk-list').addEventListener('click', doBulkListPages);
+  $('bulk-page-filter').addEventListener('input', buildBulkPages);
+  $('btn-bulk-preview').addEventListener('click', doBulkPreview);
+  $('btn-bulk-apply').addEventListener('click', () => {
+    doBulkApply().catch(err => bulkStatus('✗ ' + err.message, '#f87171'));
+  });
+
+  // Qualquer mudança nos parâmetros invalida a prévia — sem isso daria para
+  // clicar em "Aplicar" com a tela mostrando um resultado que não corresponde
+  // mais ao que está nos campos.
+  const invalidateBulk = () => {
+    if (_bulkPreview) {
+      _bulkPreview = null;
+      $('btn-bulk-apply').style.display = 'none';
+      $('bulk-results').innerHTML = '';
+    }
+    // Trocar o primeiro código deixa a lista de páginas exibida obsoleta:
+    // ela veio de outro curso. Zera tudo e pede uma nova listagem.
+    const first = bulkCourseIds()[0] || null;
+    if (_bulkListedIn && first !== _bulkListedIn) {
+      bulkReset();
+      bulkStatus('Curso alterado — liste as páginas novamente.', '#f97316');
+    }
+  };
+  $('bulk-find').addEventListener('input', invalidateBulk);
+  $('bulk-repl').addEventListener('input', invalidateBulk);
+  $('bulk-toggle-case').addEventListener('change', invalidateBulk);
+  $('bulk-courses-input').addEventListener('input', invalidateBulk);
   $('btn-apply-revisions-filter').addEventListener('click', doFetchRevisions);
   $('btn-back-canvas-revisions').addEventListener('click', () => show('canvas'));
   $('btn-canvas-checklist').addEventListener('click', () => show('checklist'));
