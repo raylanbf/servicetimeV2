@@ -626,9 +626,184 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'find-replace') {
     chrome.scripting.executeScript({
       target: { tabId: tab.id },
+      // MAIN: o editor HTML do Canvas (com numeração de linhas) é um
+      // CodeMirror, e a instância dele só existe para o JS da própria página.
+      world: 'MAIN',
       func: () => {
         document.getElementById('__svc-fr__')?.remove();
 
+        // ── Onde substituir ──────────────────────────────────────────
+        // Só editores VISÍVEIS: o TinyMCE mantém uma <textarea> oculta por
+        // trás do modo visual, e mexer nela não aparece nem é salvo.
+        function isVisible(el) {
+          return el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+        }
+
+        // CodeMirror 6 pendura um objeto interno no .cm-content (cmTile nas
+        // versões novas, cmView nas antigas) que leva até a EditorView — é o
+        // caminho do EditorView.findFromDOM. Varre as propriedades em vez de
+        // fixar o nome, que já mudou uma vez.
+        function cm6ViewOf(editorEl) {
+          const content = editorEl.querySelector('.cm-content');
+          const isView  = v => v && v.state && v.state.doc && typeof v.dispatch === 'function';
+          for (const key of Object.keys(content || {})) {
+            const node = content[key];
+            const view = [node?.root?.view, node?.rootView?.view, node?.view].find(isView);
+            if (view) return view;
+          }
+          return null;
+        }
+
+        // Cada alvo devolve o texto atual e aplica uma lista de edições
+        // { from, to, insert } feitas sobre esse mesmo texto.
+        function findTargets() {
+          const targets = [];
+          let unreachable = false;
+
+          document.querySelectorAll('.cm-editor').forEach(el => {
+            if (!isVisible(el)) return;
+            const view = cm6ViewOf(el);
+            if (!view) { unreachable = true; return; }
+            targets.push({
+              get:   () => view.state.doc.toString(),
+              apply: edits => view.dispatch({ changes: edits }),   // 1 passo de Ctrl+Z
+            });
+          });
+
+          document.querySelectorAll('.CodeMirror').forEach(el => {
+            const cm = el.CodeMirror;
+            if (!cm || !isVisible(el)) return;
+            targets.push({
+              get:   () => cm.getValue(),
+              apply: edits => cm.operation(() => {
+                for (const e of [...edits].reverse()) {
+                  cm.replaceRange(e.insert, cm.posFromIndex(e.from), cm.posFromIndex(e.to));
+                }
+              }),
+            });
+          });
+
+          document.querySelectorAll('textarea').forEach(ta => {
+            if (!isVisible(ta) || ta.closest('.cm-editor, .CodeMirror, #__svc-fr__')) return;
+            targets.push({
+              get:   () => ta.value,
+              apply: edits => {
+                let out = ta.value;
+                for (const e of [...edits].reverse()) out = out.slice(0, e.from) + e.insert + out.slice(e.to);
+                Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(ta, out);
+                ta.dispatchEvent(new Event('input',  { bubbles: true }));
+                ta.dispatchEvent(new Event('change', { bubbles: true }));
+              },
+            });
+          });
+
+          return { targets, unreachable };
+        }
+
+        // ── Modo texto: busca literal ────────────────────────────────
+        function textEdits(src, find, repl, firstOnly) {
+          const edits = [];
+          let pos = 0, at;
+          while ((at = src.indexOf(find, pos)) !== -1) {
+            edits.push({ from: at, to: at + find.length, insert: repl });
+            if (firstOnly) break;
+            pos = at + find.length;
+          }
+          return { edits };
+        }
+
+        // ── Modo intervalo: do início até o primeiro fim seguinte ────
+        function escRe(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+        // Letras acentuadas podem estar gravadas como caractere (ó) ou como
+        // entidade (&oacute;, &#243;) — conteúdo importado costuma vir assim.
+        const ACCENT_NAMES = {
+          'á': 'aacute', 'à': 'agrave', 'â': 'acirc', 'ã': 'atilde', 'ä': 'auml',
+          'é': 'eacute', 'è': 'egrave', 'ê': 'ecirc', 'ë': 'euml',
+          'í': 'iacute', 'ì': 'igrave', 'î': 'icirc', 'ï': 'iuml',
+          'ó': 'oacute', 'ò': 'ograve', 'ô': 'ocirc', 'õ': 'otilde', 'ö': 'ouml',
+          'ú': 'uacute', 'ù': 'ugrave', 'û': 'ucirc', 'ü': 'uuml',
+          'ç': 'ccedil', 'ñ': 'ntilde',
+        };
+        function accentAlt(ch) {
+          const cp = ch.codePointAt(0);
+          if (cp < 128) return null;
+          const lower = ch.toLowerCase();
+          const name  = ACCENT_NAMES[lower];
+          const alts  = [ch, `&#${cp};`, `&#x${cp.toString(16)};`];
+          if (name) alts.push('&' + (ch === lower ? name : name[0].toUpperCase() + name.slice(1)) + ';');
+          return '(?:' + alts.join('|') + ')';
+        }
+
+        // "&oacute;" no marcador vira "ó", que depois casa as duas formas.
+        // Entidades de ASCII (&lt; &amp; …) ficam: no marcador são código.
+        function decodeAccents(str) {
+          const ta = document.createElement('textarea');
+          return str.replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, ent => {
+            ta.innerHTML = ent;
+            const ch = ta.value;
+            return ch.length === 1 && ch.charCodeAt(0) > 127 ? ch : ent;
+          });
+        }
+
+        // O editor HTML reindenta o código: espaços viram "qualquer espaço"
+        // e, colados a uma tag, podem até faltar — "</span></p>" casa
+        // "</span>\n  </p>".
+        const WS_RE = '(?:\\s|&nbsp;|&#160;|&#xA0;|\\u00a0)+';
+        function markerToRe(marker) {
+          const chars = Array.from(decodeAccents(marker.trim()));
+          let out = '';
+          for (let i = 0; i < chars.length; i++) {
+            const ch = chars[i];
+            if (/\s/.test(ch)) {
+              let j = i;
+              while (j + 1 < chars.length && /\s/.test(chars[j + 1])) j++;
+              out += (chars[i - 1] === '>' || chars[j + 1] === '<') ? '\\s*' : WS_RE;
+              i = j;
+              continue;
+            }
+            out += accentAlt(ch) || escRe(ch);
+            if (ch === '>' && chars[i + 1] === '<') out += '\\s*';
+          }
+          return out;
+        }
+
+        // Tags abertas sem fechar (ou fechadas sem abrir) dentro do trecho.
+        const VOID_TAGS = /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/;
+        function unpairedTags(fragment) {
+          const stack = [];
+          let stray = 0;
+          for (const m of fragment.matchAll(/<(\/?)([a-zA-Z][\w-]*)[^>]*?(\/?)>/g)) {
+            const name = m[2].toLowerCase();
+            if (VOID_TAGS.test(name) || m[3]) continue;
+            if (!m[1]) { stack.push(name); continue; }
+            const at = stack.lastIndexOf(name);
+            if (at === -1) stray++;
+            else stack.length = at;
+          }
+          return stray + stack.length;
+        }
+
+        function rangeEdits(src, startTerm, endTerm, repl, inclusive, firstOnly) {
+          const reStart = new RegExp(markerToRe(startTerm), 'gi');
+          const reEnd   = new RegExp(markerToRe(endTerm), 'gi');
+          const edits   = [];
+          let unpaired = 0, orphan = false, s;
+          while ((s = reStart.exec(src)) !== null) {
+            reEnd.lastIndex = s.index + s[0].length;
+            const e = reEnd.exec(src);
+            if (!e) { orphan = true; break; }
+            const from = inclusive ? s.index : s.index + s[0].length;
+            const to   = inclusive ? e.index + e[0].length : e.index;
+            edits.push({ from, to, insert: repl });
+            if (unpairedTags(src.slice(from, to))) unpaired++;
+            if (firstOnly) break;
+            reStart.lastIndex = e.index + e[0].length;
+          }
+          return { edits, unpaired, orphan };
+        }
+
+        // ── Painel ───────────────────────────────────────────────────
         const overlay = document.createElement('div');
         overlay.id = '__svc-fr__';
         Object.assign(overlay.style, {
@@ -642,7 +817,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         Object.assign(box.style, {
           background: '#1e1e2e', color: '#e2e8f0',
           padding: '18px 20px', borderRadius: '8px',
-          width: '340px', boxShadow: '0 4px 24px rgba(0,0,0,.7)',
+          width: '420px', maxWidth: 'calc(100vw - 32px)',
+          boxShadow: '0 4px 24px rgba(0,0,0,.7)',
         });
 
         function mkLabel(text) {
@@ -655,51 +831,101 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
           return el;
         }
 
-        function mkInput() {
-          const el = document.createElement('input');
+        // <textarea> em vez de <input>: trechos de HTML colados costumam ter
+        // várias linhas, e o <input> descartaria as quebras.
+        function mkField() {
+          const el = document.createElement('textarea');
+          el.rows = 2;
           Object.assign(el.style, {
             display: 'block', width: '100%', padding: '6px 8px',
             borderRadius: '4px', border: '1px solid #3a3a5e',
-            background: '#2a2a3e', color: '#e2e8f0', fontSize: '13px',
+            background: '#2a2a3e', color: '#e2e8f0', fontSize: '12px',
+            fontFamily: "'Courier New', monospace", resize: 'vertical',
             marginBottom: '10px', boxSizing: 'border-box', outline: 'none',
           });
           return el;
         }
 
-        const title = document.createElement('p');
-        title.textContent = '🔍 Localizar e substituir';
-        Object.assign(title.style, { fontWeight: 'bold', fontSize: '14px', marginBottom: '14px' });
+        function mkRow() {
+          const row = document.createElement('div');
+          Object.assign(row.style, {
+            display: 'flex', gap: '16px', marginBottom: '12px',
+            fontSize: '12px', color: '#cbd5e1', alignItems: 'center',
+          });
+          return row;
+        }
 
-        const inputFind    = mkInput();
-        const inputReplace = mkInput();
-        inputReplace.style.marginBottom = '10px';
-
-        const modeRow = document.createElement('div');
-        Object.assign(modeRow.style, {
-          display: 'flex', gap: '16px', marginBottom: '14px',
-          fontSize: '12px', color: '#cbd5e1', alignItems: 'center',
-        });
-
-        function mkRadio(labelText, val, checked) {
+        function mkRadio(labelText, group, checked) {
           const wrap = document.createElement('label');
           Object.assign(wrap.style, { display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' });
           const r = document.createElement('input');
-          r.type = 'radio'; r.name = '__svc-mode__'; r.value = val; r.checked = checked;
+          r.type = 'radio'; r.name = group; r.checked = checked;
           Object.assign(r.style, { accentColor: '#4ade80', cursor: 'pointer' });
           wrap.appendChild(r);
           wrap.appendChild(document.createTextNode(labelText));
           return { wrap, radio: r };
         }
 
-        const { wrap: wAll,   radio: rAll }  = mkRadio('Substituir todos',   'all',   true);
-        const { wrap: wFirst, radio: rFirst } = mkRadio('Apenas o primeiro', 'first', false);
+        const title = document.createElement('p');
+        title.textContent = '🔍 Localizar e substituir';
+        Object.assign(title.style, { fontWeight: 'bold', fontSize: '14px', marginBottom: '12px' });
+
+        const kindRow = mkRow();
+        const { wrap: wText,  radio: rText }  = mkRadio('Texto',                    '__svc-kind__', true);
+        const { wrap: wRange, radio: rRange } = mkRadio('Intervalo (início → fim)', '__svc-kind__', false);
+        kindRow.appendChild(wText);
+        kindRow.appendChild(wRange);
+
+        const labelFind    = mkLabel('Localizar');
+        const inputFind    = mkField();
+        const endWrap      = document.createElement('div');
+        const inputEnd     = mkField();
+        endWrap.appendChild(mkLabel('Fim do trecho'));
+        endWrap.appendChild(inputEnd);
+        const inputReplace = mkField();
+
+        const modeRow = mkRow();
+        const { wrap: wAll,   radio: rAll }   = mkRadio('Substituir todos',  '__svc-mode__', true);
+        const { wrap: wFirst, radio: rFirst } = mkRadio('Apenas o primeiro', '__svc-mode__', false);
         modeRow.appendChild(wAll);
         modeRow.appendChild(wFirst);
+
+        const inclusiveRow = mkRow();
+        const wInclusive   = document.createElement('label');
+        Object.assign(wInclusive.style, { display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' });
+        const cbInclusive = document.createElement('input');
+        cbInclusive.type = 'checkbox'; cbInclusive.checked = true;
+        Object.assign(cbInclusive.style, { accentColor: '#4ade80', cursor: 'pointer' });
+        wInclusive.appendChild(cbInclusive);
+        wInclusive.appendChild(document.createTextNode('Incluir o início e o fim no trecho'));
+        inclusiveRow.appendChild(wInclusive);
+
+        const hint = document.createElement('p');
+        hint.textContent = 'Procura no código HTML, do início até o primeiro fim depois dele. Espaços e quebras de linha não precisam bater. "Substituir por" vazio apaga o trecho.';
+        Object.assign(hint.style, { fontSize: '11px', color: '#64748b', marginBottom: '10px', lineHeight: '1.4' });
 
         const result = document.createElement('p');
         Object.assign(result.style, {
           fontSize: '11px', minHeight: '15px', marginBottom: '12px', color: '#94a3b8',
         });
+        function showResult(msg, color) {
+          result.textContent = msg;
+          result.style.color = color;
+        }
+
+        function syncKind() {
+          const isRange = rRange.checked;
+          labelFind.textContent      = isRange ? 'Início do trecho' : 'Localizar';
+          inputFind.placeholder      = isRange ? 'ex.: <div class="col-xs-12' : '';
+          inputEnd.placeholder       = 'ex.: </span></p>';
+          inputReplace.placeholder   = isRange ? 'HTML novo (vazio = apagar o trecho)' : '';
+          endWrap.style.display      = isRange ? 'block' : 'none';
+          inclusiveRow.style.display = isRange ? 'flex' : 'none';
+          hint.style.display         = isRange ? 'block' : 'none';
+          showResult('', '#94a3b8');
+        }
+        rText.onchange  = syncKind;
+        rRange.onchange = syncKind;
 
         const btnRow = document.createElement('div');
         Object.assign(btnRow.style, { display: 'flex', gap: '8px' });
@@ -719,64 +945,88 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
           fontSize: '13px', fontWeight: 'bold',
         });
 
-        btnCancel.onclick = () => overlay.remove();
-        overlay.onclick   = (e) => { if (e.target === overlay) overlay.remove(); };
+        function close() {
+          overlay.remove();
+          document.removeEventListener('keydown', onEsc, true);
+        }
+        function onEsc(e) { if (e.key === 'Escape') close(); }
+        document.addEventListener('keydown', onEsc, true);
+        btnCancel.onclick = close;
+
+        // Só fecha se o clique COMEÇOU no fundo: selecionar texto num campo
+        // e soltar o mouse fora da caixa não pode fechar o painel.
+        let downOnBackdrop = false;
+        overlay.addEventListener('mousedown', e => { downOnBackdrop = e.target === overlay; });
+        overlay.addEventListener('click', e => { if (downOnBackdrop && e.target === overlay) close(); });
 
         btnDo.onclick = () => {
-          const find    = inputFind.value;
-          const replace = inputReplace.value;
-          if (!find) {
-            result.textContent = 'Informe o texto a localizar.';
-            result.style.color = '#f87171';
+          const isRange   = rRange.checked;
+          const find      = inputFind.value;
+          const end       = inputEnd.value;
+          const replace   = inputReplace.value;
+          const firstOnly = rFirst.checked;
+          if (isRange ? (!find.trim() || !end.trim()) : !find) {
+            showResult(isRange ? 'Informe o início e o fim do trecho.' : 'Informe o texto a localizar.', '#f87171');
             return;
           }
-          const replaceAll = rAll.checked;
-          let totalReplaced = 0;
 
-          document.querySelectorAll('textarea').forEach(ta => {
-            if (!ta.value.includes(find)) return;
-            let updated;
-            if (replaceAll) {
-              let count = 0, pos = 0;
-              while ((pos = ta.value.indexOf(find, pos)) !== -1) { count++; pos += find.length; }
-              totalReplaced += count;
-              updated = ta.value.split(find).join(replace);
-            } else {
-              const idx = ta.value.indexOf(find);
-              if (idx === -1) return;
-              totalReplaced += 1;
-              updated = ta.value.slice(0, idx) + replace + ta.value.slice(idx + find.length);
-            }
-            Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(ta, updated);
-            ta.dispatchEvent(new Event('input',  { bubbles: true }));
-            ta.dispatchEvent(new Event('change', { bubbles: true }));
-          });
-
-          if (totalReplaced > 0) {
-            result.style.color = '#4ade80';
-            result.textContent = `✓ ${totalReplaced} substituição(ões) feita(s).`;
-          } else {
-            result.style.color = '#f87171';
-            result.textContent = 'Texto não encontrado em nenhuma textarea.';
+          const { targets, unreachable } = findTargets();
+          if (!targets.length) {
+            showResult(unreachable
+              ? 'Não consegui acessar o editor HTML. Use "Alternar para o editor HTML bruto" e tente de novo.'
+              : 'Nenhum campo de texto visível. No Canvas, abra o editor HTML (</>) e tente de novo.', '#f87171');
+            return;
           }
+
+          // "Apenas o primeiro" vale para a página toda, não para cada campo.
+          let total = 0, unpaired = 0, orphan = false;
+          for (const t of targets) {
+            const r = isRange
+              ? rangeEdits(t.get(), find, end, replace, cbInclusive.checked, firstOnly)
+              : textEdits(t.get(), find, replace, firstOnly);
+            if (r.orphan) orphan = true;
+            if (!r.edits.length) continue;
+            t.apply(r.edits);
+            total    += r.edits.length;
+            unpaired += r.unpaired || 0;
+            if (firstOnly) break;
+          }
+
+          if (!total) {
+            showResult(isRange
+              ? (orphan ? 'Início encontrado, mas o fim não aparece depois dele.' : 'Início do trecho não encontrado.')
+              : 'Texto não encontrado.', '#f87171');
+            return;
+          }
+          let msg = isRange ? `✓ ${total} trecho(s) substituído(s).` : `✓ ${total} substituição(ões) feita(s).`;
+          if (unpaired) msg += ` ⚠ ${unpaired} com tags sem par (ex.: um <div> que abre e não fecha) — confira o layout.`;
+          showResult(msg, unpaired ? '#fbbf24' : '#4ade80');
         };
 
-        [inputFind, inputReplace].forEach(el => {
-          el.addEventListener('keydown', e => { if (e.key === 'Enter') btnDo.click(); });
+        // Enter executa; Shift+Enter quebra a linha dentro do campo.
+        [inputFind, inputEnd, inputReplace].forEach(el => {
+          el.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); btnDo.click(); }
+          });
         });
 
         btnRow.appendChild(btnCancel);
         btnRow.appendChild(btnDo);
         box.appendChild(title);
-        box.appendChild(mkLabel('Localizar'));
+        box.appendChild(kindRow);
+        box.appendChild(labelFind);
         box.appendChild(inputFind);
+        box.appendChild(endWrap);
         box.appendChild(mkLabel('Substituir por'));
         box.appendChild(inputReplace);
         box.appendChild(modeRow);
+        box.appendChild(inclusiveRow);
+        box.appendChild(hint);
         box.appendChild(result);
         box.appendChild(btnRow);
         overlay.appendChild(box);
         document.body.appendChild(overlay);
+        syncKind();
         inputFind.focus();
       },
     });

@@ -2274,6 +2274,7 @@ let _bulkPages    = [];    // páginas listadas do curso base
 let _bulkSelected = null;  // { url, title }
 let _bulkPreview  = null;  // último resultado de prévia, reusado no apply
 let _bulkListedIn = null;  // curso que gerou a lista exibida em _bulkPages
+let _bulkGen      = 0;     // muda a cada edição: prévia que volta depois disso é descartada
 
 function bulkStatus(msg, color) {
   const el = $('bulk-list-status');
@@ -2287,6 +2288,7 @@ function bulkReset() {
   _bulkSelected = null;
   _bulkPreview  = null;
   _bulkListedIn = null;
+  _bulkGen++;
   $('bulk-page-section').style.display    = 'none';
   $('bulk-replace-section').style.display = 'none';
   $('btn-bulk-apply').style.display       = 'none';
@@ -2296,6 +2298,21 @@ function bulkReset() {
 
 function bulkCourseIds() {
   return parseCourseIds($('bulk-courses-input').value);
+}
+
+// Modo "texto" troca só o texto visível; "intervalo" troca um trecho do
+// código HTML entre um início e um fim — os campos mudam de papel.
+function bulkSyncMode() {
+  const isRange = $('bulk-mode').value === 'range';
+  $('bulk-find-label').textContent = isRange ? 'Início do trecho' : 'Texto original';
+  $('bulk-find').placeholder = isRange ? 'ex.: <div class="col-xs-12' : 'texto que será procurado';
+  $('bulk-repl').placeholder = isRange ? 'HTML novo (vazio = apagar o trecho)' : 'texto novo (vazio = remover)';
+  $('bulk-find').classList.toggle('bulk-code', isRange);
+  $('bulk-repl').classList.toggle('bulk-code', isRange);
+  $('bulk-end-wrap').style.display      = isRange ? '' : 'none';
+  $('bulk-inclusive-row').style.display = isRange ? '' : 'none';
+  $('bulk-hint-text').style.display     = isRange ? 'none' : 'block';
+  $('bulk-hint-range').style.display    = isRange ? 'block' : 'none';
 }
 
 // Executa `fn` na aba ativa do Canvas — todas as chamadas usam a sessão da aba,
@@ -2405,6 +2422,7 @@ function buildBulkPages() {
     row.addEventListener('click', () => {
       _bulkSelected = { url: pg.url, title: pg.title };
       _bulkPreview  = null;
+      _bulkGen++;
       $('bulk-results').innerHTML = '';
       $('btn-bulk-apply').style.display = 'none';
       $('bulk-replace-section').style.display = 'block';
@@ -2419,7 +2437,10 @@ function buildBulkPages() {
 // Roda na aba do Canvas. Nunca reserializa o documento: opera sobre a string
 // do HTML original e só toca os trechos que estão FORA de tags, para que
 // atributos, cores, negrito, itálico e links permaneçam byte a byte iguais.
-function bulkReplaceMain(courseIds, pageRef, find, repl, caseSensitive, dryRun) {
+// No modo 'range' a busca é no código: troca o trecho entre `find` e `end`.
+// opts = { mode: 'text'|'range', find, end, repl, cs, firstOnly, inclusive }
+function bulkReplaceMain(courseIds, pageRef, opts, dryRun) {
+  const { mode, find, end, repl, cs: caseSensitive, firstOnly, inclusive } = opts;
   return (async () => {
     const delay = ms => new Promise(r => setTimeout(r, ms));
 
@@ -2458,13 +2479,35 @@ function bulkReplaceMain(courseIds, pageRef, find, repl, caseSensitive, dryRun) 
       '—': '(?:—|&mdash;|&#8212;)',
     };
 
+    // Letras acentuadas podem estar gravadas como caractere (ó) ou como
+    // entidade (&oacute;, &#243;) — conteúdo importado costuma vir assim.
+    const ACCENT_NAMES = {
+      'á': 'aacute', 'à': 'agrave', 'â': 'acirc', 'ã': 'atilde', 'ä': 'auml',
+      'é': 'eacute', 'è': 'egrave', 'ê': 'ecirc', 'ë': 'euml',
+      'í': 'iacute', 'ì': 'igrave', 'î': 'icirc', 'ï': 'iuml',
+      'ó': 'oacute', 'ò': 'ograve', 'ô': 'ocirc', 'õ': 'otilde', 'ö': 'ouml',
+      'ú': 'uacute', 'ù': 'ugrave', 'û': 'ucirc', 'ü': 'uuml',
+      'ç': 'ccedil', 'ñ': 'ntilde',
+    };
+    function accentAlt(ch) {
+      const cp = ch.codePointAt(0);
+      if (cp < 128) return null;
+      const lower = ch.toLowerCase();
+      const name  = ACCENT_NAMES[lower];
+      const alts  = [ch, `&#${cp};`, `&#x${cp.toString(16)};`];
+      if (name) alts.push('&' + (ch === lower ? name : name[0].toUpperCase() + name.slice(1)) + ';');
+      return '(?:' + alts.join('|') + ')';
+    }
+
     // Converte um trecho literal em regex, char a char — assim a alternativa
     // gerada para um caractere nunca é reprocessada pela do caractere seguinte.
     function litToRe(chunk) {
       let out = '';
-      for (const ch of chunk) out += (ENT_ALT[ch] || escRe(ch));
+      for (const ch of chunk) out += (ENT_ALT[ch] || accentAlt(ch) || escRe(ch));
       return out;
     }
+
+    const WS_RE = '(?:\\s|&nbsp;|&#160;|&#xA0;|\\u00a0)+';
 
     // O texto novo entra como TEXTO, nunca como marcação: um "<" digitado pelo
     // usuário viraria uma tag no corpo da página e mudaria a estrutura.
@@ -2477,9 +2520,99 @@ function bulkReplaceMain(courseIds, pageRef, find, repl, caseSensitive, dryRun) 
     function buildPattern(term, cs) {
       // Sem trim: espaco no inicio/fim do termo tambem conta na busca. Cada
       // corrida de espacos vira um padrao flexivel para casar &nbsp; tambem.
-      const src = term.split(/\s+/).map(litToRe)
-        .join('(?:\\s|&nbsp;|&#160;|&#xA0;|\\u00a0)+');
+      const src = term.split(/\s+/).map(litToRe).join(WS_RE);
       return new RegExp(src, cs ? 'g' : 'gi');
+    }
+
+    // "&oacute;" colado do editor HTML vira "ó", que depois casa as duas
+    // formas via accentAlt. Entidades de ASCII (&lt; &amp; …) ficam como
+    // estão: no marcador elas fazem parte do código.
+    function decodeAccents(str) {
+      const ta = document.createElement('textarea');
+      return str.replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, ent => {
+        ta.innerHTML = ent;
+        const ch = ta.value;
+        return ch.length === 1 && ch.charCodeAt(0) > 127 ? ch : ent;
+      });
+    }
+
+    // Marcador de início/fim do modo intervalo, casado no código HTML bruto.
+    // O editor HTML do Canvas reindenta o código, então espaços viram
+    // "qualquer espaço" e, colados a uma tag, podem até faltar: "</span></p>"
+    // casa "</span>\n  </p>".
+    function markerToRe(marker) {
+      const chars = Array.from(decodeAccents(marker.trim()));
+      let out = '';
+      for (let i = 0; i < chars.length; i++) {
+        const ch = chars[i];
+        if (/\s/.test(ch)) {
+          let j = i;
+          while (j + 1 < chars.length && /\s/.test(chars[j + 1])) j++;
+          out += (chars[i - 1] === '>' || chars[j + 1] === '<') ? '\\s*' : WS_RE;
+          i = j;
+          continue;
+        }
+        out += accentAlt(ch) || escRe(ch);
+        if (ch === '>' && chars[i + 1] === '<') out += '\\s*';
+      }
+      return out;
+    }
+
+    // Tags abertas sem fechar (ou fechadas sem abrir) dentro de um trecho.
+    // Elementos vazios (<br>, <img>…) e "/>" não contam; fechar uma tag
+    // descarta as que ficaram abertas dentro dela (<li>/<p> sem fechamento).
+    const VOID_TAGS = /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/;
+    function unpairedTags(fragment) {
+      const stack = [];
+      let stray = 0;
+      for (const m of fragment.matchAll(/<(\/?)([a-zA-Z][\w-]*)[^>]*?(\/?)>/g)) {
+        const name = m[2].toLowerCase();
+        if (VOID_TAGS.test(name) || m[3]) continue;
+        if (!m[1]) { stack.push(name); continue; }
+        const at = stack.lastIndexOf(name);
+        if (at === -1) stray++;
+        else stack.length = at;
+      }
+      return stray + stack.length;
+    }
+
+    function rangeSample(html, from, to) {
+      let hit = html.slice(from, to);
+      if (hit.length > 140) hit = `${hit.slice(0, 80)} … (+${hit.length - 120} caract.) … ${hit.slice(-40)}`;
+      return {
+        pre:  html.slice(Math.max(0, from - 30), from),
+        hit,
+        post: html.slice(to, to + 30),
+      };
+    }
+
+    // Troca cada trecho que vai de `startTerm` até o primeiro `endTerm`
+    // seguinte. Aqui a substituição entra como HTML, sem escape: o trecho
+    // removido também é código.
+    function replaceRange(html, startTerm, endTerm, replacement, cs) {
+      const flags   = cs ? 'g' : 'gi';
+      const reStart = new RegExp(markerToRe(startTerm), flags);
+      const reEnd   = new RegExp(markerToRe(endTerm), flags);
+      const samples = [];
+      let out = '', cursor = 0, hits = 0, unpaired = 0, orphan = false, s;
+
+      while ((s = reStart.exec(html)) !== null) {
+        reEnd.lastIndex = s.index + s[0].length;
+        const e = reEnd.exec(html);
+        if (!e) { orphan = true; break; }
+
+        const from = inclusive ? s.index : s.index + s[0].length;
+        const to   = inclusive ? e.index + e[0].length : e.index;
+        out += html.slice(cursor, from) + replacement;
+        if (samples.length < 3) samples.push(rangeSample(html, from, to));
+        if (unpairedTags(html.slice(from, to))) unpaired++;
+        cursor = to;
+        hits++;
+        if (firstOnly) break;
+        reStart.lastIndex = e.index + e[0].length;
+      }
+      out += html.slice(cursor);
+      return { html: out, hits, samples, unpaired, orphan };
     }
 
     // Fatia o HTML em segmentos de texto (fora de tags) e devolve os índices.
@@ -2531,6 +2664,7 @@ function bulkReplaceMain(courseIds, pageRef, find, repl, caseSensitive, dryRun) 
       let out = '', cursor = 0, hits = 0;
 
       for (const [a, b] of segs) {
+        if (firstOnly && hits) break;
         const chunk = html.slice(a, b);
         re.lastIndex = 0;
         if (!re.test(chunk)) continue;
@@ -2543,6 +2677,7 @@ function bulkReplaceMain(courseIds, pageRef, find, repl, caseSensitive, dryRun) 
           if (samples.length < 3) samples.push(contextOf(chunk, m.index, m.index + m[0].length));
           last = m.index + m[0].length;
           hits++;
+          if (firstOnly) break;
           if (m[0] === '') re.lastIndex++;
         }
         piece += chunk.slice(last);
@@ -2599,26 +2734,46 @@ function bulkReplaceMain(courseIds, pageRef, find, repl, caseSensitive, dryRun) 
 
         entry.title = page.title || pageRef.title;
         const body  = page.body || '';
-        const { html: newHtml, hits, samples } = replaceInHtml(body, find, repl, caseSensitive);
+        const isRange = mode === 'range';
+        const r = isRange
+          ? replaceRange(body, find, end, repl, caseSensitive)
+          : replaceInHtml(body, find, repl, caseSensitive);
+        const { html: newHtml, hits, samples } = r;
         entry.hits    = hits;
         entry.samples = samples;
 
         if (hits === 0) {
-          const plain = plainCount(body, find, caseSensitive);
-          if (plain > 0) {
-            entry.status = 'warn';
-            entry.note   = `${plain} ocorrência(s) partida(s) por formatação (negrito, itálico, link…) — não alteradas para preservar a estrutura.`;
+          if (isRange) {
+            entry.status = r.orphan ? 'warn' : 'zero';
+            entry.note   = r.orphan
+              ? 'Início encontrado, mas o fim não aparece depois dele.'
+              : 'Início do trecho não encontrado nesta página.';
           } else {
-            entry.status = 'zero';
-            entry.note   = 'Texto não encontrado nesta página.';
+            const plain = plainCount(body, find, caseSensitive);
+            if (plain > 0) {
+              entry.status = 'warn';
+              entry.note   = `${plain} ocorrência(s) partida(s) por formatação (negrito, itálico, link…) — não alteradas para preservar a estrutura.`;
+            } else {
+              entry.status = 'zero';
+              entry.note   = 'Texto não encontrado nesta página.';
+            }
           }
           results.push(entry);
           continue;
         }
 
-        const split = plainCount(body, find, caseSensitive) - hits;
-        if (split > 0) {
-          entry.note = `${split} ocorrência(s) partida(s) por formatação foram ignoradas.`;
+        if (isRange) {
+          const notes = [];
+          if (r.unpaired) notes.push(`${r.unpaired} trecho(s) com tags sem par (ex.: abre um <div> e não fecha) — o layout pode mudar.`);
+          if (r.orphan)   notes.push('Um início sem fim depois dele foi ignorado.');
+          entry.note = notes.join(' ');
+        } else if (!firstOnly) {
+          // Com "só a 1ª", as demais ocorrências sobram de propósito — não
+          // são "partidas por formatação".
+          const split = plainCount(body, find, caseSensitive) - hits;
+          if (split > 0) {
+            entry.note = `${split} ocorrência(s) partida(s) por formatação foram ignoradas.`;
+          }
         }
 
         if (!dryRun) {
@@ -2695,17 +2850,32 @@ function buildBulkResults(results, applied) {
 }
 
 async function doBulkPreview() {
-  const ids  = bulkCourseIds();
-  const find = $('bulk-find').value;
+  const ids     = bulkCourseIds();
+  const isRange = $('bulk-mode').value === 'range';
+  const opts    = {
+    mode:      isRange ? 'range' : 'text',
+    find:      $('bulk-find').value,
+    end:       isRange ? $('bulk-end').value : '',
+    repl:      $('bulk-repl').value,
+    cs:        $('bulk-toggle-case').checked,
+    firstOnly: $('bulk-toggle-first').checked,
+    inclusive: $('bulk-toggle-inclusive').checked,
+  };
   if (!ids.length) { bulkStatus('✗ Informe ao menos um código de curso.', '#f87171'); return; }
   if (ids.length > BULK_MAX_COURSES) {
     bulkStatus(`✗ Máximo de ${BULK_MAX_COURSES} cursos — você informou ${ids.length}.`, '#f87171');
     return;
   }
   if (!_bulkSelected) { bulkStatus('✗ Escolha uma página na lista.', '#f87171'); return; }
-  if (!find.trim())   { bulkStatus('✗ Informe o texto original.', '#f87171'); return; }
+  if (!opts.find.trim()) {
+    bulkStatus(isRange ? '✗ Informe o início do trecho.' : '✗ Informe o texto original.', '#f87171');
+    return;
+  }
+  if (isRange && !opts.end.trim()) { bulkStatus('✗ Informe o fim do trecho.', '#f87171'); return; }
 
-  const btn = $('btn-bulk-preview');
+  const page = _bulkSelected;
+  const gen  = ++_bulkGen;
+  const btn  = $('btn-bulk-preview');
   btn.disabled  = true;
   btn.innerHTML = '<span class="spinner"></span>Verificando...';
   $('btn-bulk-apply').style.display = 'none';
@@ -2714,13 +2884,15 @@ async function doBulkPreview() {
   bulkStatus('');
 
   try {
-    const repl    = $('bulk-repl').value;
-    const cs      = $('bulk-toggle-case').checked;
-    const results = await bulkExec(bulkReplaceMain, [ids, _bulkSelected, find, repl, cs, true]);
+    const results = await bulkExec(bulkReplaceMain, [ids, page, opts, true]);
 
-    _bulkPreview = { ids, find, repl, cs, results };
-    buildBulkResults(results, false);
-    if (results.some(r => r.status === 'ok')) $('btn-bulk-apply').style.display = 'block';
+    // Se a página ou algum campo mudou enquanto a prévia rodava, o resultado
+    // não corresponde mais à tela — descarta em vez de liberar o "Aplicar".
+    if (gen === _bulkGen) {
+      _bulkPreview = { ids, page, opts, results };
+      buildBulkResults(results, false);
+      if (results.some(r => r.status === 'ok')) $('btn-bulk-apply').style.display = 'block';
+    }
   } catch (err) {
     bulkStatus('✗ ' + err.message, '#f87171');
   }
@@ -2733,19 +2905,29 @@ async function doBulkPreview() {
 // Modal próprio em vez de confirm(): diálogos nativos do navegador não são
 // exibidos de forma confiável dentro do side panel, e o clique acabaria sem
 // efeito nenhum.
-function askBulkConfirm(total, courseIds, pageTitle, find, repl) {
+function askBulkConfirm(total, courseIds, pageTitle, opts) {
   return new Promise(resolve => {
-    const modal = $('modal-bulk-confirm');
+    const modal   = $('modal-bulk-confirm');
+    const isRange = opts.mode === 'range';
+    const row     = (label, html) =>
+      `<div class="bc-row"><span class="bc-label">${label}:</span> ${html}</div>`;
+
+    const modeDesc = [isRange
+      ? `intervalo, ${opts.inclusive ? 'incluindo' : 'sem'} o início e o fim`
+      : 'texto'];
+    if (opts.firstOnly) modeDesc.push('só a 1ª ocorrência de cada página');
 
     $('bulk-confirm-sub').textContent =
-      `${total} ocorrência(s) em ${courseIds.length} curso(s). Grava direto no Canvas.`;
+      `${total} ${isRange ? 'trecho(s)' : 'ocorrência(s)'} em ${courseIds.length} curso(s). Grava direto no Canvas.`;
 
     $('bulk-confirm-detail').innerHTML =
-      `<div class="bc-row"><span class="bc-label">Página:</span> ${clEsc(pageTitle)}</div>` +
-      `<div class="bc-row"><span class="bc-label">De:</span> <code>${clEsc(find)}</code></div>` +
-      `<div class="bc-row"><span class="bc-label">Para:</span> <code>${repl ? clEsc(repl) : '(vazio — remove)'}</code></div>` +
-      `<div class="bc-row"><span class="bc-label">Cursos:</span> ` +
-      `<span class="bc-courses">${courseIds.map(id => '#' + clEsc(id)).join(', ')}</span></div>`;
+      row('Página', clEsc(pageTitle)) +
+      row('Modo', clEsc(modeDesc.join(' · '))) +
+      (isRange
+        ? row('Início', `<code>${clEsc(opts.find)}</code>`) + row('Fim', `<code>${clEsc(opts.end)}</code>`)
+        : row('De', `<code>${clEsc(opts.find)}</code>`)) +
+      row('Para', `<code>${opts.repl ? clEsc(opts.repl) : '(vazio — remove)'}</code>`) +
+      row('Cursos', `<span class="bc-courses">${courseIds.map(id => '#' + clEsc(id)).join(', ')}</span>`);
 
     modal.style.display = 'flex';
 
@@ -2764,7 +2946,7 @@ function askBulkConfirm(total, courseIds, pageTitle, find, repl) {
 
 async function doBulkApply() {
   if (!_bulkPreview) { bulkStatus('✗ Rode a prévia antes de aplicar.', '#f87171'); return; }
-  const { find, repl, cs, results } = _bulkPreview;
+  const { page, opts, results } = _bulkPreview;
   const total = results.reduce((n, r) => n + (r.status === 'ok' ? r.hits : 0), 0);
 
   // Só grava nos cursos onde a prévia realmente encontrou ocorrências: os
@@ -2772,7 +2954,7 @@ async function doBulkApply() {
   const targets = results.filter(r => r.status === 'ok').map(r => r.courseId);
   if (!targets.length) { bulkStatus('✗ Nenhum curso com ocorrências para aplicar.', '#f87171'); return; }
 
-  const ok = await askBulkConfirm(total, targets, _bulkSelected.title, find, repl);
+  const ok = await askBulkConfirm(total, targets, page.title, opts);
   if (!ok) return;
 
   const btn = $('btn-bulk-apply');
@@ -2782,7 +2964,7 @@ async function doBulkApply() {
   $('bulk-progress').style.display = 'block';
 
   try {
-    const applied = await bulkExec(bulkReplaceMain, [targets, _bulkSelected, find, repl, cs, false]);
+    const applied = await bulkExec(bulkReplaceMain, [targets, page, opts, false]);
     buildBulkResults(applied, true);
     _bulkPreview = null;
     btn.style.display = 'none';
@@ -3605,6 +3787,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // clicar em "Aplicar" com a tela mostrando um resultado que não corresponde
   // mais ao que está nos campos.
   const invalidateBulk = () => {
+    _bulkGen++;
     if (_bulkPreview) {
       _bulkPreview = null;
       $('btn-bulk-apply').style.display = 'none';
@@ -3619,9 +3802,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
   $('bulk-find').addEventListener('input', invalidateBulk);
+  $('bulk-end').addEventListener('input', invalidateBulk);
   $('bulk-repl').addEventListener('input', invalidateBulk);
   $('bulk-toggle-case').addEventListener('change', invalidateBulk);
+  $('bulk-toggle-first').addEventListener('change', invalidateBulk);
+  $('bulk-toggle-inclusive').addEventListener('change', invalidateBulk);
   $('bulk-courses-input').addEventListener('input', invalidateBulk);
+  $('bulk-mode').addEventListener('change', () => { bulkSyncMode(); invalidateBulk(); });
   $('btn-apply-revisions-filter').addEventListener('click', doFetchRevisions);
   $('btn-back-canvas-revisions').addEventListener('click', () => show('canvas'));
   $('btn-canvas-checklist').addEventListener('click', () => show('checklist'));

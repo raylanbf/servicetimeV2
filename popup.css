@@ -585,6 +585,7 @@ input[type=text]:focus { border-color: #60a5fa; }
 }
 .bulk-page-unpub { font-size: 9px; color: #f97316; flex-shrink: 0; }
 .bulk-ta { min-height: 46px; }
+.bulk-code { font-family: 'Courier New', monospace; font-size: 11px; }
 .bulk-course-row {
   background: #2a2a3e;
   border: 1px solid #3a3a4e;

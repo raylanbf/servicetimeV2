@@ -373,8 +373,17 @@
 
   <div id="bulk-replace-section" style="display:none">
     <div class="divider"></div>
-    <span class="field-label">Texto original</span>
+    <span class="field-label">Modo</span>
+    <select id="bulk-mode">
+      <option value="text">Texto — troca só o texto</option>
+      <option value="range">Intervalo — trecho de HTML entre início e fim</option>
+    </select>
+    <span id="bulk-find-label" class="field-label">Texto original</span>
     <textarea id="bulk-find" class="comment-textarea bulk-ta" placeholder="texto que será procurado"></textarea>
+    <div id="bulk-end-wrap" style="display:none">
+      <span class="field-label" style="margin-top:6px">Fim do trecho</span>
+      <textarea id="bulk-end" class="comment-textarea bulk-ta bulk-code" placeholder="ex.: &lt;/span&gt;&lt;/p&gt;"></textarea>
+    </div>
     <span class="field-label" style="margin-top:6px">Substituir por</span>
     <textarea id="bulk-repl" class="comment-textarea bulk-ta" placeholder="texto novo (vazio = remover)"></textarea>
     <div class="row-between mt4">
@@ -384,7 +393,22 @@
         <span class="toggle-track"><span class="toggle-thumb"></span></span>
       </label>
     </div>
-    <span class="small muted" style="display:block;opacity:.6;margin-top:6px">Apenas o texto é alterado: negrito, itálico, cores, links e estrutura ficam intactos. Ocorrências partidas por formatação são apontadas na prévia, mas não alteradas.</span>
+    <div class="row-between mt4">
+      <span class="small muted">Só a 1ª ocorrência de cada página</span>
+      <label class="toggle">
+        <input type="checkbox" id="bulk-toggle-first">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+      </label>
+    </div>
+    <div id="bulk-inclusive-row" class="row-between mt4" style="display:none">
+      <span class="small muted">Incluir o início e o fim no trecho</span>
+      <label class="toggle">
+        <input type="checkbox" id="bulk-toggle-inclusive" checked>
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+      </label>
+    </div>
+    <span id="bulk-hint-text" class="small muted" style="display:block;opacity:.6;margin-top:6px">Apenas o texto é alterado: negrito, itálico, cores, links e estrutura ficam intactos. Ocorrências partidas por formatação são apontadas na prévia, mas não alteradas.</span>
+    <span id="bulk-hint-range" class="small muted" style="display:none;opacity:.6;margin-top:6px">Procura no código HTML da página: do início até o primeiro fim que aparecer depois dele. Cole trechos do editor HTML do Canvas — espaços e quebras de linha não precisam bater exatamente. O "substituir por" entra como HTML (vazio = apaga o trecho).</span>
     <button id="btn-bulk-preview" class="btn btn-surface btn-full mt6">👁  Ver prévia</button>
   </div>
 
