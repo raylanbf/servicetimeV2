@@ -2978,6 +2978,647 @@ async function doBulkApply() {
   btn.innerHTML = '✅  Aplicar substituição';
 }
 
+// ── Importar materiais complementares ────────────────────────────────
+// Lê os módulos do curso, sobe os arquivos na ordem escolhida para a pasta do
+// módulo em Arquivos, adiciona cada um como item no fim do módulo e lista os
+// nomes em "Material Complementar › Notas de Aula". As chamadas à API rodam na
+// aba do Canvas (sessão + CSRF); o binário sobe direto do painel, que tem
+// host_permissions para o storage do Canvas — arquivo não passa por `args`.
+
+let _matModules  = [];     // módulos do curso lido: [{ id, name }]
+let _matCourseId = null;   // curso que gerou a lista de módulos
+let _matFiles    = [];     // [{ id, file }] na ordem de importação
+let _matProgress = {};     // id → { status, detail }
+let _matPhase    = 'idle'; // 'idle' | 'running' | 'done'
+let _matSeq      = 0;
+let _matDragId   = null;
+
+function matStatus(msg, color) {
+  const el = $('mat-status');
+  el.textContent = msg;
+  el.style.color = color || '#94a3b8';
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function matFmtSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} MB`;
+}
+
+async function openMaterials() {
+  show('canvas-materiais');
+  if (_matPhase === 'running') return;
+  const courseId = await getCanvasCourseId();
+  $('mat-course-label').textContent = courseId ? `curso #${courseId}` : 'nenhum curso nesta aba';
+  // Mudou de curso: módulos e arquivos do anterior não valem mais.
+  if (_matCourseId && courseId !== _matCourseId) matReset();
+}
+
+function matReset() {
+  _matModules  = [];
+  _matCourseId = null;
+  _matFiles    = [];
+  _matProgress = {};
+  _matPhase    = 'idle';
+  $('mat-module-section').style.display = 'none';
+  $('mat-result').style.display = 'none';
+  $('btn-mat-modules').textContent = '📚  Ler módulos do curso';
+  matStatus('');
+  buildMatFiles();
+  matSyncUI();
+}
+
+// Depois de uma importação, recomeça mantendo só os arquivos que falharam —
+// assim dá para tentar de novo sem reenviar o que já entrou no módulo.
+function matNewBatch() {
+  _matFiles    = _matFiles.filter(f => _matProgress[f.id]?.status === 'error');
+  _matProgress = {};
+  _matPhase    = 'idle';
+  $('mat-result').style.display = 'none';
+  buildMatFiles();
+  matSyncUI();
+}
+
+// Aba ativa do Canvas, dentro de um curso — é onde as chamadas à API rodam.
+async function matCanvasTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const m = (tab?.url || '').match(/\/courses\/(\d+)/);
+  if (!m) throw new Error('Abra uma aba de um curso no Canvas para usar esta ferramenta.');
+  return { tabId: tab.id, courseId: m[1] };
+}
+
+async function matExec(tabId, courseId, op, p) {
+  const res = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: matCanvasMain,
+    args: [op, courseId, p || null],
+  });
+  const out = res[0]?.result;
+  if (out && out.__error) throw new Error(out.__error);
+  return out;
+}
+
+// Roda na aba do Canvas. Uma só função serializada para todas as operações,
+// para não repetir os helpers de CSRF e paginação em cada uma.
+function matCanvasMain(op, courseId, p) {
+  return (async () => {
+    try {
+      const rawCsrf = document.cookie.split(';')
+        .map(c => c.trim())
+        .find(c => c.startsWith('_csrf_token='));
+      const csrf = rawCsrf
+        ? decodeURIComponent(rawCsrf.split('=').slice(1).join('='))
+        : decodeURIComponent(document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
+      const api  = `/api/v1/courses/${courseId}`;
+      const norm = s => (s || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
+
+      async function fetchAll(url) {
+        const out = [];
+        let next = url;
+        while (next) {
+          const res = await fetch(next);
+          if (!res.ok) throw new Error(`HTTP ${res.status} ao ler ${url.split('?')[0]}`);
+          const data = await res.json();
+          if (Array.isArray(data)) out.push(...data);
+          const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
+          next = m ? m[1] : null;
+        }
+        return out;
+      }
+
+      async function send(method, url, body) {
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+          body: JSON.stringify(body),
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`HTTP ${res.status}${text ? ' — ' + text.slice(0, 160) : ''}`);
+        return text ? JSON.parse(text) : null;
+      }
+
+      if (op === 'modules') {
+        const mods = await fetchAll(`${api}/modules?per_page=100`);
+        return mods.map(m => ({ id: m.id, name: m.name }));
+      }
+
+      // Posição de inserção (sempre o fim do módulo), página Material
+      // Complementar do módulo e pasta de destino em Arquivos.
+      if (op === 'prepare') {
+        const items = await fetchAll(`${api}/modules/${p.moduleId}/items?per_page=100`);
+        const matRe = /materi[a-zç]*\s+complementar/i;
+        const mat   = items.find(it => it.type === 'Page' && matRe.test(it.title || ''))
+                   || items.find(it => matRe.test(it.title || ''));
+        const basePosition = items.reduce((max, it) => Math.max(max, it.position || 0), 0);
+
+        // Reaproveita a pasta da unidade ("Unidade 1 - Nome") em vez de criar
+        // outra só porque o nome não bate com o do módulo — sem confundir
+        // Unidade 1 com Unidade 10. Senão, casa pelo nome exato do módulo.
+        const folders = await fetchAll(`${api}/folders?per_page=100`);
+        let folder = null;
+        const unit = p.moduleName.match(/unidade\s*0*(\d+)/i)?.[1];
+        if (unit) {
+          const re = new RegExp(`^unidade\\s*0*${unit}(?!\\d)`, 'i');
+          folder = folders.find(f => re.test((f.name || '').trim())) || null;
+        }
+        if (!folder) folder = folders.find(f => norm(f.name) === norm(p.moduleName)) || null;
+
+        // Sem pasta existente, o Canvas cria pelo caminho — "/" viraria subpasta.
+        const path = p.moduleName.replace(/\//g, '-').trim();
+        return {
+          basePosition,
+          afterMaterial: !!mat,
+          materialSlug:  mat?.page_url || null,
+          folder:        folder ? { parent_folder_id: folder.id } : { parent_folder_path: path },
+          folderLabel:   folder ? `"${folder.name}"` : `"${path}" (criada)`,
+        };
+      }
+
+      // Etapa 1 do upload: o Canvas devolve a upload_url e os parâmetros assinados.
+      if (op === 'ticket') {
+        return await send('POST', `${api}/files`, {
+          name:         p.name,
+          size:         p.size,
+          content_type: p.contentType,
+          on_duplicate: 'overwrite',
+          ...p.folder,
+        });
+      }
+
+      if (op === 'addItem') {
+        await send('POST', `${api}/modules/${p.moduleId}/items`, {
+          module_item: {
+            title:      p.title,
+            type:       'File',
+            content_id: p.fileId,
+            position:   p.position,
+            indent:     p.indent,
+            completion_requirement: { type: 'must_view' },
+          },
+        });
+        return true;
+      }
+
+      // Acrescenta os links no bloco "Notas de Aula" da página Material
+      // Complementar, um por linha, sem apagar nem duplicar os que já estão lá.
+      // Como na edição em escala, nunca reserializa a página: o bloco é
+      // localizado por posição no HTML bruto e os links entram por fatia de
+      // string — todo o resto fica byte a byte igual.
+      if (op === 'notas') {
+        const res = await fetch(`${api}/pages/${p.slug}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status} ao ler a página Material Complementar`);
+        const page = await res.json();
+        const body = page.body || '';
+
+        // Árvore de elementos com as posições de cada tag no HTML original.
+        function scanElements(html) {
+          const VOID  = /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/;
+          const root  = { name: '#root', attrs: {}, children: [], parent: null };
+          const stack = [root];
+          const re    = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][\w-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+          let m;
+          while ((m = re.exec(html))) {
+            if (!m[2]) continue;                                   // comentário
+            const name = m[2].toLowerCase();
+            if (m[1]) {
+              const at = stack.map(e => e.name).lastIndexOf(name);
+              if (at <= 0) continue;                               // fechamento solto
+              // Fecha junto os que ficaram abertos dentro dele.
+              for (let k = stack.length - 1; k >= at; k--) {
+                stack[k].closeStart = m.index;
+                stack[k].end = k === at ? m.index + m[0].length : m.index;
+              }
+              stack.length = at;
+              continue;
+            }
+            const attrs = {};
+            for (const a of m[3].matchAll(/([^\s=\/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g)) {
+              attrs[a[1].toLowerCase()] = a[2] ?? a[3] ?? a[4] ?? '';
+            }
+            const parent = stack[stack.length - 1];
+            const el = { name, attrs, children: [], parent, start: m.index, openEnd: m.index + m[0].length };
+            parent.children.push(el);
+            if (VOID.test(name) || /\/\s*$/.test(m[3])) {
+              el.closeStart = el.end = el.openEnd;
+            } else if (name === 'script' || name === 'style') {
+              const close = new RegExp(`</${name}\\s*>`, 'ig');
+              close.lastIndex = el.openEnd;
+              const c = close.exec(html);
+              el.closeStart = c ? c.index : html.length;
+              el.end = c ? c.index + c[0].length : html.length;
+              re.lastIndex = el.end;
+            } else {
+              stack.push(el);
+            }
+          }
+          for (let k = stack.length - 1; k > 0; k--) stack[k].closeStart = stack[k].end = html.length;
+          return root;
+        }
+
+        function* descendants(el) {
+          for (const c of el.children) { yield c; yield* descendants(c); }
+        }
+        const find     = (el, pred) => { for (const d of descendants(el)) if (pred(d)) return d; return null; };
+        const hasClass = (el, c) => (el.attrs.class || '').split(/\s+/).includes(c);
+        const ta       = document.createElement('textarea');
+        const textOf   = el => {
+          ta.innerHTML = body.slice(el.openEnd, el.closeStart).replace(/<[^>]*>/g, '');
+          return ta.value;
+        };
+        const fileIdOf = href => (href || '').match(/\/files\/(\d+)/)?.[1];
+
+        const root = scanElements(body);
+        let block = null;
+        for (const el of descendants(root)) {
+          if (!/^(span|strong|h3|h4|p)$/.test(el.name) || norm(textOf(el)) !== 'notas de aula') continue;
+          for (let up = el; up.parent && !block; up = up.parent) if (hasClass(up, 'content-box')) block = up;
+          if (block) break;
+        }
+        const target = block && find(block, el => hasClass(el, 'textLayer--absolute'));
+        if (!target) return { notas: 'error', detail: 'bloco "Notas de Aula" não encontrado na página' };
+
+        const esc  = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const link = f =>
+          `<p><a class="instructure_file_link inline_disabled" title="${esc(f.name)}" ` +
+          `href="/courses/${courseId}/files/${f.fileId}?wrap=1" target="_blank" rel="noopener" ` +
+          `data-api-endpoint="${location.origin}/api/v1/courses/${courseId}/files/${f.fileId}" data-api-returntype="File">` +
+          `${esc(f.name)}</a></p>`;
+
+        const anchors = [...descendants(target)].filter(el => el.name === 'a' && 'href' in el.attrs);
+        let from, to, insert;
+        if (!anchors.length) {
+          // Bloco só com o placeholder: troca só o conteúdo dele.
+          from   = target.openEnd;
+          to     = target.closeStart;
+          insert = `<div id="section-slide0">${p.files.map(link).join('\n')}</div>\n<div id="section-slide1"></div>`;
+        } else {
+          const have  = new Set(anchors.map(a => fileIdOf(a.attrs.href)).filter(Boolean));
+          const novos = p.files.filter(f => !have.has(String(f.fileId)));
+          if (!novos.length) return { notas: 'ok' };
+          // Entra no fim do #section-slide0 se existir; senão no fim do próprio
+          // alvo, ou antes do marcador #section-slide1 quando ele está solto ali.
+          const section0 = find(target, el => el.attrs.id === 'section-slide0');
+          const marker   = section0 ? null : target.children.find(el => el.attrs.id === 'section-slide1');
+          from = to = marker ? marker.start : (section0 || target).closeStart;
+          insert = novos.map(link).join('\n');
+        }
+        const newBody = body.slice(0, from) + insert + body.slice(to);
+
+        // Confere com o parser do navegador que os links caíram dentro do
+        // bloco certo: se o HTML for irregular e o scanner errar, não grava.
+        const doc = new DOMParser().parseFromString(newBody, 'text/html');
+        let checkBlock = null;
+        for (const el of doc.querySelectorAll('span, strong, h3, h4, p')) {
+          if (norm(el.textContent) !== 'notas de aula') continue;
+          checkBlock = el.closest('.content-box');
+          if (checkBlock) break;
+        }
+        const checkTarget = checkBlock?.querySelector('.textLayer--absolute');
+        const inside = new Set([...(checkTarget?.querySelectorAll('a[href]') || [])].map(a => fileIdOf(a.getAttribute('href'))));
+        if (!p.files.every(f => inside.has(String(f.fileId)))) {
+          return { notas: 'error', detail: 'não consegui localizar o bloco "Notas de Aula" com segurança — a página não foi alterada' };
+        }
+
+        await send('PUT', `${api}/pages/${p.slug}`, { wiki_page: { body: newBody } });
+        return { notas: 'ok' };
+      }
+
+      return { __error: `Operação desconhecida: ${op}` };
+    } catch (err) {
+      return { __error: err.message };
+    }
+  })();
+}
+
+// Etapa 2 do upload: o binário vai do painel direto para a upload_url (storage
+// do Canvas, outro domínio). O campo "file" precisa ser o último do form.
+async function matUploadBinary(ticket, file) {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(ticket.upload_params || {})) form.append(k, v);
+  form.append('file', file, file.name);
+
+  let res;
+  try {
+    res = await fetch(ticket.upload_url, { method: 'POST', body: form });
+  } catch (err) {
+    throw new Error('falha ao enviar para o storage do Canvas: ' + err.message);
+  }
+  const text = await res.text().catch(() => '');
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+  const id = data?.id || (data?.location || '').match(/\/files\/(\d+)/)?.[1];
+  if (res.ok && id) return Number(id);
+  throw new Error(`upload não confirmado (HTTP ${res.status})`);
+}
+
+async function doMatLoadModules() {
+  const btn = $('btn-mat-modules');
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="spinner"></span>Lendo módulos...';
+
+  try {
+    const { tabId, courseId } = await matCanvasTab();
+    const mods = await matExec(tabId, courseId, 'modules');
+    if (courseId !== _matCourseId) matReset();
+
+    const sel  = $('mat-module');
+    const prev = sel.value;
+    _matCourseId = courseId;
+    _matModules  = mods;
+    $('mat-course-label').textContent = `curso #${courseId}`;
+    sel.innerHTML = '';
+    for (const m of mods) {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.name;
+      sel.appendChild(opt);
+    }
+    if (mods.some(m => String(m.id) === prev)) sel.value = prev;
+
+    if (!mods.length) {
+      matStatus(`Nenhum módulo no curso #${courseId}.`, '#f97316');
+      $('mat-module-section').style.display = 'none';
+    } else {
+      matStatus(`${mods.length} módulo(s) no curso #${courseId}`, '#4ade80');
+      $('mat-module-section').style.display = 'block';
+    }
+  } catch (err) {
+    matStatus('✗ ' + err.message, '#f87171');
+  }
+
+  btn.disabled    = false;
+  btn.textContent = _matModules.length ? '🔄  Reler módulos do curso' : '📚  Ler módulos do curso';
+  buildMatFiles();
+  matSyncUI();
+}
+
+function matAddFiles(e) {
+  // Copia antes de limpar o input — senão o FileList esvazia junto.
+  const added = [...e.target.files].map(file => ({ id: 'm' + _matSeq++, file }));
+  e.target.value = '';
+  if (!added.length) return;
+  _matFiles.push(...added);
+  buildMatFiles();
+  matSyncUI();
+}
+
+// Tira o arquivo da posição `from` e o coloca em `to` (setas e arraste).
+function matMove(from, to) {
+  if (from === to || to < 0 || to >= _matFiles.length) return;
+  const [moved] = _matFiles.splice(from, 1);
+  _matFiles.splice(to, 0, moved);
+  buildMatFiles();
+}
+
+function matFileBtn(label, title, onClick, disabled, extraClass) {
+  const b = document.createElement('button');
+  b.className   = 'mat-file-btn' + (extraClass ? ' ' + extraClass : '');
+  b.textContent = label;
+  b.title       = title;
+  b.disabled    = disabled;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+const MAT_STATUS_TITLE = {
+  pending: 'na fila', uploading: 'enviando arquivo', adding: 'adicionando ao módulo', ok: 'importado', error: 'erro',
+};
+
+function buildMatFiles() {
+  const list    = $('mat-files');
+  const editing = _matPhase === 'idle';
+  list.innerHTML = '';
+  list.style.display = _matFiles.length ? 'flex' : 'none';
+  $('mat-order-hint').style.display = _matFiles.length && _matPhase !== 'done' ? 'block' : 'none';
+
+  _matFiles.forEach((item, i) => {
+    const prog = _matProgress[item.id];
+    const row  = document.createElement('div');
+    row.className = 'mat-file'
+      + (editing ? ' editable' : '')
+      + (prog?.status === 'ok' ? ' ok' : prog?.status === 'error' ? ' error' : '');
+
+    if (editing) {
+      const grip = document.createElement('span');
+      grip.className   = 'mat-file-grip';
+      grip.textContent = '⋮⋮';
+      row.appendChild(grip);
+    }
+
+    const num = document.createElement('span');
+    num.className   = 'mat-file-num';
+    num.textContent = i + 1;
+    row.appendChild(num);
+
+    if (!editing) {
+      const s  = prog?.status || 'pending';
+      const st = document.createElement('span');
+      st.className = 'mat-file-status';
+      st.title     = MAT_STATUS_TITLE[s];
+      if (s === 'uploading' || s === 'adding') st.innerHTML = '<span class="spinner"></span>';
+      else if (s === 'ok')    { st.textContent = '✓'; st.style.color = '#4ade80'; }
+      else if (s === 'error') { st.textContent = '✗'; st.style.color = '#f87171'; }
+      else                    { st.textContent = '·'; st.style.color = '#64748b'; }
+      row.appendChild(st);
+    }
+
+    const name = document.createElement('span');
+    name.className   = 'mat-file-name';
+    name.textContent = item.file.name;
+    name.title       = item.file.name;
+    row.appendChild(name);
+
+    const info = document.createElement('span');
+    if (prog?.detail) {
+      info.className   = 'mat-file-detail';
+      info.textContent = prog.detail;
+      info.title       = prog.detail;
+    } else {
+      info.className   = 'mat-file-size';
+      info.textContent = matFmtSize(item.file.size);
+    }
+    row.appendChild(info);
+
+    if (editing) {
+      row.appendChild(matFileBtn('▲', 'Subir',   () => matMove(i, i - 1), i === 0));
+      row.appendChild(matFileBtn('▼', 'Descer',  () => matMove(i, i + 1), i === _matFiles.length - 1));
+      row.appendChild(matFileBtn('✕', 'Remover', () => {
+        _matFiles.splice(i, 1);
+        buildMatFiles();
+        matSyncUI();
+      }, false, 'rm'));
+
+      row.draggable = true;
+      row.addEventListener('dragstart', e => {
+        _matDragId = item.id;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', item.file.name);
+        row.classList.add('dragging');
+      });
+      row.addEventListener('dragover', e => {
+        if (!_matDragId || _matDragId === item.id) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        row.classList.add('over');
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('over'));
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        const from = _matFiles.findIndex(f => f.id === _matDragId);
+        _matDragId = null;
+        if (from >= 0) matMove(from, i);
+      });
+      row.addEventListener('dragend', () => {
+        _matDragId = null;
+        row.classList.remove('dragging');
+      });
+    }
+
+    list.appendChild(row);
+  });
+}
+
+function matSyncUI() {
+  const running = _matPhase === 'running';
+  const btn     = $('btn-mat-import');
+  $('btn-mat-modules').disabled   = running;
+  $('mat-module').disabled        = running;
+  $('btn-mat-add-files').disabled = running;
+
+  if (running) {
+    const done = Object.values(_matProgress).filter(p => p.status === 'ok' || p.status === 'error').length;
+    btn.className = 'btn btn-green btn-full mt6';
+    btn.disabled  = true;
+    btn.innerHTML = `<span class="spinner"></span>Importando ${Math.min(done + 1, _matFiles.length)} de ${_matFiles.length}...`;
+  } else if (_matPhase === 'done') {
+    const failed = _matFiles.filter(f => _matProgress[f.id]?.status === 'error').length;
+    btn.className   = failed ? 'btn btn-surface btn-full mt6' : 'btn btn-green btn-full mt6';
+    btn.disabled    = !failed;
+    btn.textContent = failed ? `↻  Tentar de novo os que falharam (${failed})` : '✓  Importação concluída';
+  } else {
+    btn.className   = 'btn btn-green btn-full mt6';
+    btn.disabled    = !_matFiles.length || !$('mat-module').value;
+    btn.textContent = `⬆  Importar materiais${_matFiles.length ? ` (${_matFiles.length})` : ''}`;
+  }
+}
+
+function showMatResult(files, prep, notas) {
+  const el  = $('mat-result');
+  const ok  = files.filter(f => _matProgress[f.id]?.status === 'ok').length;
+  const err = files.length - ok;
+  el.innerHTML = '';
+  const line = (text, color) => {
+    const d = document.createElement('div');
+    d.className   = 'mat-result-line';
+    d.style.color = color;
+    d.textContent = text;
+    el.appendChild(d);
+  };
+
+  if (ok)  line(`✓ ${ok} arquivo(s) adicionado(s) ao módulo · pasta ${prep.folderLabel}`, '#4ade80');
+  if (err) line(`✗ ${err} com erro — passe o mouse no erro para ver o detalhe.`, '#f87171');
+  if (notas.notas === 'ok')        line('✓ Nomes escritos em Material Complementar › Notas de Aula', '#4ade80');
+  else if (notas.notas === 'skip') line(`Notas de Aula não atualizada — ${notas.detail}`, '#f97316');
+  else                             line(`✗ Erro em Notas de Aula — ${notas.detail}`, '#f87171');
+  el.style.display = 'block';
+}
+
+async function doMatImport() {
+  const mod = _matModules.find(m => String(m.id) === $('mat-module').value);
+  if (!mod || !_matFiles.length || _matPhase !== 'idle') return;
+
+  // Trava antes do primeiro await — senão um duplo clique importa duas vezes.
+  const files  = _matFiles.slice();
+  _matPhase    = 'running';
+  _matProgress = Object.fromEntries(files.map(f => [f.id, { status: 'pending' }]));
+  matStatus('');
+  $('mat-result').style.display = 'none';
+  buildMatFiles();
+  matSyncUI();
+
+  const abort = msg => {
+    _matPhase    = 'idle';
+    _matProgress = {};
+    matStatus('✗ ' + msg, '#f87171');
+    buildMatFiles();
+    matSyncUI();
+  };
+
+  let tabId;
+  try {
+    const tab = await matCanvasTab();
+    if (tab.courseId !== _matCourseId) {
+      throw new Error(`A aba ativa é do curso #${tab.courseId}, mas os módulos lidos são do curso #${_matCourseId}. Clique em "Reler módulos do curso".`);
+    }
+    tabId = tab.tabId;
+  } catch (err) {
+    abort(err.message);
+    return;
+  }
+
+  // Curso e aba ficam fixos: trocar de aba no meio não muda o destino.
+  const courseId = _matCourseId;
+  const exec     = (op, p) => matExec(tabId, courseId, op, p);
+
+  let prep;
+  try {
+    prep = await exec('prepare', { moduleId: mod.id, moduleName: mod.name });
+  } catch (err) {
+    abort(err.message);
+    return;
+  }
+
+  const set = (id, status, detail) => {
+    _matProgress[id] = { status, detail };
+    buildMatFiles();
+    matSyncUI();
+  };
+
+  const uploaded = [];
+  let position   = prep.basePosition + 1;
+  for (const item of files) {
+    try {
+      set(item.id, 'uploading');
+      const ticket = await exec('ticket', {
+        name:        item.file.name,
+        size:        item.file.size,
+        contentType: item.file.type || 'application/octet-stream',
+        folder:      prep.folder,
+      });
+      const fileId = await matUploadBinary(ticket, item.file);
+
+      set(item.id, 'adding');
+      const title = item.file.name.replace(/\.[^./\\]+$/, '');
+      await exec('addItem', { moduleId: mod.id, fileId, title, position, indent: prep.afterMaterial ? 1 : 0 });
+      uploaded.push({ name: title, fileId });
+      position++;
+      set(item.id, 'ok');
+    } catch (err) {
+      set(item.id, 'error', err.message);
+    }
+  }
+
+  let notas;
+  if (!uploaded.length) {
+    notas = { notas: 'skip', detail: 'nenhum arquivo foi adicionado' };
+  } else if (!prep.materialSlug) {
+    notas = { notas: 'skip', detail: 'página "Material Complementar" não encontrada no módulo' };
+  } else {
+    $('btn-mat-import').innerHTML = '<span class="spinner"></span>Atualizando Notas de Aula...';
+    try {
+      notas = await exec('notas', { slug: prep.materialSlug, files: uploaded });
+    } catch (err) {
+      notas = { notas: 'error', detail: err.message };
+    }
+  }
+
+  _matPhase = 'done';
+  buildMatFiles();
+  matSyncUI();
+  showMatResult(files, prep, notas);
+}
+
 // ── Checklist de publicação (multi-curso) ────────────────────────────
 
 const CHECKLIST_ITEMS = [
@@ -3809,6 +4450,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('bulk-toggle-inclusive').addEventListener('change', invalidateBulk);
   $('bulk-courses-input').addEventListener('input', invalidateBulk);
   $('bulk-mode').addEventListener('change', () => { bulkSyncMode(); invalidateBulk(); });
+
+  // ── Materiais complementares ──────────────────────────────────────
+  $('btn-canvas-materiais').addEventListener('click', openMaterials);
+  $('btn-back-canvas-materiais').addEventListener('click', () => show('canvas'));
+  $('btn-mat-modules').addEventListener('click', doMatLoadModules);
+  $('mat-module').addEventListener('change', () => {
+    if (_matPhase === 'done') matNewBatch();
+    matSyncUI();
+  });
+  $('btn-mat-add-files').addEventListener('click', () => {
+    if (_matPhase === 'done') matNewBatch();
+    $('mat-file-input').click();
+  });
+  $('mat-file-input').addEventListener('change', matAddFiles);
+  // Depois de importar, o mesmo botão tenta de novo só os que falharam.
+  $('btn-mat-import').addEventListener('click', () => {
+    if (_matPhase === 'done') matNewBatch();
+    doMatImport();
+  });
+
   $('btn-apply-revisions-filter').addEventListener('click', doFetchRevisions);
   $('btn-back-canvas-revisions').addEventListener('click', () => show('canvas'));
   $('btn-canvas-checklist').addEventListener('click', () => show('checklist'));

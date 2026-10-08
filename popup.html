@@ -126,6 +126,7 @@
   <div class="divider"></div>
   <span class="small muted">Edição em escala</span>
   <button id="btn-canvas-bulk" class="btn btn-surface btn-full mt4">⚡  Editar páginas em massa</button>
+  <button id="btn-canvas-materiais" class="btn btn-surface btn-full mt4">📎  Importar materiais complementares</button>
 </div>
 
 <!-- ── Editar serviços ─────────────────────────────────────────────── -->
@@ -415,6 +416,38 @@
   <div id="bulk-progress" class="small muted mt4" style="display:none;text-align:center"></div>
   <div id="bulk-results" class="cl-results mt6"></div>
   <button id="btn-bulk-apply" class="btn btn-green btn-full mt6" style="display:none">✅  Aplicar substituição</button>
+</div>
+
+<!-- ── Importar materiais complementares ─────────── -->
+<div id="view-canvas-materiais" class="view">
+  <div class="view-header">
+    <button id="btn-back-canvas-materiais" class="btn-icon">←</button>
+    <span class="view-title">Materiais complementares</span>
+  </div>
+
+  <div class="row-between">
+    <span class="field-label" style="margin-bottom:0">Curso</span>
+    <span id="mat-course-label" class="small muted"></span>
+  </div>
+  <span class="small muted" style="display:block;opacity:.6;margin-top:3px">Cada arquivo (slides, PDF, código…) sobe para a pasta do módulo em Arquivos — reaproveitando a pasta da unidade, se já existir —, entra no fim do módulo com o requisito "Visualizar" e tem o nome listado em Material Complementar › Notas de Aula.</span>
+
+  <button id="btn-mat-modules" class="btn btn-surface btn-full mt6">📚  Ler módulos do curso</button>
+  <div id="mat-status" class="small mt4" style="display:none"></div>
+
+  <div id="mat-module-section" style="display:none">
+    <div class="divider"></div>
+    <span class="field-label">Módulo de destino</span>
+    <select id="mat-module"></select>
+
+    <span class="field-label">Arquivos, na ordem em que vão aparecer</span>
+    <input id="mat-file-input" type="file" multiple style="display:none">
+    <button id="btn-mat-add-files" class="btn btn-surface btn-full">＋  Adicionar arquivos</button>
+    <div id="mat-files" class="mat-files mt4" style="display:none"></div>
+    <span id="mat-order-hint" class="small muted" style="display:none;opacity:.6;margin-top:3px">Arraste ou use as setas para mudar a ordem. Mantenha o painel aberto até a importação terminar.</span>
+
+    <button id="btn-mat-import" class="btn btn-green btn-full mt6" disabled>⬆  Importar materiais</button>
+    <div id="mat-result" class="mt6" style="display:none"></div>
+  </div>
 </div>
 
 <!-- ── Modal de confirmação da edição em escala ──────────────────── -->
