@@ -127,6 +127,7 @@
   <span class="small muted">Edição em escala</span>
   <button id="btn-canvas-bulk" class="btn btn-surface btn-full mt4">⚡  Editar páginas em massa</button>
   <button id="btn-canvas-materiais" class="btn btn-surface btn-full mt4">📎  Importar materiais complementares</button>
+  <button id="btn-canvas-banner" class="btn btn-surface btn-full mt4">🖼  Trocar banner dos cursos</button>
 </div>
 
 <!-- ── Editar serviços ─────────────────────────────────────────────── -->
@@ -448,6 +449,41 @@
     <button id="btn-mat-import" class="btn btn-green btn-full mt6" disabled>⬆  Importar materiais</button>
     <div id="mat-result" class="mt6" style="display:none"></div>
   </div>
+</div>
+
+<!-- ── Trocar banner dos cursos ──────────────────── -->
+<div id="view-canvas-banner" class="view">
+  <div class="view-header">
+    <button id="btn-back-canvas-banner" class="btn-icon">←</button>
+    <span class="view-title">Trocar banner</span>
+  </div>
+
+  <span class="small muted" style="display:block;opacity:.6">Procura em Arquivos › Layout de cada curso as imagens cujo nome começa com banner, nova pos, biblioteca, cronograma-do-curso, estrutura-curso-disciplinas ou apresentacao-coordenacao, e sobe a nova imagem por cima mantendo o nome — as páginas que já usam esses arquivos passam a mostrar o novo banner sem precisar editá-las.</span>
+
+  <span class="field-label mt6">Nova imagem</span>
+  <input id="ban-file-input" type="file" accept="image/*" style="display:none">
+  <div id="ban-preview" class="ban-preview" style="display:none">
+    <img id="ban-preview-img" alt="Prévia do novo banner">
+    <div class="ban-preview-info">
+      <span id="ban-preview-name" class="ban-preview-name"></span>
+      <span id="ban-preview-size" class="mat-file-size"></span>
+    </div>
+  </div>
+  <button id="btn-ban-pick" class="btn btn-surface btn-full mt4">🖼  Escolher imagem</button>
+
+  <div class="row-between mt6">
+    <span class="field-label" style="margin-bottom:0">Códigos dos cursos</span>
+    <button id="btn-ban-use-tab" class="btn-link-sm">+ aba atual</button>
+  </div>
+  <textarea id="ban-courses-input" class="comment-textarea" placeholder="12345&#10;67890" style="min-height:54px;font-size:12px;margin-top:4px;font-family:'Courier New',monospace;margin-bottom:0"></textarea>
+  <span class="small muted" style="display:block;opacity:.6;margin-top:3px">Máximo de 10 cursos.</span>
+
+  <button id="btn-ban-scan" class="btn btn-surface btn-full mt6">🔍  Buscar banners</button>
+  <div id="ban-status" class="small mt4" style="display:none"></div>
+
+  <div id="ban-results" class="cl-results mt6"></div>
+  <button id="btn-ban-apply" class="btn btn-green btn-full mt6" style="display:none"></button>
+  <div id="ban-result" class="mt6" style="display:none"></div>
 </div>
 
 <!-- ── Modal de confirmação da edição em escala ──────────────────── -->

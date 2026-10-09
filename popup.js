@@ -3619,6 +3619,497 @@ async function doMatImport() {
   showMatResult(files, prep, notas);
 }
 
+// ── Trocar banner dos cursos ─────────────────────────────────────────
+// Procura as imagens de banner em Arquivos › Layout de cada curso e sobe a
+// nova imagem por cima delas, com o MESMO nome e on_duplicate "overwrite": o
+// Canvas redireciona o arquivo antigo para o novo, então as páginas que já
+// usam o banner passam a mostrar o novo sem edição nenhuma. O ticket de upload
+// sai da aba do Canvas (sessão + CSRF) e o binário sobe do painel, como nos
+// materiais complementares. Portado dos modais de banner da extensão AVA.
+
+const BANNER_MAX_COURSES = 10;
+const BANNER_FOLDER      = 'Layout';
+
+// Começo do nome (sem extensão, sem acento, minúsculo) dos arquivos de banner.
+const BANNER_PREFIXES = [
+  'banner',
+  'nova pos',
+  'apresentacao-coordenacao',
+  'biblioteca',
+  'cronograma-do-curso',
+  'estrutura-curso-disciplinas',
+];
+
+let _banFile     = null;   // nova imagem escolhida
+let _banImageUrl = null;   // object URL da prévia da imagem
+let _banScan     = null;   // [{ courseId, name, folderId, error, files: [{ id, name, size, checked }] }]
+let _banProgress = {};     // `${courseId}:${fileId}` → { status, detail }
+let _banRunKeys  = [];     // chaves da rodada em andamento (para o "N de M")
+let _banPhase    = 'idle'; // 'idle' | 'scanning' | 'running' | 'done'
+
+function isBannerFile(name) {
+  const base = (name || '').replace(/\.[^.]+$/, '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().trim();
+  return BANNER_PREFIXES.some(p => base.startsWith(p));
+}
+
+function banStatus(msg, color) {
+  const el = $('ban-status');
+  el.textContent = msg;
+  el.style.color = color || '#94a3b8';
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function banKey(courseId, file) {
+  return `${courseId}:${file.id}`;
+}
+
+// Arquivos marcados, na ordem da tela, com o curso de cada um.
+function banTargets() {
+  return (_banScan || []).flatMap(c => c.files.filter(f => f.checked).map(file => ({ course: c, file })));
+}
+
+// Resumo da última busca na linha de status (ou nada, se não houve busca).
+function banScanSummary() {
+  if (!_banScan) { banStatus(''); return; }
+  const found   = _banScan.reduce((n, c) => n + c.files.length, 0);
+  const courses = _banScan.filter(c => c.files.length).length;
+  if (found) banStatus(`${found} arquivo(s) de banner em ${courses} curso(s). Desmarque o que não deve ser trocado.`, '#4ade80');
+  else       banStatus(`Nenhum arquivo de banner encontrado em Arquivos › ${BANNER_FOLDER}.`, '#f97316');
+}
+
+async function openBanner() {
+  show('canvas-banner');
+  const input = $('ban-courses-input');
+  if (_banPhase === 'idle' && !input.value.trim()) {
+    const id = await getCanvasCourseId();
+    if (id) input.value = id;
+  }
+  banSyncUI();
+}
+
+// Trocar os cursos invalida a busca: a lista exibida veio de outros cursos.
+function banInvalidate() {
+  if (!_banScan) return;
+  _banScan     = null;
+  _banProgress = {};
+  _banPhase    = 'idle';
+  $('ban-result').style.display = 'none';
+  banStatus('Cursos alterados — busque os banners novamente.', '#f97316');
+  buildBannerResults();
+  banSyncUI();
+}
+
+function banPickImage(e) {
+  // Guarda o File antes de limpar o input — o FileList esvazia junto.
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    banStatus('✗ Escolha um arquivo de imagem.', '#f87171');
+    return;
+  }
+  _banFile = file;
+  if (_banImageUrl) URL.revokeObjectURL(_banImageUrl);
+  _banImageUrl = URL.createObjectURL(file);
+  $('ban-preview-img').src          = _banImageUrl;
+  $('ban-preview-name').textContent = file.name;
+  $('ban-preview-name').title       = file.name;
+  $('ban-preview-size').textContent = matFmtSize(file.size);
+  $('ban-preview').style.display    = 'block';
+
+  // Imagem nova depois de uma rodada: libera substituir de novo, com ela.
+  if (_banPhase === 'done') {
+    _banPhase    = 'idle';
+    _banProgress = {};
+    $('ban-result').style.display = 'none';
+    buildBannerResults();
+  }
+  banScanSummary();
+  banSyncUI();
+}
+
+// Aba ativa do Canvas — as chamadas usam a sessão dela, para qualquer curso.
+async function banCanvasTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || !/\/courses\//.test(tab.url || '')) {
+    throw new Error('Abra uma aba do Canvas (qualquer curso) para usar esta ferramenta.');
+  }
+  return tab.id;
+}
+
+async function banExec(tabId, op, p) {
+  const res = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: bannerCanvasMain,
+    args: [op, p],
+  });
+  const out = res[0]?.result;
+  if (out && out.__error) throw new Error(out.__error);
+  return out;
+}
+
+// Roda na aba do Canvas. `scan` lê a pasta Layout de cada curso, junto com o
+// nome do curso (para conferir os códigos digitados); `ticket` pede ao Canvas
+// a upload_url para sobrescrever um arquivo da pasta.
+function bannerCanvasMain(op, p) {
+  return (async () => {
+    try {
+      const rawCsrf = document.cookie.split(';')
+        .map(c => c.trim())
+        .find(c => c.startsWith('_csrf_token='));
+      const csrf = rawCsrf
+        ? decodeURIComponent(rawCsrf.split('=').slice(1).join('='))
+        : decodeURIComponent(document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
+
+      async function fetchAll(url) {
+        const out = [];
+        let next = url;
+        while (next) {
+          const res = await fetch(next);
+          if (!res.ok) throw new Error(`HTTP ${res.status} ao listar os arquivos da pasta`);
+          const data = await res.json();
+          if (Array.isArray(data)) out.push(...data);
+          const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
+          next = m ? m[1] : null;
+        }
+        return out;
+      }
+
+      if (op === 'scan') {
+        return await Promise.all(p.courseIds.map(async courseId => {
+          try {
+            const [courseRes, folderRes] = await Promise.all([
+              fetch(`/api/v1/courses/${courseId}`),
+              fetch(`/api/v1/courses/${courseId}/folders/by_path/${encodeURIComponent(p.folder)}`),
+            ]);
+            if (!courseRes.ok) {
+              return {
+                courseId,
+                error: courseRes.status === 404 ? 'curso não encontrado' : `sem acesso ao curso (HTTP ${courseRes.status})`,
+              };
+            }
+            const course = await courseRes.json();
+            if (!folderRes.ok) {
+              return {
+                courseId,
+                name:  course.name,
+                error: folderRes.status === 404
+                  ? `pasta Arquivos › ${p.folder} não encontrada`
+                  : `HTTP ${folderRes.status} ao abrir a pasta ${p.folder}`,
+              };
+            }
+            // by_path devolve a cadeia de pastas até a pedida — ela é a última.
+            const chain  = await folderRes.json();
+            const folder = Array.isArray(chain) ? chain[chain.length - 1] : chain;
+            const files  = await fetchAll(`/api/v1/folders/${folder.id}/files?per_page=100`);
+            return {
+              courseId,
+              name:     course.name,
+              folderId: folder.id,
+              files:    files.map(f => ({ id: f.id, name: f.display_name, size: f.size })),
+            };
+          } catch (err) {
+            return { courseId, error: err.message };
+          }
+        }));
+      }
+
+      if (op === 'ticket') {
+        const res = await fetch(`/api/v1/courses/${p.courseId}/files`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+          body: JSON.stringify({
+            name:             p.name,
+            size:             p.size,
+            content_type:     p.contentType,
+            parent_folder_id: p.folderId,
+            on_duplicate:     'overwrite',
+          }),
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`HTTP ${res.status}${text ? ' — ' + text.slice(0, 160) : ''}`);
+        return JSON.parse(text);
+      }
+
+      return { __error: `Operação desconhecida: ${op}` };
+    } catch (err) {
+      return { __error: err.message };
+    }
+  })();
+}
+
+const BAN_STATUS_TITLE = {
+  pending: 'na fila', uploading: 'enviando', ok: 'substituído', error: 'erro', skipped: 'não marcado',
+};
+
+function buildBannerResults() {
+  const box = $('ban-results');
+  box.innerHTML = '';
+  if (!_banScan) return;
+  const editing = _banPhase === 'idle';
+
+  for (const c of _banScan) {
+    const statuses = c.files.map(f => _banProgress[banKey(c.courseId, f)]?.status);
+    const card = document.createElement('div');
+    card.className = 'bulk-course-row ' + (
+      c.error                    ? 'error' :
+      !c.files.length            ? 'zero'  :
+      statuses.includes('error') ? 'warn'  : 'ok');
+
+    // Em edição, a caixa do cabeçalho marca/desmarca todos os arquivos do curso.
+    const selectable = editing && c.files.length > 0;
+    const head = document.createElement(selectable ? 'label' : 'div');
+    head.className = 'bulk-course-row-head';
+    if (selectable) {
+      const all = document.createElement('input');
+      all.type          = 'checkbox';
+      all.className     = 'ban-check';
+      all.checked       = c.files.every(f => f.checked);
+      all.indeterminate = !all.checked && c.files.some(f => f.checked);
+      all.addEventListener('change', () => {
+        c.files.forEach(f => { f.checked = all.checked; });
+        buildBannerResults();
+        banSyncUI();
+      });
+      head.appendChild(all);
+    }
+    const title = document.createElement('span');
+    title.className   = 'ban-course-title';
+    title.textContent = `Curso #${c.courseId}` + (c.name ? ` · ${c.name}` : '');
+    title.title       = title.textContent;
+    head.appendChild(title);
+    if (c.files.length) {
+      const count = document.createElement('span');
+      count.className   = 'bulk-count';
+      count.textContent = `${c.files.length} arq.`;
+      head.appendChild(count);
+    }
+    card.appendChild(head);
+
+    if (c.error || !c.files.length) {
+      const note = document.createElement('div');
+      note.className   = 'bulk-course-note';
+      note.textContent = c.error ? '✗ ' + c.error : `Nenhum arquivo de banner em Arquivos › ${BANNER_FOLDER}.`;
+      card.appendChild(note);
+    } else {
+      const list = document.createElement('div');
+      list.className = 'ban-files';
+      for (const f of c.files) list.appendChild(bannerFileRow(c, f, editing));
+      card.appendChild(list);
+    }
+    box.appendChild(card);
+  }
+}
+
+function bannerFileRow(course, file, editing) {
+  const prog = _banProgress[banKey(course.courseId, file)];
+  // Em edição a linha inteira é um <label>: clicar no nome marca/desmarca.
+  const row = document.createElement(editing ? 'label' : 'div');
+  row.className = 'mat-file'
+    + (prog?.status === 'ok' ? ' ok' : prog?.status === 'error' ? ' error' : '');
+
+  if (editing) {
+    const cb = document.createElement('input');
+    cb.type      = 'checkbox';
+    cb.className = 'ban-check';
+    cb.checked   = file.checked;
+    cb.addEventListener('change', () => {
+      file.checked = cb.checked;
+      buildBannerResults();
+      banSyncUI();
+    });
+    row.appendChild(cb);
+  } else {
+    const s  = prog?.status || 'skipped';
+    const st = document.createElement('span');
+    st.className = 'mat-file-status';
+    st.title     = BAN_STATUS_TITLE[s];
+    if (s === 'uploading')    st.innerHTML = '<span class="spinner"></span>';
+    else if (s === 'ok')      { st.textContent = '✓'; st.style.color = '#4ade80'; }
+    else if (s === 'error')   { st.textContent = '✗'; st.style.color = '#f87171'; }
+    else if (s === 'pending') { st.textContent = '·'; st.style.color = '#64748b'; }
+    else                      { st.textContent = '–'; st.style.color = '#64748b'; }
+    row.appendChild(st);
+  }
+
+  const name = document.createElement('span');
+  name.className   = 'mat-file-name' + (file.checked ? '' : ' ban-off');
+  name.textContent = file.name;
+  name.title       = file.name;
+  row.appendChild(name);
+
+  const info = document.createElement('span');
+  if (prog?.detail) {
+    info.className   = 'mat-file-detail';
+    info.textContent = prog.detail;
+    info.title       = prog.detail;
+  } else {
+    info.className   = 'mat-file-size';
+    info.textContent = matFmtSize(file.size || 0);
+  }
+  row.appendChild(info);
+  return row;
+}
+
+function banSyncUI() {
+  const scanning = _banPhase === 'scanning';
+  const running  = _banPhase === 'running';
+
+  $('btn-ban-pick').disabled      = running;
+  $('btn-ban-pick').textContent   = _banFile ? '🔄  Trocar imagem' : '🖼  Escolher imagem';
+  $('ban-courses-input').disabled = scanning || running;
+  $('btn-ban-use-tab').disabled   = scanning || running;
+
+  const scan = $('btn-ban-scan');
+  scan.disabled = scanning || running;
+  if (scanning) scan.innerHTML   = '<span class="spinner"></span>Buscando banners...';
+  else          scan.textContent = _banScan ? '🔄  Buscar de novo' : '🔍  Buscar banners';
+
+  const btn = $('btn-ban-apply');
+  const found = (_banScan || []).some(c => c.files.length);
+  btn.style.display = found ? 'block' : 'none';
+  if (!found) return;
+
+  if (running) {
+    const done = _banRunKeys.filter(k => /^(ok|error)$/.test(_banProgress[k]?.status)).length;
+    btn.className = 'btn btn-green btn-full mt6';
+    btn.disabled  = true;
+    btn.innerHTML = `<span class="spinner"></span>Substituindo ${Math.min(done + 1, _banRunKeys.length)} de ${_banRunKeys.length}...`;
+  } else if (_banPhase === 'done') {
+    const failed = Object.values(_banProgress).filter(p => p.status === 'error').length;
+    btn.className   = failed ? 'btn btn-surface btn-full mt6' : 'btn btn-green btn-full mt6';
+    btn.disabled    = !failed;
+    btn.textContent = failed ? `↻  Tentar de novo os que falharam (${failed})` : '✓  Banners substituídos';
+  } else {
+    const targets = banTargets();
+    const courses = new Set(targets.map(t => t.course.courseId)).size;
+    btn.className   = 'btn btn-green btn-full mt6';
+    btn.disabled    = !targets.length || !_banFile;
+    btn.textContent = !_banFile       ? 'Escolha a nova imagem acima'
+                    : !targets.length ? 'Nenhum arquivo marcado'
+                    : `🖼  Substituir ${targets.length} arquivo(s) em ${courses} curso(s)`;
+  }
+}
+
+function showBannerResult() {
+  const el  = $('ban-result');
+  const all = Object.values(_banProgress);
+  const ok  = all.filter(p => p.status === 'ok').length;
+  const err = all.filter(p => p.status === 'error').length;
+  el.innerHTML = '';
+  const line = (text, color) => {
+    const d = document.createElement('div');
+    d.className   = 'mat-result-line';
+    d.style.color = color;
+    d.textContent = text;
+    el.appendChild(d);
+  };
+
+  if (ok)  line(`✓ ${ok} arquivo(s) substituído(s). Se a página ainda mostrar o banner antigo, recarregue com Ctrl+F5 — é o cache do navegador.`, '#4ade80');
+  if (err) line(`✗ ${err} com erro — passe o mouse no erro para ver o detalhe.`, '#f87171');
+  el.style.display = 'block';
+}
+
+async function doBannerScan() {
+  if (_banPhase === 'scanning' || _banPhase === 'running') return;
+  const ids = parseCourseIds($('ban-courses-input').value);
+  if (!ids.length) { banStatus('✗ Informe ao menos um código de curso.', '#f87171'); return; }
+  if (ids.length > BANNER_MAX_COURSES) {
+    banStatus(`✗ Máximo de ${BANNER_MAX_COURSES} cursos — você informou ${ids.length}.`, '#f87171');
+    return;
+  }
+
+  _banPhase    = 'scanning';
+  _banScan     = null;
+  _banProgress = {};
+  $('ban-result').style.display = 'none';
+  banStatus(`Lendo Arquivos › ${BANNER_FOLDER} de ${ids.length} curso(s)...`);
+  buildBannerResults();
+  banSyncUI();
+
+  try {
+    const tabId = await banCanvasTab();
+    const scan  = await banExec(tabId, 'scan', { courseIds: ids, folder: BANNER_FOLDER });
+    _banScan = scan.map(c => ({
+      ...c,
+      files: (c.files || []).filter(f => isBannerFile(f.name)).map(f => ({ ...f, checked: true })),
+    }));
+    _banPhase = 'idle';
+    banScanSummary();
+  } catch (err) {
+    _banPhase = 'idle';
+    banStatus('✗ ' + err.message, '#f87171');
+  }
+  buildBannerResults();
+  banSyncUI();
+}
+
+async function doBannerReplace() {
+  if (_banPhase === 'scanning' || _banPhase === 'running' || !_banFile) return;
+  // Depois de uma rodada, o mesmo botão tenta de novo só os que falharam.
+  const retry   = _banPhase === 'done';
+  const targets = banTargets().filter(t =>
+    !retry || _banProgress[banKey(t.course.courseId, t.file)]?.status === 'error');
+  if (!targets.length) return;
+
+  // Trava antes do primeiro await — senão um duplo clique sobe duas vezes.
+  const prev  = { phase: _banPhase, progress: _banProgress };
+  const image = _banFile;
+  _banPhase    = 'running';
+  _banProgress = retry ? { ..._banProgress } : {};
+  _banRunKeys  = targets.map(t => banKey(t.course.courseId, t.file));
+  for (const k of _banRunKeys) _banProgress[k] = { status: 'pending' };
+  $('ban-result').style.display = 'none';
+  banStatus('Substituindo — mantenha o painel aberto até terminar.');
+  buildBannerResults();
+  banSyncUI();
+
+  // A aba fica fixa: trocar de aba no meio não muda a sessão usada.
+  let tabId;
+  try {
+    tabId = await banCanvasTab();
+  } catch (err) {
+    _banPhase    = prev.phase;
+    _banProgress = prev.progress;
+    banStatus('✗ ' + err.message, '#f87171');
+    buildBannerResults();
+    banSyncUI();
+    return;
+  }
+
+  for (const { course, file } of targets) {
+    const key = banKey(course.courseId, file);
+    const set = (status, detail) => {
+      _banProgress[key] = { status, detail };
+      buildBannerResults();
+      banSyncUI();
+    };
+    try {
+      set('uploading');
+      const ticket = await banExec(tabId, 'ticket', {
+        courseId:    course.courseId,
+        folderId:    course.folderId,
+        name:        file.name,
+        size:        image.size,
+        contentType: image.type || 'application/octet-stream',
+      });
+      // No formulário o binário também vai com o nome antigo, como na AVA.
+      await matUploadBinary(ticket, new File([image], file.name, { type: image.type }));
+      set('ok');
+    } catch (err) {
+      set('error', err.message);
+    }
+  }
+
+  _banPhase = 'done';
+  banStatus('');
+  buildBannerResults();
+  banSyncUI();
+  showBannerResult();
+}
+
 // ── Checklist de publicação (multi-curso) ────────────────────────────
 
 const CHECKLIST_ITEMS = [
@@ -4469,6 +4960,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (_matPhase === 'done') matNewBatch();
     doMatImport();
   });
+
+  // ── Trocar banner ─────────────────────────────────────────────────
+  $('btn-canvas-banner').addEventListener('click', openBanner);
+  $('btn-back-canvas-banner').addEventListener('click', () => show('canvas'));
+  $('btn-ban-pick').addEventListener('click', () => $('ban-file-input').click());
+  $('ban-file-input').addEventListener('change', banPickImage);
+  $('btn-ban-use-tab').addEventListener('click', async () => {
+    const id = await getCanvasCourseId();
+    if (!id) { banStatus('✗ Nenhum curso Canvas detectado na aba ativa.', '#f87171'); return; }
+    const input    = $('ban-courses-input');
+    const existing = parseCourseIds(input.value);
+    if (existing.includes(id)) return;
+    if (existing.length >= BANNER_MAX_COURSES) {
+      banStatus(`✗ Limite de ${BANNER_MAX_COURSES} cursos atingido.`, '#f87171');
+      return;
+    }
+    input.value = (input.value.trim() ? input.value.trim() + '\n' : '') + id;
+    banInvalidate();  // valor trocado por código não dispara o evento "input"
+  });
+  $('ban-courses-input').addEventListener('input', banInvalidate);
+  $('btn-ban-scan').addEventListener('click', doBannerScan);
+  $('btn-ban-apply').addEventListener('click', doBannerReplace);
 
   $('btn-apply-revisions-filter').addEventListener('click', doFetchRevisions);
   $('btn-back-canvas-revisions').addEventListener('click', () => show('canvas'));
