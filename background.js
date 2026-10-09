@@ -402,6 +402,212 @@ function justifyText(tabId) {
   });
 }
 
+// ── Redimensionar H5P (largura 100%) ─────────────────────────────────
+// O H5P entra pela ferramenta "Interactive Content – H5P" do editor como um
+// iframe LTI (class="lti-embed", que o redimensionar vídeos ignora) com
+// largura fixa, perto de 700px. Só esse iframe — reconhecido pelo src, que
+// leva o endereço do H5P — passa a ter 100% de largura; a altura e os demais
+// iframes (vídeos, Studio) ficam como estão.
+function resizeH5p(tabId) {
+  chrome.scripting.executeScript({
+    target: { tabId },
+    // MAIN: o editor HTML do Canvas é um CodeMirror e o visual é o TinyMCE —
+    // as instâncias dos dois só existem para o JS da própria página.
+    world: 'MAIN',
+    func: h5pResizeMain,
+  });
+}
+
+function h5pResizeMain() {
+  function showToast(text, bg) {
+    document.getElementById('__svc-toast__')?.remove();
+    const el = document.createElement('div');
+    el.id = '__svc-toast__';
+    el.textContent = text;
+    Object.assign(el.style, {
+      position: 'fixed', bottom: '24px', right: '24px',
+      background: bg, color: '#fff',
+      padding: '10px 16px', borderRadius: '6px',
+      fontFamily: 'system-ui', fontSize: '13px',
+      zIndex: '2147483647', boxShadow: '0 2px 8px rgba(0,0,0,.4)',
+    });
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3500);
+  }
+
+  // Põe width: 100% no style, no lugar da largura que houver (max-width e
+  // min-width ficam). Devolve o mesmo texto se já estiver em 100%.
+  function fullWidthStyle(style) {
+    let found = false;
+    const out = style.replace(/(^|;)(\s*)width\s*:([^;]*)/gi, (m, sep, ws, val) => {
+      found = true;
+      return val.trim() === '100%' ? m : `${sep}${ws}width: 100%`;
+    });
+    if (found) return out;
+    const base = style.trim();
+    return base ? base.replace(/;?\s*$/, '; ') + 'width: 100%;' : 'width: 100%;';
+  }
+
+  // Ajusta uma tag <iframe ...>; devolve null se o iframe não é do H5P. Só os
+  // atributos width e style são reescritos — o resto da tag fica igual.
+  function patchTag(tag) {
+    const attrs  = {};
+    const attrRe = /([^\s=\/>"']+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>"']+))?/g;
+    attrRe.lastIndex = '<iframe'.length;
+    let a;
+    while ((a = attrRe.exec(tag))) {
+      const name = a[1].toLowerCase();
+      if (name in attrs) continue;
+      const raw = a[2] || '';
+      const q   = raw[0] === '"' || raw[0] === "'" ? raw[0] : '';
+      attrs[name] = { from: a.index, to: a.index + a[0].length, q, value: q ? raw.slice(1, -1) : raw };
+    }
+    if (!/h5p/i.test(attrs.src?.value || '')) return null;
+
+    const edits = [];
+    if (attrs.width && attrs.width.value.trim() !== '100%') {
+      edits.push({ from: attrs.width.from, to: attrs.width.to, insert: 'width="100%"' });
+    }
+    if (attrs.style) {
+      const style = fullWidthStyle(attrs.style.value);
+      if (style !== attrs.style.value) {
+        const q = attrs.style.q || '"';
+        edits.push({ from: attrs.style.from, to: attrs.style.to, insert: `style=${q}${style}${q}` });
+      }
+    } else {
+      const at = tag.length - (tag.endsWith('/>') ? 2 : 1);
+      edits.push({ from: at, to: at, insert: ' style="width: 100%;"' });
+    }
+    let out = tag;
+    for (const e of edits.sort((x, y) => y.from - x.from)) out = out.slice(0, e.from) + e.insert + out.slice(e.to);
+    return out;
+  }
+
+  // Edições { from, to, insert } que põem os iframes do H5P do texto em 100%.
+  function h5pEdits(html) {
+    const edits = [];
+    let found = 0;
+    for (const m of html.matchAll(/<iframe\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi)) {
+      const out = patchTag(m[0]);
+      if (out === null) continue;
+      found++;
+      if (out !== m[0]) edits.push({ from: m.index, to: m.index + m[0].length, insert: out });
+    }
+    return { found, edits };
+  }
+
+  function applyEdits(text, edits) {
+    let out = text;
+    for (const e of [...edits].reverse()) out = out.slice(0, e.from) + e.insert + out.slice(e.to);
+    return out;
+  }
+
+  function isVisible(el) {
+    return !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  }
+
+  // Mesmo acesso ao CodeMirror 6 do localizar e substituir.
+  function cm6ViewOf(editorEl) {
+    const content = editorEl.querySelector('.cm-content');
+    const isView  = v => v && v.state && v.state.doc && typeof v.dispatch === 'function';
+    for (const key of Object.keys(content || {})) {
+      const node = content[key];
+      const view = [node?.root?.view, node?.rootView?.view, node?.view].find(isView);
+      if (view) return view;
+    }
+    return null;
+  }
+
+  // Editor HTML aberto na tela. Com ele aberto, o visual fica escondido e
+  // desatualizado — então, havendo editor HTML, só ele é alterado.
+  const targets = [];
+  let unreachable = false;
+
+  document.querySelectorAll('.cm-editor').forEach(el => {
+    if (!isVisible(el)) return;
+    const view = cm6ViewOf(el);
+    if (!view) { unreachable = true; return; }
+    targets.push({
+      get:   () => view.state.doc.toString(),
+      apply: edits => view.dispatch({ changes: edits }),   // 1 passo de Ctrl+Z
+    });
+  });
+
+  document.querySelectorAll('.CodeMirror').forEach(el => {
+    const cm = el.CodeMirror;
+    if (!cm || !isVisible(el)) return;
+    targets.push({
+      get:   () => cm.getValue(),
+      apply: edits => cm.operation(() => {
+        for (const e of [...edits].reverse()) {
+          cm.replaceRange(e.insert, cm.posFromIndex(e.from), cm.posFromIndex(e.to));
+        }
+      }),
+    });
+  });
+
+  document.querySelectorAll('textarea').forEach(ta => {
+    if (!isVisible(ta) || ta.closest('.cm-editor, .CodeMirror')) return;
+    targets.push({
+      get:   () => ta.value,
+      apply: (edits, text) => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
+          .set.call(ta, applyEdits(text, edits));
+        ta.dispatchEvent(new Event('input',  { bubbles: true }));
+        ta.dispatchEvent(new Event('change', { bubbles: true }));
+      },
+    });
+  });
+
+  // Sem editor HTML na tela: o editor visual (TinyMCE). O conteúdo é lido,
+  // ajustado e regravado num passo só de Ctrl+Z.
+  if (!targets.length && !unreachable && window.tinymce) {
+    const tm  = window.tinymce;
+    const all = [].concat((typeof tm.get === 'function' ? tm.get() : tm.editors) || []);
+    all.forEach(ed => {
+      if (!ed || ed.removed || !ed.getBody?.() || !isVisible(ed.getContainer?.() || ed.getBody())) return;
+      targets.push({
+        get:   () => ed.getContent(),
+        apply: (edits, text) => {
+          const win = ed.getWin();
+          const y   = win.scrollY;
+          // Garante o estado atual na pilha do Ctrl+Z (não duplica se já
+          // estiver lá) — senão o transact só registra o estado novo.
+          ed.undoManager.add();
+          ed.undoManager.transact(() => ed.setContent(applyEdits(text, edits)));
+          ed.setDirty(true);
+          ed.nodeChanged();
+          win.scrollTo(0, y);
+        },
+      });
+    });
+  }
+
+  if (!targets.length) {
+    showToast(unreachable
+      ? '⚠ Não consegui acessar o editor HTML — volte ao editor visual e tente de novo.'
+      : '⚠ Abra a página no editor do Canvas antes de redimensionar o H5P.', '#b45309');
+    return;
+  }
+
+  let found = 0, changed = 0;
+  for (const t of targets) {
+    const text = t.get();
+    const r    = h5pEdits(text);
+    found   += r.found;
+    changed += r.edits.length;
+    if (r.edits.length) t.apply(r.edits, text);
+  }
+
+  if (!found) {
+    showToast('⚠ Nenhum H5P encontrado no editor.', '#b45309');
+  } else if (!changed) {
+    showToast(found > 1 ? `✓ Os ${found} H5P já estão com 100% de largura.` : '✓ O H5P já está com 100% de largura.', '#1d4ed8');
+  } else {
+    showToast(`✓ ${changed} H5P ajustado(s) para 100% de largura.`, '#1d4ed8');
+  }
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   refreshIcon();
@@ -425,6 +631,11 @@ chrome.runtime.onInstalled.addListener(() => {
     id: 'resize-videos',
     title: '📐 Redimensionar vídeos da página',
     contexts: ['page', 'frame'],
+  });
+  chrome.contextMenus.create({
+    id: 'resize-h5p',
+    title: '📐 Redimensionar H5P (largura 100%)',
+    contexts: ['page', 'frame', 'editable'],
   });
   chrome.contextMenus.create({
     id: 'convert-formula',
@@ -1086,6 +1297,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         args: [video_width, video_height],
       });
     });
+  }
+
+  if (info.menuItemId === 'resize-h5p') {
+    resizeH5p(tab.id);
   }
 });
 
