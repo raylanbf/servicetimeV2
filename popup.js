@@ -28,6 +28,12 @@ const DEFAULT_CANVAS_NO_VIDEO = [
   'PROVA FINAL',
 ];
 
+// Cursos-template das disciplinas novas: se a 1ª importação de um curso veio de
+// um deles, é fluxo de produção; senão, reaproveitamento (canvas-course-type.js).
+const DEFAULT_CANVAS_FLOW_TEMPLATES = [
+  'Template 2025 Deduca',
+];
+
 const APPS_SCRIPT =
 `function doPost(e) {
   try {
@@ -875,6 +881,10 @@ function buildSettings() {
 
   $('settings-canvas-exceptions').value = (S.canvasExceptions || []).join('\n');
   $('settings-canvas-no-video').value   = (S.canvasNoVideo || []).join('\n');
+  $('settings-course-type').checked     = !!S.courseTypeEnabled;
+  $('settings-flow-templates').value    = (S.canvasFlowTemplates || []).join('\n');
+  // A chave vale na hora, sem "Salvar" — as abas do Canvas abertas se atualizam sozinhas.
+  $('settings-course-type').onchange = () => persist({ courseTypeEnabled: $('settings-course-type').checked });
 
   $('btn-save-settings').onclick = async () => {
     const name = $('settings-name').value.trim();
@@ -883,11 +893,14 @@ function buildSettings() {
     const h          = parseInt($('settings-video-h').value, 10) || 398;
     const key        = $('settings-openrouter').value.trim();
     const toLines = el => $(el).value.split('\n').map(s => s.trim()).filter(Boolean);
+    const flowTemplates = toLines('settings-flow-templates');
     await persist({
       usuario: name, webhook_url: $('settings-url').value.trim(),
       video_width: w, video_height: h, openrouter_key: key,
       canvasExceptions: toLines('settings-canvas-exceptions'),
       canvasNoVideo:    toLines('settings-canvas-no-video'),
+      // Lista vazia classificaria tudo como reaproveitamento: volta ao padrão.
+      canvasFlowTemplates: flowTemplates.length ? flowTemplates : DEFAULT_CANVAS_FLOW_TEMPLATES,
     });
     $('user-label').textContent = '👤  ' + name;
     show('main');
@@ -4836,6 +4849,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     sheetsEnabled:      saved.sheetsEnabled      || false,
     canvasExceptions:   saved.canvasExceptions   ?? DEFAULT_CANVAS_EXCEPTIONS,
     canvasNoVideo:      saved.canvasNoVideo      ?? DEFAULT_CANVAS_NO_VIDEO,
+    courseTypeEnabled:   saved.courseTypeEnabled   || false,
+    canvasFlowTemplates: saved.canvasFlowTemplates ?? DEFAULT_CANVAS_FLOW_TEMPLATES,
   };
 
   // Bindings estáticos

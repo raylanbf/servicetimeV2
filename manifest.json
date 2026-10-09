@@ -43,6 +43,11 @@
       "js": ["canvas-justify.js"],
       "run_at": "document_idle",
       "world": "MAIN"
+    },
+    {
+      "matches": ["https://*.instructure.com/courses/*", "https://canvas.pucminas.br/courses/*"],
+      "js": ["canvas-course-type.js"],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
