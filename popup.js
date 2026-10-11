@@ -4849,7 +4849,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     sheetsEnabled:      saved.sheetsEnabled      || false,
     canvasExceptions:   saved.canvasExceptions   ?? DEFAULT_CANVAS_EXCEPTIONS,
     canvasNoVideo:      saved.canvasNoVideo      ?? DEFAULT_CANVAS_NO_VIDEO,
-    courseTypeEnabled:   saved.courseTypeEnabled   || false,
+    courseTypeEnabled:   saved.courseTypeEnabled   ?? true,
     canvasFlowTemplates: saved.canvasFlowTemplates ?? DEFAULT_CANVAS_FLOW_TEMPLATES,
   };
 

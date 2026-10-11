@@ -3,11 +3,12 @@
 // olha a 1ª importação de conteúdo do curso (a de menor id que não falhou): se
 // veio de um template do fluxo de produção (⚙ Configurações), a disciplina é
 // nova; se veio de qualquer outro curso ou arquivo, é reaproveitamento.
-// Liga e desliga em ⚙ Configurações › Canvas LMS — nasce desligado.
+// Liga e desliga em ⚙ Configurações › Canvas LMS — nasce ligado.
 (() => {
   'use strict';
 
-  const courseId = location.pathname.match(/^\/courses\/(\d+)/)?.[1];
+  const courseOf = () => location.pathname.match(/^\/courses\/(\d+)/)?.[1] || null;
+  let courseId = courseOf();
   if (!courseId || window.__svcCourseType) return;
   window.__svcCourseType = true;
 
@@ -25,9 +26,20 @@
   const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[‐-―]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
 
+  const RETRY_MS = [1500, 4000];   // esperas antes da 2ª e da 3ª tentativa
+
   async function getJson(url) {
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    let res = null;
+    for (let i = 0; ; i++) {
+      try { res = await fetch(url, { headers: { Accept: 'application/json' } }); } catch { res = null; }
+      if (res?.ok) break;
+      // 401/404 = sem permissão no curso: não adianta insistir. O resto (403 do
+      // limite de requisições do Canvas, que estoura na página inicial cheia de
+      // chamadas, 5xx ou rede) é passageiro e tenta de novo.
+      const status = res?.status || 0;
+      if (status === 401 || status === 404 || i >= RETRY_MS.length) throw new Error(`HTTP ${status}`);
+      await new Promise(r => setTimeout(r, RETRY_MS[i]));
+    }
     // GET com sessão pode vir com o prefixo anti-sequestro do Canvas.
     const data = JSON.parse((await res.text()).replace(/^while\(1\);/, ''));
     const next = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/)?.[1] || null;
@@ -107,18 +119,48 @@
     box.append(pill, text);
   }
 
-  let firstImport = null;   // uma busca por página, reaproveitada ao mudar a configuração
+  let firstImport = null;   // busca da 1ª importação do curso atual (uma por curso)
+  let shown       = null;   // { info, templates } na tela — para redesenhar sem buscar de novo
 
   async function refresh() {
-    const cfg = await chrome.storage.local.get({ courseTypeEnabled: false, canvasFlowTemplates: null });
-    if (!cfg.courseTypeEnabled) { clear(); return; }
+    const cfg = await chrome.storage.local.get({ courseTypeEnabled: true, canvasFlowTemplates: null });
+    if (!cfg.courseTypeEnabled) { shown = null; clear(); return; }
     const templates = cfg.canvasFlowTemplates?.length ? cfg.canvasFlowTemplates : DEFAULT_TEMPLATES;
+    const course = courseId;
     try {
-      render(await (firstImport ||= fetchFirstImport()), templates);
+      const info = await (firstImport ||= fetchFirstImport());
+      if (course !== courseId) return;   // trocou de curso no meio da busca
+      shown = { info, templates };
+      render(info, templates);
     } catch {
-      clear();   // sem permissão no curso ou API fora do ar: não mostra nada
+      if (course !== courseId) return;   // erro da busca do curso anterior
+      // Sem permissão no curso ou API fora do ar: não mostra nada, e esquece a
+      // busca que falhou para a próxima atualização tentar de novo.
+      firstImport = shown = null;
+      clear();
     }
   }
+
+  // O Canvas pode refazer o cabeçalho depois que a página carrega, e a linha
+  // some junto: observa a página e a recoloca com o resultado já buscado. Se a
+  // URL passar para outro curso sem recarregar, busca de novo.
+  let queued = false;
+  new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      const now = courseOf();
+      if (now !== courseId) {
+        courseId = now;
+        firstImport = shown = null;
+        clear();
+        if (now) refresh();
+        return;
+      }
+      if (shown && !document.getElementById(BOX_ID)) render(shown.info, shown.templates);
+    });
+  }).observe(document.documentElement, { childList: true, subtree: true });
 
   refresh();
   chrome.storage.onChanged.addListener((changes, area) => {
