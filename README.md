@@ -125,7 +125,7 @@ HTML gerado ao colar e visualizar o código no editor:
 | Opção | Descrição |
 |---|---|
 | 🔢 Converter fórmula para LaTeX | Envia a imagem para a API OpenRouter/OpenAI e copia o LaTeX resultante |
-| ⭕ Baixar imagem redonda | Baixa a imagem recortada em círculo com 200×200 px |
+| ⭕ Baixar imagem redonda | Abre um editor para posicionar e dimensionar o círculo sobre a imagem (arrastar, roda do mouse, setas) e baixa o recorte em PNG 200×200 px |
 
 ### Sobre a página
 

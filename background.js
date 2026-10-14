@@ -791,47 +791,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     justifyText(tab.id);
   }
   if (info.menuItemId === 'download-round') {
-    (async () => {
-      try {
-        const response = await fetch(info.srcUrl);
-        const blob     = await response.blob();
-        const bitmap   = await createImageBitmap(blob);
-
-        // Recorta quadrado central e aplica clip circular em 200x200
-        const srcSize = Math.min(bitmap.width, bitmap.height);
-        const outSize = 200;
-        const canvas  = new OffscreenCanvas(outSize, outSize);
-        const ctx     = canvas.getContext('2d');
-
-        ctx.beginPath();
-        ctx.arc(outSize / 2, outSize / 2, outSize / 2, 0, Math.PI * 2);
-        ctx.clip();
-
-        const sx = (bitmap.width  - srcSize) / 2;
-        const sy = (bitmap.height - srcSize) / 2;
-        ctx.drawImage(bitmap, sx, sy, srcSize, srcSize, 0, 0, outSize, outSize);
-
-        const png    = await canvas.convertToBlob({ type: 'image/png' });
-        const buffer = await png.arrayBuffer();
-        const bytes  = new Uint8Array(buffer);
-
-        // Converte para base64 em chunks para evitar estouro de pilha
-        let binary = '';
-        for (let i = 0; i < bytes.length; i += 8192) {
-          binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-        }
-
-        // Extrai nome do arquivo da URL original
-        const srcName = (info.srcUrl.split('/').pop().split('?')[0] || 'imagem').replace(/\.[^.]+$/, '');
-
-        chrome.downloads.download({
-          url:      `data:image/png;base64,${btoa(binary)}`,
-          filename: `${srcName}-redondo.png`,
-        });
-      } catch (err) {
-        console.error('Erro ao gerar imagem redonda:', err);
-      }
-    })();
+    openRoundCropper(info, tab).catch(console.error);
   }
 
   if (info.menuItemId === 'find-replace') {
@@ -1443,9 +1403,12 @@ function addPeriods(tabId, frameId, selectionText) {
 }
 
 // ── Upload delegado pelo popup ────────────────────────────────────────
-chrome.runtime.onMessage.addListener((msg) => {
+chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg.action === 'upload') {
     handleUpload(msg).catch(console.error);
+  }
+  if (msg.action === 'round-crop' && sender.tab) {
+    saveRoundImage(msg.src, msg.crop, sender.tab.id);
   }
 });
 
@@ -1476,7 +1439,7 @@ async function handleUpload({ webhookUrl, usuario, registros }) {
 
 // ── Conversor de fórmula para LaTeX ──────────────────────────────────
 async function convertFormulaToLatex(info, tab) {
-  showFormulaToast(tab.id, 'info', '⏳ Processando fórmula...');
+  showPageToast(tab.id, 'info', '⏳ Processando fórmula...');
   try {
     const { openrouter_key } = await chrome.storage.local.get(['openrouter_key']);
     if (!openrouter_key) throw new Error('Configure a chave API OpenRouter ou OpenAI em ⚙ Configurações');
@@ -1518,13 +1481,13 @@ async function convertFormulaToLatex(info, tab) {
       args:   [latex],
     });
 
-    showFormulaToast(tab.id, 'success', '✓ LaTeX copiado!');
+    showPageToast(tab.id, 'success', '✓ LaTeX copiado!');
   } catch (err) {
-    showFormulaToast(tab.id, 'error', '✗ ' + err.message);
+    showPageToast(tab.id, 'error', '✗ ' + err.message);
   }
 }
 
-function showFormulaToast(tabId, type, message) {
+function showPageToast(tabId, type, message) {
   const bg = { info: '#1e1e2e', success: '#166534', error: '#7f1d1d' };
   chrome.scripting.executeScript({
     target: { tabId },
@@ -1548,8 +1511,7 @@ function showFormulaToast(tabId, type, message) {
 }
 
 async function fetchImageAsBase64(url) {
-  const response = await fetch(url);
-  const blob     = await response.blob();
+  const { blob } = await fetchImageBlob(url);
   const mimeType = blob.type || 'image/png';
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1557,4 +1519,412 @@ async function fetchImageAsBase64(url) {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+// Busca a imagem pelo service worker: com host_permissions não há CORS, e
+// credentials:'include' leva os cookies de login — arquivos do Canvas
+// (/courses/…/files/…/preview) exigem sessão.
+async function fetchImageBlob(url) {
+  let response;
+  try {
+    response = await fetch(url, { credentials: 'include' });
+  } catch {
+    throw new Error('Não foi possível baixar a imagem');
+  }
+  if (!response.ok) throw new Error(`Não foi possível baixar a imagem (erro ${response.status})`);
+  const blob = await response.blob();
+  // Sessão expirada costuma devolver a página de login no lugar da imagem.
+  if (blob.type.startsWith('text/html')) {
+    throw new Error('O servidor devolveu uma página em vez da imagem — confira se ainda está logado');
+  }
+  return { blob, response };
+}
+
+// ── Imagem redonda ───────────────────────────────────────────────────
+// O menu abre na página um editor para posicionar o círculo (o recorte
+// central fixo cortava a cabeça em fotos que não são quadradas). Ao confirmar,
+// o editor manda o recorte para cá ('round-crop') e o PNG é gerado aqui — na
+// página, uma imagem de outro domínio "suja" o canvas e não pode ser exportada.
+const ROUND_OUT_SIZE = 200;
+
+async function openRoundCropper(info, tab) {
+  // Valida antes de abrir o editor: melhor avisar já do que depois de a
+  // pessoa posicionar o círculo.
+  try {
+    const { blob } = await fetchImageBlob(info.srcUrl);
+    (await decodeImage(blob)).close();
+  } catch (err) {
+    showPageToast(tab.id, 'error', '✗ ' + err.message);
+    return;
+  }
+  // Sempre no frame principal: no editor do Canvas a imagem fica num iframe
+  // pequeno, e o painel precisa da tela toda.
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func:   roundCropperUI,
+    args:   [info.srcUrl, ROUND_OUT_SIZE],
+  });
+}
+
+async function decodeImage(blob) {
+  if (blob.type === 'image/svg+xml') throw new Error('Imagens SVG não são suportadas');
+  try {
+    // from-image: aplica a rotação do EXIF, como a página faz ao exibir.
+    return await createImageBitmap(blob, { imageOrientation: 'from-image' });
+  } catch {
+    throw new Error('Não foi possível ler a imagem');
+  }
+}
+
+// crop: { x, y, size } em frações da imagem (x e size da largura, y da altura)
+// — o editor mede a imagem exibida na página, que pode ter outra escala.
+async function saveRoundImage(src, crop, tabId) {
+  showPageToast(tabId, 'info', '⏳ Gerando imagem redonda...');
+  try {
+    const { blob, response } = await fetchImageBlob(src);
+    const bitmap = await decodeImage(blob);
+    const { width: w, height: h } = bitmap;
+
+    const side = Math.min(Math.max(crop.size * w, 1), w, h);
+    const sx   = Math.min(Math.max(crop.x * w, 0), w - side);
+    const sy   = Math.min(Math.max(crop.y * h, 0), h - side);
+
+    const out    = ROUND_OUT_SIZE;
+    const canvas = new OffscreenCanvas(out, out);
+    const ctx    = canvas.getContext('2d');
+    ctx.beginPath();
+    ctx.arc(out / 2, out / 2, out / 2, 0, Math.PI * 2);
+    ctx.clip();
+    // Sem 'high', reduzir uma foto grande para 200 px sai serrilhado.
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap, sx, sy, side, side, 0, 0, out, out);
+    bitmap.close();
+
+    const png   = await canvas.convertToBlob({ type: 'image/png' });
+    const bytes = new Uint8Array(await png.arrayBuffer());
+
+    // Converte para base64 em chunks para evitar estouro de pilha
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 8192) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    }
+
+    // await: sem ele, um download recusado (ex.: nome inválido) escapa do catch.
+    await chrome.downloads.download({
+      url:      `data:image/png;base64,${btoa(binary)}`,
+      filename: `${imageBaseName(src, response)}-redondo.png`,
+    });
+    showPageToast(tabId, 'success', '✓ Imagem redonda baixada!');
+  } catch (err) {
+    showPageToast(tabId, 'error', '✗ ' + err.message);
+  }
+}
+
+// Nome do arquivo baixado. O endereço nem sempre ajuda: no Canvas termina em
+// /preview ou /download, e imagens embutidas (data:) não têm nome. Tenta, em
+// ordem: o nome que o servidor manda (Content-Disposition), o fim do endereço
+// final (após redirecionamentos) e o do endereço original.
+function imageBaseName(srcUrl, response) {
+  const decode = s => { try { return decodeURIComponent(s); } catch { return s; } };
+  const cd     = response.headers.get('content-disposition') || '';
+  const candidates = [
+    cd.match(/filename\*\s*=\s*[^']*'[^']*'([^;]+)/i)?.[1],
+    cd.match(/filename\s*=\s*"?([^";]+)/i)?.[1],
+    ...[response.url, srcUrl]
+      .filter(u => /^https?:/i.test(u))
+      .map(u => new URL(u).pathname.split('/').pop()),
+  ];
+  for (const c of candidates) {
+    if (!c) continue;
+    const name = decode(c.trim())
+      .replace(/\.[^.]+$/, '')
+      .replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_')   // proibidos no Windows
+      .trim().slice(0, 80).replace(/[. ]+$/, '');
+    if (name && !/^(preview|download|view|raw|file|image)$/i.test(name)) return name;
+  }
+  return 'imagem';
+}
+
+// Editor do recorte redondo. Roda NA PÁGINA (serializada pelo executeScript),
+// então não enxerga nada deste arquivo. Mundo isolado, para ter chrome.runtime.
+// Estado em pixels da imagem original: s = diâmetro, (x, y) = canto do
+// quadrado que contém o círculo.
+function roundCropperUI(src, outSize) {
+  document.getElementById('__svc-round__')?.remove();
+
+  const PREVIEW = 96;
+  const clamp   = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+  let nw = 0, nh = 0, scale = 1, minS = 0, maxS = 0, s = 0, x = 0, y = 0;
+  let drag = null;
+
+  // ── Painel ─────────────────────────────────────────────────────────
+  const overlay = document.createElement('div');
+  overlay.id = '__svc-round__';
+  Object.assign(overlay.style, {
+    position: 'fixed', inset: '0',
+    background: 'rgba(0,0,0,0.55)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: '2147483647', fontFamily: 'system-ui, sans-serif',
+  });
+
+  const box = document.createElement('div');
+  Object.assign(box.style, {
+    background: '#1e1e2e', color: '#e2e8f0',
+    padding: '18px 20px', borderRadius: '8px',
+    width: '380px', maxWidth: 'calc(100vw - 32px)', boxSizing: 'border-box',
+    boxShadow: '0 4px 24px rgba(0,0,0,.7)',
+    display: 'flex', flexDirection: 'column', gap: '12px',
+  });
+
+  function mkText(text, style) {
+    const el = document.createElement('p');
+    el.textContent = text;
+    Object.assign(el.style, { margin: '0', color: '#e2e8f0', lineHeight: '1.4' }, style);
+    return el;
+  }
+
+  const title  = mkText('⭕ Posicione o círculo', { fontWeight: 'bold', fontSize: '14px' });
+  const hint   = mkText(
+    'Arraste o círculo para mover (ou clique onde quer o centro). A roda do mouse, a bolinha verde ou a barra mudam o tamanho. Setas movem; Enter baixa.',
+    { fontSize: '11px', color: '#94a3b8' });
+  const status = mkText('', { fontSize: '11px', color: '#f87171', minHeight: '15px' });
+
+  // Fora do círculo escurece com uma sombra gigante: é a "máscara".
+  const stage = document.createElement('div');
+  Object.assign(stage.style, {
+    position: 'relative', overflow: 'hidden', alignSelf: 'center',
+    touchAction: 'none', userSelect: 'none', cursor: 'crosshair',
+    background: '#0f172a',
+  });
+  const imgStyle = {
+    display: 'block', maxWidth: 'none', maxHeight: 'none',
+    margin: '0', padding: '0', border: '0', pointerEvents: 'none',
+  };
+  const img = document.createElement('img');
+  img.draggable = false;
+  Object.assign(img.style, imgStyle);
+
+  const ring = document.createElement('div');
+  Object.assign(ring.style, {
+    position: 'absolute', borderRadius: '50%', boxSizing: 'border-box',
+    border: '2px solid #fff', boxShadow: '0 0 0 9999px rgba(0,0,0,.6)',
+    cursor: 'move',
+  });
+
+  const handle = document.createElement('div');
+  Object.assign(handle.style, {
+    position: 'absolute', width: '14px', height: '14px', borderRadius: '50%',
+    boxSizing: 'border-box', background: '#4ade80', border: '2px solid #0f172a',
+    cursor: 'nwse-resize',
+  });
+
+  // Prévia do resultado: a mesma imagem, deslocada dentro de um círculo.
+  const previewWrap = document.createElement('div');
+  Object.assign(previewWrap.style, {
+    position: 'relative', overflow: 'hidden', borderRadius: '50%', flex: 'none',
+    width: PREVIEW + 'px', height: PREVIEW + 'px', background: '#0f172a',
+  });
+  const previewImg = document.createElement('img');
+  previewImg.draggable = false;
+  Object.assign(previewImg.style, imgStyle, { position: 'absolute' });
+
+  const controls = document.createElement('div');
+  Object.assign(controls.style, { display: 'flex', alignItems: 'center', gap: '14px' });
+  const sizeCol = document.createElement('div');
+  Object.assign(sizeCol.style, { display: 'flex', flexDirection: 'column', gap: '6px', flex: '1' });
+  const slider = document.createElement('input');
+  slider.type = 'range'; slider.min = '0'; slider.max = '1000'; slider.step = '1';
+  slider.setAttribute('aria-label', 'Tamanho do círculo');
+  Object.assign(slider.style, {
+    width: '100%', margin: '0', padding: '0', accentColor: '#4ade80', cursor: 'pointer',
+  });
+
+  const btnRow = document.createElement('div');
+  Object.assign(btnRow.style, { display: 'flex', gap: '8px' });
+
+  const btnCancel = document.createElement('button');
+  btnCancel.textContent = 'Cancelar';
+  Object.assign(btnCancel.style, {
+    flex: '1', padding: '7px', borderRadius: '4px', border: 'none',
+    background: '#2a2a3e', color: '#e2e8f0', cursor: 'pointer', fontSize: '13px',
+  });
+
+  const btnDo = document.createElement('button');
+  btnDo.textContent = '⬇ Baixar';
+  Object.assign(btnDo.style, {
+    flex: '1', padding: '7px', borderRadius: '4px', border: 'none',
+    background: '#4ade80', color: '#0f172a', cursor: 'pointer',
+    fontSize: '13px', fontWeight: 'bold',
+  });
+  function setReady(ready) {
+    btnDo.disabled      = !ready;
+    btnDo.style.opacity = ready ? '1' : '.5';
+  }
+  setReady(false);
+
+  // ── Posição e tamanho ──────────────────────────────────────────────
+  function render() {
+    ring.style.left   = x * scale + 'px';
+    ring.style.top    = y * scale + 'px';
+    ring.style.width  = s * scale + 'px';
+    ring.style.height = s * scale + 'px';
+    // Alça na borda do círculo, a 45° (embaixo, à direita).
+    const r = s * scale / 2, d = r * Math.SQRT1_2;
+    handle.style.left = x * scale + r + d - 7 + 'px';
+    handle.style.top  = y * scale + r + d - 7 + 'px';
+    const k = PREVIEW / s;
+    previewImg.style.width  = nw * k + 'px';
+    previewImg.style.height = nh * k + 'px';
+    previewImg.style.left   = -x * k + 'px';
+    previewImg.style.top    = -y * k + 'px';
+    slider.value = String(Math.round((s - minS) / (maxS - minS) * 1000));
+  }
+
+  // O círculo nunca sai da imagem: sobraria canto transparente no PNG.
+  function moveTo(nx, ny) {
+    x = clamp(nx, 0, nw - s);
+    y = clamp(ny, 0, nh - s);
+    render();
+  }
+
+  // Muda o tamanho mantendo o centro (até onde a borda da imagem deixa).
+  function resize(ns) {
+    const cx = x + s / 2, cy = y + s / 2;
+    s = clamp(ns, minS, maxS);
+    moveTo(cx - s / 2, cy - s / 2);
+  }
+
+  function init() {
+    nw = img.naturalWidth;
+    nh = img.naturalHeight;
+    if (!nw || !nh) { img.onerror(); return; }
+    // Cabe na tela, deixando espaço para os controles; imagem pequena amplia.
+    const maxW = Math.min(window.innerWidth - 72, 760);
+    const maxH = Math.max(window.innerHeight - 300, 160);
+    scale = Math.min(maxW / nw, maxH / nh, 3);
+    const dw = Math.round(nw * scale), dh = Math.round(nh * scale);
+    img.style.width   = dw + 'px';
+    img.style.height  = dh + 'px';
+    stage.style.width  = dw + 'px';
+    stage.style.height = dh + 'px';
+    box.style.width   = Math.max(dw + 40, 380) + 'px';
+
+    // Começa como o recorte antigo: o maior círculo, centralizado.
+    maxS = Math.min(nw, nh);
+    minS = maxS * 0.1;
+    s = maxS;
+    x = (nw - s) / 2;
+    y = (nh - s) / 2;
+    render();
+    setReady(true);
+    btnDo.focus();
+  }
+
+  // ── Mouse / toque ──────────────────────────────────────────────────
+  function toImage(e) {
+    const rect = stage.getBoundingClientRect();
+    return { px: (e.clientX - rect.left) / scale, py: (e.clientY - rect.top) / scale };
+  }
+
+  stage.addEventListener('pointerdown', e => {
+    if (!s || e.button !== 0) return;
+    e.preventDefault();
+    const { px, py } = toImage(e);
+    if (e.target === handle) {
+      drag = { mode: 'resize' };
+    } else {
+      // Clique fora do círculo: leva o centro até ali e já começa a arrastar.
+      if (Math.hypot(px - (x + s / 2), py - (y + s / 2)) > s / 2) moveTo(px - s / 2, py - s / 2);
+      drag = { mode: 'move', dx: px - x, dy: py - y };
+    }
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const { px, py } = toImage(e);
+    if (drag.mode === 'move') moveTo(px - drag.dx, py - drag.dy);
+    else resize(2 * Math.hypot(px - (x + s / 2), py - (y + s / 2)));
+  });
+  stage.addEventListener('pointerup',     () => { drag = null; });
+  stage.addEventListener('pointercancel', () => { drag = null; });
+
+  stage.addEventListener('wheel', e => {
+    if (!s) return;
+    e.preventDefault();
+    resize(s * (e.deltaY < 0 ? 1.05 : 1 / 1.05));
+  }, { passive: false });
+
+  slider.addEventListener('input', () => {
+    if (s) resize(minS + Number(slider.value) / 1000 * (maxS - minS));
+  });
+
+  // ── Teclado ────────────────────────────────────────────────────────
+  const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  function onKey(e) {
+    if (e.key === 'Escape') {
+      close();
+    } else if (e.key === 'Enter') {
+      if (e.target.tagName === 'BUTTON') return;   // Enter no botão já clica nele
+      btnDo.click();
+    } else if (ARROWS[e.key] && s && e.target !== slider) {
+      const step = Math.max(1, maxS * 0.01) * (e.shiftKey ? 10 : 1);
+      moveTo(x + ARROWS[e.key][0] * step, y + ARROWS[e.key][1] * step);
+    } else if ((e.key === '+' || e.key === '=' || e.key === '-') && s) {
+      resize(s * (e.key === '-' ? 1 / 1.05 : 1.05));
+    } else {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function close() {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey, true);
+  }
+  document.addEventListener('keydown', onKey, true);
+  btnCancel.onclick = close;
+
+  // Só fecha se o clique COMEÇOU no fundo: arrastar o círculo e soltar o
+  // mouse fora da caixa não pode fechar o painel.
+  let downOnBackdrop = false;
+  overlay.addEventListener('mousedown', e => { downOnBackdrop = e.target === overlay; });
+  overlay.addEventListener('click', e => { if (downOnBackdrop && e.target === overlay) close(); });
+
+  btnDo.onclick = () => {
+    if (!s) return;
+    try {
+      chrome.runtime.sendMessage({
+        action: 'round-crop', src,
+        crop: { x: x / nw, y: y / nh, size: s / nw },
+      }).catch(() => {});   // o background não responde; o aviso vem por toast
+    } catch {
+      // Extensão recarregada com a página aberta: o canal com ela morreu.
+      status.textContent = 'A extensão foi atualizada. Recarregue a página (F5) e tente de novo.';
+      return;
+    }
+    close();
+  };
+
+  img.onerror = () => {
+    status.textContent = 'Não foi possível exibir a imagem nesta página.';
+    setReady(false);
+  };
+  img.onload = init;
+
+  stage.append(img, ring, handle);
+  previewWrap.appendChild(previewImg);
+  sizeCol.append(
+    mkText('Tamanho do círculo', { fontSize: '11px', fontWeight: 'bold', color: '#94a3b8' }),
+    slider,
+    mkText(`Resultado: PNG ${outSize}×${outSize} px`, { fontSize: '11px', color: '#64748b' }),
+  );
+  controls.append(previewWrap, sizeCol);
+  btnRow.append(btnCancel, btnDo);
+  box.append(title, hint, stage, controls, status, btnRow);
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+
+  img.src        = src;
+  previewImg.src = src;
 }
