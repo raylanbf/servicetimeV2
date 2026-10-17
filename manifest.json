@@ -24,11 +24,15 @@
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["storage", "tabs", "contextMenus", "scripting", "downloads", "windows", "clipboardWrite", "sidePanel", "alarms"],
+  "permissions": ["storage", "tabs", "contextMenus", "scripting", "downloads", "windows", "clipboardWrite", "clipboardRead", "offscreen", "sidePanel", "alarms"],
   "commands": {
     "justify-text": {
       "suggested_key": { "default": "Ctrl+Shift+J" },
       "description": "Justificar texto no editor (Canvas)"
+    },
+    "equation-editor": {
+      "suggested_key": { "default": "Ctrl+Shift+Q" },
+      "description": "Abrir o editor de equação LaTeX (Canvas)"
     }
   },
   "host_permissions": ["https://script.google.com/*", "<all_urls>"],

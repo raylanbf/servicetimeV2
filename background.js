@@ -402,6 +402,139 @@ function justifyText(tabId) {
   });
 }
 
+// Lê o texto da área de transferência pelo documento offscreen (ver
+// offscreen.js). Devolve '' se não conseguir ou se não houver texto.
+async function readClipboardText() {
+  try {
+    if (!(await chrome.offscreen.hasDocument())) {
+      // Pode falhar se outra chamada acabou de criar o documento — nesse
+      // caso a mensagem abaixo chega nele do mesmo jeito.
+      await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['CLIPBOARD'],
+        justification: 'Ler a fórmula copiada para colar no editor de equação do Canvas',
+      }).catch(() => {});
+    }
+    return (await chrome.runtime.sendMessage({ action: 'read-clipboard' })) || '';
+  } catch (e) {
+    console.warn('Não foi possível ler a área de transferência:', e);
+    return '';
+  }
+}
+
+// Prepara a fórmula copiada para o editor de equação: põe \Large na frente,
+// se já não tiver.
+function toLargeLatex(text) {
+  const formula = text.trim();
+  if (!formula) return '';
+  return /^\\Large\b/.test(formula) ? formula : `\\Large ${formula}`;
+}
+
+// Abre o "Editor de equação" do Canvas (botão √x da toolbar) no editor onde
+// o cursor está, já com a fórmula copiada colada no modo "Editar diretamente
+// LaTeX". Com o cursor sobre uma equação já inserida, o Canvas abre ela para
+// edição, como no clique do botão — e ela não é trocada pela copiada.
+async function openEquationEditor(tabId) {
+  const formula = toLargeLatex(await readClipboardText());
+  chrome.scripting.executeScript({
+    target: { tabId },
+    args: [formula],
+    func: (formula) => {
+      function showToast(text, bg) {
+        document.getElementById('__svc-toast__')?.remove();
+        const el = document.createElement('div');
+        el.id = '__svc-toast__';
+        el.textContent = text;
+        Object.assign(el.style, {
+          position: 'fixed', bottom: '24px', right: '24px',
+          background: bg, color: '#fff',
+          padding: '10px 16px', borderRadius: '6px',
+          fontFamily: 'system-ui', fontSize: '13px',
+          zIndex: '2147483647', boxShadow: '0 2px 8px rgba(0,0,0,.4)',
+        });
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 3500);
+      }
+
+      const editor = window.tinymce?.activeEditor;
+      if (!editor || !editor.getContainer()?.isConnected) {
+        showToast('⚠ Abra o editor do Canvas antes de inserir uma equação.', '#b45309');
+        return;
+      }
+
+      // Sem foco, a equação cairia no início do texto em vez de onde o
+      // cursor estava (o focus() restaura a última seleção do editor).
+      if (!editor.hasFocus()) editor.focus();
+
+      const EQUATION = /equa[çc][ãa]o|equation/i;
+      const editingExisting = editor.selection.getNode()?.classList?.contains('equation_image');
+
+      // Comando registrado pelo plugin instructure_equation do Canvas — o
+      // mesmo que o botão √x executa.
+      let opened = false;
+      try { opened = editor.execCommand('instructureEquation'); } catch (_) {}
+
+      // Plano B, caso o Canvas renomeie o comando: clica no próprio botão.
+      if (!opened) {
+        const btn = [...editor.getContainer().querySelectorAll('.tox-tbtn')]
+          .find(b => EQUATION.test(b.getAttribute('aria-label') || b.title || ''));
+        if (!btn) {
+          showToast('⚠ Não encontrei o editor de equação neste editor.', '#b45309');
+          return;
+        }
+        btn.click();
+      }
+
+      if (!formula || editingExisting) return;
+
+      // O modal é React e pode demorar a montar (na 1ª vez o Canvas ainda
+      // baixa o código dele), então espera cada elemento aparecer.
+      function waitFor(find, timeout = 5000) {
+        return new Promise(resolve => {
+          const start = Date.now();
+          (function tick() {
+            const el = find();
+            if (el || Date.now() - start > timeout) return resolve(el || null);
+            setTimeout(tick, 100);
+          })();
+        });
+      }
+
+      const findDialog = () => [...document.querySelectorAll('[role="dialog"]')]
+        .find(d => EQUATION.test(d.getAttribute('aria-label') || d.querySelector('h1, h2')?.textContent || ''));
+      // A caixa do LaTeX — ignora as textareas de 1px que editores visuais
+      // de fórmula escondem para capturar o teclado.
+      const findTextarea = (dialog) => [...dialog.querySelectorAll('textarea')]
+        .find(t => t.getBoundingClientRect().width > 50);
+
+      (async () => {
+        const dialog = await waitFor(findDialog);
+        if (!dialog) return;
+
+        // Liga o "Editar diretamente LaTeX", se estiver desligado.
+        const toggle = dialog.querySelector('input[type="checkbox"]');
+        if (toggle && !toggle.checked) toggle.click();
+
+        const textarea = await waitFor(() => findTextarea(dialog));
+        if (!textarea) {
+          showToast('⚠ Não encontrei a caixa do LaTeX para colar a fórmula.', '#b45309');
+          return;
+        }
+        if (textarea.value.trim()) return;
+
+        // O campo é controlado pelo React: atribuir .value direto não chega
+        // ao estado dele; o setter nativo + evento input chega.
+        const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+        setValue.call(textarea, formula);
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.focus();
+        textarea.setSelectionRange(formula.length, formula.length);
+      })();
+    },
+    world: 'MAIN',
+  });
+}
+
 // ── Redimensionar H5P (largura 100%) ─────────────────────────────────
 // O H5P entra pela ferramenta "Interactive Content – H5P" do editor como um
 // iframe LTI (class="lti-embed", que o redimensionar vídeos ignora) com
@@ -669,9 +802,10 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 chrome.commands.onCommand.addListener(async (command) => {
-  if (command !== 'justify-text') return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id) justifyText(tab.id);
+  if (!tab?.id) return;
+  if (command === 'justify-text') justifyText(tab.id);
+  if (command === 'equation-editor') openEquationEditor(tab.id);
 });
 
 chrome.runtime.onStartup.addListener(async () => {
