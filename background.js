@@ -431,11 +431,19 @@ function toLargeLatex(text) {
 }
 
 // Abre o "Editor de equação" do Canvas (botão √x da toolbar) no editor onde
-// o cursor está, já com a fórmula copiada colada no modo "Editar diretamente
-// LaTeX". Com o cursor sobre uma equação já inserida, o Canvas abre ela para
-// edição, como no clique do botão — e ela não é trocada pela copiada.
+// o cursor está. Com "Colar a fórmula copiada" ligado nas configurações, já
+// cola a fórmula copiada no modo "Editar diretamente LaTeX". Com o cursor
+// sobre uma equação já inserida, o Canvas abre ela para edição, como no
+// clique do botão — e ela não é trocada pela copiada.
 async function openEquationEditor(tabId) {
-  const formula = toLargeLatex(await readClipboardText());
+  const cfg = await chrome.storage.local.get({ equationShortcutEnabled: false, equationPasteEnabled: false });
+  // O Chrome não deixa desligar um atalho pelo código, então ele continua
+  // chegando aqui: só avisa onde ligar.
+  if (!cfg.equationShortcutEnabled) {
+    showPageToast(tabId, 'info', 'Atalho do editor de equação desativado — ligue em ⚙ Configurações › Canvas LMS.');
+    return;
+  }
+  const formula = cfg.equationPasteEnabled ? toLargeLatex(await readClipboardText()) : '';
   chrome.scripting.executeScript({
     target: { tabId },
     args: [formula],

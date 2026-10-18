@@ -886,6 +886,22 @@ function buildSettings() {
   // A chave vale na hora, sem "Salvar" — as abas do Canvas abertas se atualizam sozinhas.
   $('settings-course-type').onchange = () => persist({ courseTypeEnabled: $('settings-course-type').checked });
 
+  // Atalho do editor de equação: também vale na hora. A colagem da fórmula
+  // só faz sentido com o atalho ligado, então fica apagada sem ele.
+  $('settings-equation-shortcut').checked = !!S.equationShortcutEnabled;
+  $('settings-equation-paste').checked    = !!S.equationPasteEnabled;
+  const syncEquationPaste = () => {
+    const on = $('settings-equation-shortcut').checked;
+    $('settings-equation-paste').disabled = !on;
+    $('settings-equation-paste-group').classList.toggle('is-disabled', !on);
+  };
+  syncEquationPaste();
+  $('settings-equation-shortcut').onchange = () => {
+    persist({ equationShortcutEnabled: $('settings-equation-shortcut').checked });
+    syncEquationPaste();
+  };
+  $('settings-equation-paste').onchange = () => persist({ equationPasteEnabled: $('settings-equation-paste').checked });
+
   $('btn-save-settings').onclick = async () => {
     const name = $('settings-name').value.trim();
     if (!name) return;
@@ -4851,6 +4867,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     canvasNoVideo:      saved.canvasNoVideo      ?? DEFAULT_CANVAS_NO_VIDEO,
     courseTypeEnabled:   saved.courseTypeEnabled   ?? true,
     canvasFlowTemplates: saved.canvasFlowTemplates ?? DEFAULT_CANVAS_FLOW_TEMPLATES,
+    equationShortcutEnabled: saved.equationShortcutEnabled || false,
+    equationPasteEnabled:    saved.equationPasteEnabled    || false,
   };
 
   // Bindings estáticos
