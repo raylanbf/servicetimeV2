@@ -1,0 +1,95 @@
+{
+  "media": {
+    "disableImageZooming": false
+  },
+  "question": "<p>Um produto custava R$ 80,00 e teve um aumento de 25%. Qual é o novo preço?</p>\n",
+  "answers": [
+    {
+      "text": "<div>R$ 100,00</div>\n",
+      "correct": true,
+      "tipsAndFeedback": {
+        "tip": "",
+        "chosenFeedback": "<div>Isso! 25% de R$ 80,00 são R$ 20,00, e R$ 80,00 + R$ 20,00 = R$ 100,00.</div>\n",
+        "notChosenFeedback": ""
+      }
+    },
+    {
+      "text": "<div>R$ 105,00</div>\n",
+      "correct": false,
+      "tipsAndFeedback": {
+        "tip": "",
+        "chosenFeedback": "<div>Confira: 25% de R$ 80,00 são R$ 20,00, não R$ 25,00.</div>\n",
+        "notChosenFeedback": ""
+      }
+    },
+    {
+      "text": "<div>R$ 85,00</div>\n",
+      "correct": false,
+      "tipsAndFeedback": {
+        "tip": "",
+        "chosenFeedback": "<div>Esse valor soma 5 reais, não 25%.</div>\n",
+        "notChosenFeedback": ""
+      }
+    },
+    {
+      "text": "<div>R$ 120,00</div>\n",
+      "correct": false,
+      "tipsAndFeedback": {
+        "tip": "",
+        "chosenFeedback": "<div>Esse seria um aumento de 50%.</div>\n",
+        "notChosenFeedback": ""
+      }
+    }
+  ],
+  "overallFeedback": [
+    {
+      "from": 0,
+      "to": 100
+    }
+  ],
+  "behaviour": {
+    "enableRetry": true,
+    "enableSolutionsButton": true,
+    "enableCheckButton": true,
+    "type": "auto",
+    "singlePoint": false,
+    "randomAnswers": true,
+    "showSolutionsRequiresInput": true,
+    "confirmCheckDialog": false,
+    "confirmRetryDialog": false,
+    "autoCheck": false,
+    "passPercentage": 100,
+    "showScorePoints": false
+  },
+  "UI": {
+    "checkAnswerButton": "Verificar",
+    "submitAnswerButton": "Enviar",
+    "showSolutionButton": "Mostrar solução",
+    "tryAgainButton": "Tentar Novamente",
+    "tipsLabel": "Mostrar dica",
+    "scoreBarLabel": "Você conseguiu :num de :total pontos possíveis",
+    "tipAvailable": "Dica disponível",
+    "feedbackAvailable": "Feedback disponível",
+    "readFeedback": "Ler feedback",
+    "wrongAnswer": "Resposta incorreta",
+    "correctAnswer": "Resposta correta",
+    "shouldCheck": "Deveria ter sido verificado",
+    "shouldNotCheck": "Não deveria ter sido marcado",
+    "noInput": "Por favor, responda antes de visualizar a solução",
+    "a11yCheck": "Confira as respostas. As respostas serão marcadas como corretas, incorretas ou não respondidas.",
+    "a11yShowSolution": "Mostrar a solução. A tarefa será marcada com sua solução correta.",
+    "a11yRetry": "Repita a tarefa. Redefina todas as respostas e inicie a tarefa novamente."
+  },
+  "confirmCheck": {
+    "header": "Finalizar ?",
+    "body": "Você tem certeza que deseja finalizar ?",
+    "cancelLabel": "Cancelar",
+    "confirmLabel": "Finalizar"
+  },
+  "confirmRetry": {
+    "header": "Tentar Novamente ?",
+    "body": "Você tem certeza que deseja tentar novamente ?",
+    "cancelLabel": "Cancelar",
+    "confirmLabel": "Confirmar"
+  }
+}
