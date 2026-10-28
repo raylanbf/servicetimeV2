@@ -50,8 +50,20 @@
     },
     {
       "matches": ["https://*.instructure.com/courses/*", "https://canvas.pucminas.br/courses/*"],
-      "js": ["canvas-course-type.js"],
+      "js": ["canvas-course-type.js", "canvas-h5p-bridge.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.instructure.com/courses/*", "https://canvas.pucminas.br/courses/*"],
+      "js": ["h5p-width.js", "canvas-h5p.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://*.h5p.com/lti/*"],
+      "js": ["h5p-search.js"],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [

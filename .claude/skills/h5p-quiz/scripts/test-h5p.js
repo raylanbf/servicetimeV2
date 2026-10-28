@@ -48,7 +48,9 @@ function check(cond, msg) {
   if (!cond) failures++;
 }
 
-const run   = page => page.evaluate(`(${SRC})()`);
+// A regra fica no h5p-width.js, que o background injeta antes do h5pResizeMain.
+const WIDTH = require('fs').readFileSync(path.resolve(__dirname, '../../../../h5p-width.js'), 'utf8');
+const run   = async page => { await page.addScriptTag({ content: WIDTH }); return page.evaluate(`(${SRC})()`); };
 const toast = page => page.evaluate(() => document.getElementById('__svc-toast__')?.textContent || '');
 
 (async () => {
