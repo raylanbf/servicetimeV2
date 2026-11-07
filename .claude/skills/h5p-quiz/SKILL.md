@@ -27,7 +27,7 @@ O plano completo está em `PLANO-H5P.md`, na raiz do repositório. Leia-o inteir
    cd <raiz do repo> && NODE_PATH=<scratchpad>/node_modules node .claude/skills/h5p-quiz/scripts/test-h5p.js
    ```
 
-   Tem que terminar com "TUDO OK". Se mexer no botão (`canvas-h5p.js`, `canvas-h5p-bridge.js`, `h5p-search.js`), rode também a simulação dele, do mesmo jeito: `node .claude/skills/h5p-quiz/scripts/test-quiz.js`. O `extract-h5p.js` tira o `h5pResizeMain` do `background.js` real e segue `importScripts`, então continua valendo depois da refatoração.
+   Tem que terminar com "TUDO OK". O acesso ao editor (`editor-access.js`) é compartilhado com o "Redimensionar vídeos da página" (regra em `video-size.js`): se mexer nele, rode também `test-video.js`, do mesmo jeito. Se mexer no botão (`canvas-h5p.js`, `canvas-h5p-bridge.js`, `h5p-search.js`), rode também a simulação dele, do mesmo jeito: `node .claude/skills/h5p-quiz/scripts/test-quiz.js`. O `extract-h5p.js` tira o `h5pResizeMain` do `background.js` real e segue `importScripts`, então continua valendo depois da refatoração.
 
 7. **Entregue como nas outras funcionalidades.** Diga ao usuário o que mudou, o que foi testado e como (simulação ou Canvas real) e o que ainda depende dele. Commit e versão só se ele pedir; nesse caso, um commit da funcionalidade e outro "Sobe versao para X".
 

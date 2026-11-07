@@ -59,9 +59,15 @@ function check(cond, msg) {
   if (!cond) failures++;
 }
 
-// A regra fica no h5p-width.js, que o background injeta antes do h5pResizeMain.
-const WIDTH = require('fs').readFileSync(path.resolve(__dirname, '../../../../h5p-width.js'), 'utf8');
-const run   = async page => { await page.addScriptTag({ content: WIDTH }); return page.evaluate(`(${SRC})()`); };
+// O acesso ao editor fica no editor-access.js e a regra no h5p-width.js, que o
+// background injeta antes do h5pResizeMain.
+const readRoot = f => require('fs').readFileSync(path.resolve(__dirname, '../../../..', f), 'utf8');
+const ACCESS = readRoot('editor-access.js'), WIDTH = readRoot('h5p-width.js');
+const run   = async page => {
+  await page.addScriptTag({ content: ACCESS });
+  await page.addScriptTag({ content: WIDTH });
+  return page.evaluate(`(${SRC})()`);
+};
 const toast = page => page.evaluate(() => document.getElementById('__svc-toast__')?.textContent || '');
 
 (async () => {

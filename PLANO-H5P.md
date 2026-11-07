@@ -101,7 +101,7 @@ A página **não é salva sozinha** — quem usa confere e clica em Salvar. Um C
 | Pôr o cursor num nó / depois de um elemento | `placeCursorInside`, `placeCursorAfter` (~1809–1828) |
 | Esperar o iframe novo entrar no editor | `watchForStudioVideo` (~1879) |
 | Largura 100% só no H5P (regra testada) | `background.js` › `h5pResizeMain` |
-| Achar o editor visível (CodeMirror 6/5, textarea) | `background.js` › `h5pResizeMain` e localizar e substituir (`cm6ViewOf`) |
+| Achar o editor visível (CodeMirror 6/5, textarea, TinyMCE) | `editor-access.js` (desde 06/11/2026, compartilhado pelo Redimensionar H5P e pelo Redimensionar vídeos) e localizar e substituir (`cm6ViewOf`) |
 | Hook de rede num frame de outro domínio (MAIN + ponte ISOLATED) | AVA `extension/src/studio/net-hook.ts` + `studio.ts`; no servicetime, a ponte `blockSaveBridge` |
 | Casar por título + prévia + trocar placeholder via API | AVA `extension/src/videoInsert/VideoImportPanel.tsx` + `insertVideos.ts` |
 | Gravar página sem reserializar (fatia de string + conferência com DOMParser) | `popup.js` › `bulkReplaceMain`, `matCanvasMain` (op `notas`) |

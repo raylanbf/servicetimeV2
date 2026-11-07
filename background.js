@@ -554,111 +554,16 @@ async function openEquationEditor(tabId) {
 async function resizeH5p(tabId) {
   // MAIN: o editor HTML do Canvas é um CodeMirror e o visual é o TinyMCE —
   // as instâncias dos dois só existem para o JS da própria página.
-  await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['h5p-width.js'] });
+  await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['editor-access.js', 'h5p-width.js'] });
   await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: h5pResizeMain });
 }
 
 function h5pResizeMain() {
-  function showToast(text, bg, ms = 3500) {
-    document.getElementById('__svc-toast__')?.remove();
-    const el = document.createElement('div');
-    el.id = '__svc-toast__';
-    el.textContent = text;
-    Object.assign(el.style, {
-      position: 'fixed', bottom: '24px', right: '24px',
-      background: bg, color: '#fff',
-      padding: '10px 16px', borderRadius: '6px',
-      fontFamily: 'system-ui', fontSize: '13px',
-      zIndex: '2147483647', boxShadow: '0 2px 8px rgba(0,0,0,.4)',
-    });
-    document.body.appendChild(el);
-    setTimeout(() => el.remove(), ms);
-  }
-
-  // A regra (quais iframes e como fica o width/style) vem do h5p-width.js,
-  // injetado antes desta função.
-  const { h5pEdits, applyEdits } = window.__svcH5pWidth;
-
-  function isVisible(el) {
-    return !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
-  }
-
-  // Mesmo acesso ao CodeMirror 6 do localizar e substituir.
-  function cm6ViewOf(editorEl) {
-    const content = editorEl.querySelector('.cm-content');
-    const isView  = v => v && v.state && v.state.doc && typeof v.dispatch === 'function';
-    for (const key of Object.keys(content || {})) {
-      const node = content[key];
-      const view = [node?.root?.view, node?.rootView?.view, node?.view].find(isView);
-      if (view) return view;
-    }
-    return null;
-  }
-
-  // Editor HTML aberto na tela. Com ele aberto, o visual fica escondido e
-  // desatualizado — então, havendo editor HTML, só ele é alterado.
-  const targets = [];
-  let unreachable = false;
-
-  document.querySelectorAll('.cm-editor').forEach(el => {
-    if (!isVisible(el)) return;
-    const view = cm6ViewOf(el);
-    if (!view) { unreachable = true; return; }
-    targets.push({
-      get:   () => view.state.doc.toString(),
-      apply: edits => view.dispatch({ changes: edits }),   // 1 passo de Ctrl+Z
-    });
-  });
-
-  document.querySelectorAll('.CodeMirror').forEach(el => {
-    const cm = el.CodeMirror;
-    if (!cm || !isVisible(el)) return;
-    targets.push({
-      get:   () => cm.getValue(),
-      apply: edits => cm.operation(() => {
-        for (const e of [...edits].reverse()) {
-          cm.replaceRange(e.insert, cm.posFromIndex(e.from), cm.posFromIndex(e.to));
-        }
-      }),
-    });
-  });
-
-  document.querySelectorAll('textarea').forEach(ta => {
-    if (!isVisible(ta) || ta.closest('.cm-editor, .CodeMirror')) return;
-    targets.push({
-      get:   () => ta.value,
-      apply: (edits, text) => {
-        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
-          .set.call(ta, applyEdits(text, edits));
-        ta.dispatchEvent(new Event('input',  { bubbles: true }));
-        ta.dispatchEvent(new Event('change', { bubbles: true }));
-      },
-    });
-  });
-
-  // Sem editor HTML na tela: o editor visual (TinyMCE). O conteúdo é lido,
-  // ajustado e regravado num passo só de Ctrl+Z.
-  if (!targets.length && !unreachable && window.tinymce) {
-    const tm  = window.tinymce;
-    const all = [].concat((typeof tm.get === 'function' ? tm.get() : tm.editors) || []);
-    all.forEach(ed => {
-      if (!ed || ed.removed || !ed.getBody?.() || !isVisible(ed.getContainer?.() || ed.getBody())) return;
-      targets.push({
-        get:   () => ed.getContent(),
-        apply: (edits, text) => {
-          const win = ed.getWin();
-          const y   = win.scrollY;
-          // Garante o estado atual na pilha do Ctrl+Z (não duplica se já
-          // estiver lá) — senão o transact só registra o estado novo.
-          ed.undoManager.add();
-          ed.undoManager.transact(() => ed.setContent(applyEdits(text, edits)));
-          ed.setDirty(true);
-          ed.nodeChanged();
-          win.scrollTo(0, y);
-        },
-      });
-    });
-  }
+  // O acesso ao editor vem do editor-access.js e a regra (quais iframes e
+  // como fica o width/style), do h5p-width.js — injetados antes desta função.
+  const { targets: findTargets, toast: showToast } = window.__svcEditor;
+  const { h5pEdits } = window.__svcH5pWidth;
+  const { targets, unreachable } = findTargets();
 
   if (!targets.length) {
     showToast(unreachable
@@ -696,6 +601,48 @@ function h5pResizeMain() {
   }
 }
 
+// ── Redimensionar vídeos da página ───────────────────────────────────
+// Vídeos colados (YouTube, Vimeo...), do Canvas Studio e da mídia do Canvas
+// ficam com a largura × altura das Configurações. Vídeo é reconhecido pelo
+// player no src: outros embeds com tela cheia (Genially, H5P, apresentações)
+// ficam como estão. A regra fica no video-size.js; o acesso ao editor
+// (HTML ou visual), no editor-access.js, o mesmo do Redimensionar H5P.
+async function resizeVideos(tabId) {
+  const { video_width: w, video_height: h } = await chrome.storage.local.get({ video_width: 620, video_height: 398 });
+  await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['editor-access.js', 'video-size.js'] });
+  await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: videoResizeMain, args: [w, h] });
+}
+
+function videoResizeMain(w, h) {
+  const { targets: findTargets, toast } = window.__svcEditor;
+  const { videoEdits } = window.__svcVideoSize;
+  const { targets, unreachable } = findTargets();
+
+  if (!targets.length) {
+    toast(unreachable
+      ? '⚠ Não consegui acessar o editor HTML — volte ao editor visual e tente de novo.'
+      : '⚠ Abra a página no editor do Canvas antes de redimensionar os vídeos.', '#b45309');
+    return;
+  }
+
+  let found = 0, changed = 0;
+  for (const t of targets) {
+    const text = t.get();
+    const r    = videoEdits(text, w, h);
+    found   += r.found;
+    changed += r.edits.length;
+    if (r.edits.length) t.apply(r.edits, text);
+  }
+
+  if (!found) {
+    toast('⚠ Nenhum vídeo encontrado no editor.', '#b45309');
+  } else if (!changed) {
+    toast(found > 1 ? `✓ Os ${found} vídeos já estão em ${w}×${h}.` : `✓ O vídeo já está em ${w}×${h}.`, '#1d4ed8');
+  } else {
+    toast(changed > 1 ? `✓ ${changed} vídeos redimensionados para ${w}×${h}.` : `✓ 1 vídeo redimensionado para ${w}×${h}.`, '#1d4ed8');
+  }
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   refreshIcon();
@@ -718,7 +665,7 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: 'resize-videos',
     title: '📐 Redimensionar vídeos da página',
-    contexts: ['page', 'frame'],
+    contexts: ['page', 'frame', 'editable'],
   });
   chrome.contextMenus.create({
     id: 'resize-h5p',
@@ -1297,55 +1244,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 
   if (info.menuItemId === 'resize-videos') {
-    chrome.storage.local.get({ video_width: 620, video_height: 398 }, ({ video_width, video_height }) => {
-      chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: (w, h) => {
-          let count = 0;
-
-          // Substitui dimensões em <iframe> com allowfullscreen (atributos e/ou style inline)
-          function patchHtml(html) {
-            return html.replace(/<iframe[^>]+>/gi, tag => {
-              if (!/allowfullscreen/i.test(tag)) return tag;
-              if (/class=["'][^"']*lti-embed/i.test(tag)) return tag;
-              const hasAttr  = /\bwidth=["']?\d+["']?/i.test(tag) && /\bheight=["']?\d+["']?/i.test(tag);
-              const hasStyle = /width\s*:\s*\d+px/i.test(tag) && /height\s*:\s*\d+px/i.test(tag);
-              if (!hasAttr && !hasStyle) return tag;
-              let patched = tag;
-              if (hasAttr) {
-                patched = patched
-                  .replace(/\bwidth=["']?\d+["']?/i,  `width="${w}"`)
-                  .replace(/\bheight=["']?\d+["']?/i, `height="${h}"`);
-              }
-              if (hasStyle) {
-                patched = patched
-                  .replace(/width\s*:\s*\d+px/i,  `width: ${w}px`)
-                  .replace(/height\s*:\s*\d+px/i, `height: ${h}px`);
-              }
-              count++;
-              return patched;
-            });
-          }
-
-          // Editor HTML bruto do Canvas (textarea visível na tela)
-          document.querySelectorAll('textarea').forEach(textarea => {
-            if (!/<iframe/i.test(textarea.value)) return;
-            const updated = patchHtml(textarea.value);
-            if (updated === textarea.value) return;
-            Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
-              .set.call(textarea, updated);
-            textarea.dispatchEvent(new Event('input',  { bubbles: true }));
-            textarea.dispatchEvent(new Event('change', { bubbles: true }));
-          });
-
-          alert(count
-            ? `${count} vídeo(s) redimensionado(s) para ${w}×${h}.`
-            : 'Nenhum iframe de vídeo encontrado no editor.'
-          );
-        },
-        args: [video_width, video_height],
-      });
-    });
+    resizeVideos(tab.id);
   }
 
   if (info.menuItemId === 'resize-h5p') {
