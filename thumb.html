@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Capa de vídeo — Service Timer</title>
+  <link rel="stylesheet" href="thumb.css">
+</head>
+<body>
+  <header class="th-header">
+    <span class="th-title">🖼 Capa de vídeo</span>
+    <span class="th-sub">1920×1080 · PNG</span>
+  </header>
+
+  <main class="th-main">
+    <section class="th-preview">
+      <canvas id="thumb-canvas" width="1920" height="1080" aria-label="Prévia da capa"></canvas>
+      <div id="thumb-warn" class="th-warn" style="display:none"></div>
+    </section>
+
+    <aside class="th-side">
+      <label class="th-label" for="thumb-text">Texto da capa</label>
+      <textarea id="thumb-text" class="th-text" rows="5" placeholder="Digite o título do vídeo"></textarea>
+      <div class="th-row">
+        <span class="th-hint">Enter quebra a linha. A letra se ajusta à moldura.</span>
+        <button id="btn-thumb-clear" class="th-link" type="button">limpar</button>
+      </div>
+      <div id="thumb-size" class="th-hint"></div>
+
+      <span class="th-label th-mt">Template</span>
+      <div id="thumb-templates" class="th-templates"></div>
+
+      <div class="th-actions">
+        <button id="btn-thumb-download" class="th-btn th-btn-green" type="button">⬇  Baixar PNG</button>
+        <button id="btn-thumb-copy" class="th-btn" type="button">📋  Copiar imagem</button>
+      </div>
+      <div id="thumb-status" class="th-status"></div>
+    </aside>
+  </main>
+
+  <script src="thumb-templates.js"></script>
+  <script src="thumb.js"></script>
+</body>
+</html>

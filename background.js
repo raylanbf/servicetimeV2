@@ -663,6 +663,11 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ['selection'],
   });
   chrome.contextMenus.create({
+    id: 'make-thumb',
+    title: '🖼 Criar capa de vídeo com o texto',
+    contexts: ['selection'],
+  });
+  chrome.contextMenus.create({
     id: 'resize-videos',
     title: '📐 Redimensionar vídeos da página',
     contexts: ['page', 'frame', 'editable'],
@@ -1250,7 +1255,20 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'resize-h5p') {
     resizeH5p(tab.id);
   }
+
+  if (info.menuItemId === 'make-thumb') {
+    openThumbEditor(info.selectionText || '');
+  }
 });
+
+// ── Capa de vídeo ────────────────────────────────────────────────────
+// Abre o editor (thumb.html) numa janela própria, com o texto selecionado.
+function openThumbEditor(text) {
+  chrome.windows.create({
+    url: chrome.runtime.getURL('thumb.html') + (text ? '?text=' + encodeURIComponent(text) : ''),
+    type: 'popup', width: 1280, height: 800,
+  });
+}
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;

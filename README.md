@@ -95,6 +95,11 @@ Disponíveis com **botão direito** em qualquer página:
 | 🔠 Copiar em CAIXA ALTA | Copia o texto selecionado convertido para maiúsculas, mantendo formatações básicas |
 | 🧹 Copiar texto limpo | Copia o texto removendo atributos e estilos desnecessários, mantendo negrito, itálico e listas |
 | ✨ Copia Inteligente | Cópia avançada para colar em editores rich text (Canvas, TinyMCE, CKEditor, Moodle, Bubble.io) |
+| 🖼 Criar capa de vídeo com o texto | Abre o editor de capa 1920×1080 com o texto selecionado na moldura do template escolhido; editar o texto, trocar o template e baixar o PNG ou copiar a imagem |
+
+#### Capas de vídeo — templates
+
+Os templates ficam em `thumb-templates.js`, com as imagens de fundo (sem texto) em `thumbs/`. Para criar outro, ponha a imagem 1920×1080 em `thumbs/` e acrescente uma entrada com a área do texto (`box`, em pixels da imagem), a fonte, a cor e o tamanho máximo da letra. A fonte dos títulos é a Alegreya Sans Bold (SIL OFL, em `thumbs/fonts/`).
 
 #### Copia Inteligente — detalhes
 

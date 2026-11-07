@@ -5459,6 +5459,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('bulk-courses-input').addEventListener('input', invalidateBulk);
   $('bulk-mode').addEventListener('change', () => { bulkSyncMode(); invalidateBulk(); });
 
+  // ── Capa de vídeo (o editor abre numa janela; o texto se digita lá) ──
+  $('btn-canvas-thumb').addEventListener('click', () => chrome.windows.create({
+    url: chrome.runtime.getURL('thumb.html'), type: 'popup', width: 1280, height: 800,
+  }));
+
   // ── Vídeos em lote ────────────────────────────────────────────────
   $('btn-canvas-videos').addEventListener('click', openVideos);
   $('btn-back-canvas-videos').addEventListener('click', () => show('canvas'));
