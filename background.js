@@ -546,9 +546,10 @@ async function openEquationEditor(tabId) {
 // ── Redimensionar H5P (largura 100%) ─────────────────────────────────
 // O H5P entra pela ferramenta "Interactive Content – H5P" do editor como um
 // iframe LTI (class="lti-embed", que o redimensionar vídeos ignora) com
-// largura fixa, perto de 700px. Só esse iframe — reconhecido pelo src, que
-// leva o endereço do H5P — passa a ter 100% de largura; a altura e os demais
-// iframes (vídeos, Studio) ficam como estão. A regra fica no h5p-width.js,
+// largura fixa, perto de 700px. Só o quiz da caixa logo depois da faixa
+// "Atividade de Fixação Não Pontuada" passa a ter 100% de largura; a altura,
+// os outros H5P da página (imagens, carrosséis no corpo) e os demais iframes
+// (vídeos, Studio) ficam como estão. A regra fica no h5p-width.js,
 // compartilhada com o botão do quiz (canvas-h5p.js).
 async function resizeH5p(tabId) {
   // MAIN: o editor HTML do Canvas é um CodeMirror e o visual é o TinyMCE —
@@ -558,7 +559,7 @@ async function resizeH5p(tabId) {
 }
 
 function h5pResizeMain() {
-  function showToast(text, bg) {
+  function showToast(text, bg, ms = 3500) {
     document.getElementById('__svc-toast__')?.remove();
     const el = document.createElement('div');
     el.id = '__svc-toast__';
@@ -571,7 +572,7 @@ function h5pResizeMain() {
       zIndex: '2147483647', boxShadow: '0 2px 8px rgba(0,0,0,.4)',
     });
     document.body.appendChild(el);
-    setTimeout(() => el.remove(), 3500);
+    setTimeout(() => el.remove(), ms);
   }
 
   // A regra (quais iframes e como fica o width/style) vem do h5p-width.js,
@@ -666,21 +667,32 @@ function h5pResizeMain() {
     return;
   }
 
-  let found = 0, changed = 0;
+  let found = 0, others = 0, changed = 0, error = '';
   for (const t of targets) {
     const text = t.get();
     const r    = h5pEdits(text);
+    if (r.error) { error = error || r.error; continue; }
     found   += r.found;
+    others  += r.others;
     changed += r.edits.length;
     if (r.edits.length) t.apply(r.edits, text);
   }
 
-  if (!found) {
+  // Só o quiz da caixa da Atividade de Fixação muda; os outros H5P ficam.
+  const rest = others === 1 ? ' O outro H5P da página ficou como estava.'
+    : others ? ` Os outros ${others} H5P da página ficaram como estavam.` : '';
+  if (error) {
+    showToast(`⚠ ${error} Nada foi alterado.`, '#b45309', 6000);
+  } else if (!found && !others) {
     showToast('⚠ Nenhum H5P encontrado no editor.', '#b45309');
+  } else if (!found) {
+    showToast(`⚠ Nenhum H5P na caixa da Atividade de Fixação.${rest}`, '#b45309', 6000);
   } else if (!changed) {
-    showToast(found > 1 ? `✓ Os ${found} H5P já estão com 100% de largura.` : '✓ O H5P já está com 100% de largura.', '#1d4ed8');
+    showToast((found > 1 ? `✓ Os ${found} H5P da Atividade de Fixação já estão com 100% de largura.`
+      : '✓ O H5P da Atividade de Fixação já está com 100% de largura.') + rest, '#1d4ed8', rest ? 6000 : 3500);
   } else {
-    showToast(`✓ ${changed} H5P ajustado(s) para 100% de largura.`, '#1d4ed8');
+    showToast((changed > 1 ? `✓ ${changed} H5P da Atividade de Fixação ajustados para 100% de largura.`
+      : '✓ H5P da Atividade de Fixação ajustado para 100% de largura.') + rest, '#1d4ed8', rest ? 6000 : 3500);
   }
 }
 

@@ -5,7 +5,7 @@
 
 ## Andamento
 
-- [x] Redimensionar H5P (largura 100%) — menu de contexto, `h5pResizeMain` em `background.js` (out/2026)
+- [x] Redimensionar H5P (largura 100%) — menu de contexto, `h5pResizeMain` em `background.js` (out/2026). Desde 06/11/2026, a pedido do usuário, só muda o quiz da caixa depois da faixa; os outros H5P da página (imagens, carrosséis no corpo) ficam (`quizBox` em `h5p-width.js`, a mesma caixa do botão)
 - [x] Pré-requisitos — conta de autor ok; curso de teste "Ambiente teste - Raylan" (282082) com o Tópico 5; quiz de teste criado (27/10/2026)
 - [x] Fase 1 — investigação da tela do H5P.com, pelo botão provisório "🔬 Diagnóstico H5P" (27/10/2026). Ver seção 2.1. O teste 4.6 (iframe montado à mão) fica para a Fase 3.
 - [x] Fase 2 — botão página por página (redesenhada em 27/10/2026, ver seção 5). Implementada em 27/10/2026 (`canvas-h5p.js`, `canvas-h5p-bridge.js`, `h5p-search.js`, `h5p-width.js`), aprovada na simulação (`test-quiz.js`, `test-h5p.js`) e **no Canvas real** (curso 282082, Tópico 5). Ajuste do teste real: a busca vai pelo endereço com `content_scope=mine` (seção 2.1). Diagnóstico provisório removido.
@@ -237,3 +237,4 @@ Modelo: "Vídeos nas páginas" da AVA.
 - **Botão na barra do editor, ao lado do Justificar** (decisão de 27/10/2026), e não no painel.
 - **Confirmação antes de importar** ("Quer importar o H5P para a página?" Sim/Não), porque o botão pode ser apertado sem querer (decisão de 27/10/2026).
 - **Largura 100%, altura intacta;** só o iframe do H5P muda.
+- **Só o quiz da caixa da Atividade de Fixação vai para 100%** (decisão de 06/11/2026), tanto no "Redimensionar H5P" quanto no botão. O corpo do tópico pode ter outros H5P (imagens, carrosséis) e eles não mudam. Sem a faixa, ou com 2 faixas, nada muda. A posição de cada tag no texto vem do DOMParser, casando as tags com os iframes na ordem e conferindo o `src`; se não baterem, nada muda.

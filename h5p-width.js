@@ -3,10 +3,31 @@
 // Regra da largura do H5P (100%), compartilhada pelo menu "Redimensionar H5P"
 // (o background.js injeta este arquivo antes do h5pResizeMain) e pelo botão do
 // quiz (canvas-h5p.js, que o carrega como content script). Roda no mundo MAIN
-// da página e fica em window.__svcH5pWidth. Só os atributos width e style dos
-// iframes do H5P — reconhecidos pelo src — são reescritos; o resto do texto
-// fica byte a byte igual. Regressão: .claude/skills/h5p-quiz/scripts/test-h5p.js
+// da página e fica em window.__svcH5pWidth. Só muda o quiz da caixa logo
+// depois da faixa "Atividade de Fixação Não Pontuada"; os outros H5P da página
+// (imagens, carrosséis no corpo do tópico) ficam como estão. Só os atributos
+// width e style desse iframe são reescritos; o resto do texto fica byte a byte
+// igual. Regressão: .claude/skills/h5p-quiz/scripts/test-h5p.js
 window.__svcH5pWidth = (() => {
+  const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[‐-―]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
+
+  // A caixa do quiz: a div logo depois da faixa — a div mais interna cujo
+  // texto começa com "Atividade de Fixação". Tem que haver uma faixa só.
+  // Serve tanto para o body do TinyMCE quanto para o HTML lido no DOMParser.
+  function quizBox(root) {
+    const isBand = d => norm(d.textContent).startsWith('atividade de fixacao');
+    const bands  = [...root.querySelectorAll('div')].filter(d => isBand(d) && ![...d.querySelectorAll('div')].some(isBand));
+    if (bands.length !== 1) {
+      return { error: bands.length
+        ? `Achei ${bands.length} faixas "Atividade de Fixação" nesta página — deve haver só uma.`
+        : 'Não achei a faixa "Atividade de Fixação Não Pontuada" nesta página.' };
+    }
+    const box = bands[0].nextElementSibling;
+    if (!box || box.tagName !== 'DIV') return { error: 'Não achei a caixa logo abaixo da faixa "Atividade de Fixação".' };
+    return { box };
+  }
+
   // Põe width: 100% no style, no lugar da largura que houver (max-width e
   // min-width ficam). Devolve o mesmo texto se já estiver em 100%.
   function fullWidthStyle(style) {
@@ -54,17 +75,33 @@ window.__svcH5pWidth = (() => {
     return out;
   }
 
-  // Edições { from, to, insert } que põem os iframes do H5P do texto em 100%.
+  // Edições { from, to, insert } que põem em 100% o H5P da caixa do quiz.
+  // found = H5P na caixa; others = H5P fora dela, que não mudam. Para saber
+  // onde cada tag do texto fica, as tags são casadas, na ordem, com os iframes
+  // do DOMParser (conferindo o src); se não baterem, nada muda.
   function h5pEdits(html) {
-    const edits = [];
-    let found = 0;
-    for (const m of html.matchAll(/<iframe\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi)) {
+    const res  = { found: 0, others: 0, edits: [] };
+    const doc  = new DOMParser().parseFromString(html, 'text/html');
+    const tags = [...html.matchAll(/<!--[\s\S]*?-->|<iframe\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi)]
+      .filter(m => !m[0].startsWith('<!--'));
+    const frames = [...doc.querySelectorAll('iframe')];
+    const where  = quizBox(doc.body);
+    const srcOf  = tag => new DOMParser().parseFromString(tag, 'text/html').querySelector('iframe')?.getAttribute('src');
+
+    for (let i = 0; i < tags.length; i++) {
+      const m   = tags[i];
       const out = patchTag(m[0]);
       if (out === null) continue;
-      found++;
-      if (out !== m[0]) edits.push({ from: m.index, to: m.index + m[0].length, insert: out });
+      if (tags.length !== frames.length || frames[i].getAttribute('src') !== srcOf(m[0])) {
+        return { found: 0, others: 0, edits: [], error: 'Não consegui localizar os iframes da página com segurança.' };
+      }
+      if (where.error || !where.box.contains(frames[i])) { res.others++; continue; }
+      res.found++;
+      if (out !== m[0]) res.edits.push({ from: m.index, to: m.index + m[0].length, insert: out });
     }
-    return { found, edits };
+    // Sem faixa só é erro se houver H5P — senão a página só não tem H5P.
+    if (where.error && res.others) res.error = where.error;
+    return res;
   }
 
   function applyEdits(text, edits) {
@@ -73,5 +110,5 @@ window.__svcH5pWidth = (() => {
     return out;
   }
 
-  return { h5pEdits, applyEdits };
+  return { h5pEdits, applyEdits, quizBox };
 })();

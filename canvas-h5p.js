@@ -63,18 +63,13 @@
   }
   const h5pIn = root => [...root.querySelectorAll('span.mce-preview-object, iframe')].filter(isH5p);
 
-  // A caixa do quiz: a div logo depois da faixa. Ela só pode ter H5P, o
-  // marcador da AVA e parágrafos vazios — outra coisa faz o botão parar.
+  // A caixa do quiz: a div logo depois da faixa — a mesma do "Redimensionar
+  // H5P" (h5p-width.js). Ela só pode ter H5P, o marcador da AVA e parágrafos
+  // vazios — outra coisa faz o botão parar.
   function findBox(body) {
-    const isBand = d => norm(d.textContent).startsWith('atividade de fixacao');
-    const bands  = [...body.querySelectorAll('div')].filter(d => isBand(d) && ![...d.querySelectorAll('div')].some(isBand));
-    if (bands.length !== 1) {
-      return { error: bands.length
-        ? `Achei ${bands.length} faixas "Atividade de Fixação" nesta página — deve haver só uma.`
-        : 'Não achei a faixa "Atividade de Fixação Não Pontuada" nesta página.' };
-    }
-    const box = bands[0].nextElementSibling;
-    if (!box || box.tagName !== 'DIV') return { error: 'Não achei a caixa logo abaixo da faixa "Atividade de Fixação".' };
+    const where = window.__svcH5pWidth.quizBox(body);
+    if (where.error) return where;
+    const box   = where.box;
     const probe = box.cloneNode(true);
     h5pIn(probe).forEach(n => n.remove());
     const extra = probe.querySelector('img, iframe, video, audio, object, embed, table, a, span.mce-preview-object');
@@ -106,7 +101,8 @@
       (node.tagName === 'IFRAME' ? node : node.querySelector('iframe'))?.setAttribute('title', label);
       node.scrollIntoView({ block: 'center' });
 
-      // 100% de largura, pela mesma regra do "Redimensionar H5P".
+      // 100% de largura, pela mesma regra do "Redimensionar H5P" — só o
+      // quiz da caixa; os H5P do corpo do tópico ficam como estão.
       const W = window.__svcH5pWidth;
       const html = ed.getContent();
       const r = W.h5pEdits(html);

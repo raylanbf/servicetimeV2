@@ -219,9 +219,11 @@ const check = (cond, msg) => { console.log((cond ? '  ✔ ' : '  ✘ ') + msg); 
   }), 'botão H5P logo depois do Justificar, no mesmo grupo');
 
   // ── A: troca, My Content, hífen x travessão ─────────────────────────
-  console.log('A · caixa com H5P antigo, popup em All Content, quiz com hífen');
+  console.log('A · caixa com H5P antigo, popup em All Content, quiz com hífen, carrossel H5P no corpo');
   {
-    const original = await setup({ title: `Tópico 5 – ${T}`, html: pageHtml({ box: OLD_BOX }) });
+    // O carrossel do corpo do tópico também é H5P: não pode ir para 100%.
+    const carousel = `<p style="text-align: center;">${iframeOf('999', 700)}</p>`;
+    const original = await setup({ title: `Tópico 5 – ${T}`, html: pageHtml({ box: OLD_BOX, extra: carousel }) });
     await page.click('.__svc-h5p-btn__');
     const c = await confirmText();
     check(/Quer importar o H5P para a página\?/.test(c || ''), 'pergunta antes de fazer qualquer coisa');
@@ -244,6 +246,11 @@ const check = (cond, msg) => { console.log((cond ? '  ✔ ' : '  ✘ ') + msg); 
     check(await page.evaluate(() => [...document.querySelectorAll('iframe')].length) >= 1 && !(await page.$('[role="dialog"]')), 'popup fechado');
     const after = await page.evaluate(() => tinymce.activeEditor.getContent());
     check(outsideBox(after) === outsideBox(original), 'fora da caixa, nada mudou');
+    const car = await page.evaluate(html => {
+      const f = [...new DOMParser().parseFromString(html, 'text/html').querySelectorAll('iframe')].find(x => x.src.includes('content%2F999'));
+      return f && { width: f.getAttribute('width'), sw: f.style.width };
+    }, after);
+    check(car?.width === '700' && car?.sw === '700px', 'carrossel H5P do corpo continua com 700px — ' + JSON.stringify(car));
     check(await page.evaluate(() => tinymce.activeEditor.isDirty()), 'página marcada como alterada (não salva sozinha)');
     await page.evaluate(() => { tinymce.activeEditor.undoManager.undo(); tinymce.activeEditor.undoManager.undo(); });
     check(await page.evaluate(() => tinymce.activeEditor.getContent()) === original, 'dois Ctrl+Z voltam ao original (a troca e a inserção do Canvas)');

@@ -132,6 +132,7 @@ HTML gerado ao colar e visualizar o código no editor:
 | Opção | Descrição |
 |---|---|
 | 📐 Redimensionar vídeos da página | Ajusta iframes de vídeo às dimensões configuradas (padrão 620×398) |
+| 📐 Redimensionar H5P (largura 100%) | Põe em 100% só o quiz H5P da caixa abaixo da faixa "Atividade de Fixação"; os outros H5P da página ficam como estão |
 | 🔍 Localizar e substituir | Abre painel flutuante para busca e substituição em campos de texto da página |
 
 ---

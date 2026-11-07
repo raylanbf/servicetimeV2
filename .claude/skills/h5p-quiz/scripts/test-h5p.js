@@ -38,9 +38,20 @@ const CASES = [
     '<iframe title="Quiz > Parte 1" src="https://x.h5p.com/content/11" width="100%" style="width: 100%;"></iframe>'],
 ];
 
+// H5P no corpo do tópico (carrossel, imagem): só o quiz da caixa depois da
+// faixa muda, então estes ficam como estão.
+const BODY_H5P = [
+  '<iframe class="lti-embed" style="width: 700px; height: 450px;" title="Carrossel" src="https://pucminas.instructure.com/courses/282082/external_tools/retrieve?display=borderless&amp;url=https%3A%2F%2Fpucminasvirtual.h5p.com%2Fcontent%2F555" width="700" height="450" allowfullscreen="allowfullscreen"></iframe>',
+  '<iframe src="https://pucminas.h5p.com/content/777/embed" width="800" height="500" frameborder="0" allowfullscreen="allowfullscreen"></iframe>',
+];
+const BAND = '<div id="questao-fixacao-banner" style="background: #155382; padding: 20px 1%; text-align: center;"><span style="color: #ffffff;">&nbsp;Atividade de Fixa&ccedil;&atilde;o N&atilde;o Pontuada - Ao concluir este t&oacute;pico, responda &agrave; quest&atilde;o:&nbsp;</span></div>';
 const join   = parts => parts.map(p => `<p style="text-align: center;">${p}</p>`).join('\n');
-const BEFORE = '<div id="conteudo" class="content-box"><h4>Atividade</h4>\n' + join(CASES.map(c => c[1])) + '\n</div>';
-const AFTER  = '<div id="conteudo" class="content-box"><h4>Atividade</h4>\n' + join(CASES.map(c => c[2] ?? c[1])) + '\n</div>';
+const pageOf = (box, { band = BAND, body = BODY_H5P } = {}) =>
+  '<div id="conteudo" class="content-box"><h4>Conteúdo</h4>\n' + join(body) + '\n</div>\n' + band +
+  '\n<div id="questao-fixacao-atividade" style="background-color: #ffffff; padding: 1.5% 2.5%;">\n' + join(box) + '\n</div>';
+const BEFORE = pageOf(CASES.map(c => c[1]));
+const AFTER  = pageOf(CASES.map(c => c[2] ?? c[1]));
+const REST   = ' Os outros 2 H5P da página ficaram como estavam.';
 
 let failures = 0;
 function check(cond, msg) {
@@ -74,16 +85,47 @@ const toast = page => page.evaluate(() => document.getElementById('__svc-toast__
     }, [BEFORE]);
     await run(page);
     const out = await page.inputValue('#ta');
-    check(out === AFTER, 'só os iframes do H5P mudam, byte a byte');
+    check(out === AFTER, 'só os H5P da caixa da Atividade de Fixação mudam, byte a byte (os do corpo ficam)');
     if (out !== AFTER) {
       const a = out.split('\n'), b = AFTER.split('\n');
       a.forEach((l, i) => { if (l !== b[i]) console.log('     obtido  :', l, '\n     esperado:', b[i]); });
     }
     check(await page.inputValue('#oculta') === BEFORE, 'textarea oculta (a do TinyMCE) não é tocada');
     check((await page.evaluate(() => window.__events)).join(',') === 'input,change', 'dispara input e change');
-    check(await toast(page) === '✓ 5 H5P ajustado(s) para 100% de largura.', 'aviso: ' + await toast(page));
+    check(await toast(page) === '✓ 5 H5P da Atividade de Fixação ajustados para 100% de largura.' + REST, 'aviso: ' + await toast(page));
     await run(page);
-    check(await toast(page) === '✓ Os 6 H5P já estão com 100% de largura.', 'segunda vez: ' + await toast(page));
+    check(await toast(page) === '✓ Os 6 H5P da Atividade de Fixação já estão com 100% de largura.' + REST, 'segunda vez: ' + await toast(page));
+    await page.close();
+  }
+
+  // ── Onde fica o quiz ────────────────────────────────────────────────
+  // [nome, HTML, saída esperada (null = não muda), aviso]
+  const QUIZ   = CASES[0][1], QUIZ_OK = CASES[0][2];
+  const PLACES = [
+    ['o caso real: 1 quiz na caixa, carrossel e imagem no corpo', pageOf([QUIZ]), pageOf([QUIZ_OK]),
+      '✓ H5P da Atividade de Fixação ajustado para 100% de largura.' + REST],
+    ['sem a faixa: nenhum H5P muda', pageOf([QUIZ], { band: '' }), null,
+      '⚠ Não achei a faixa "Atividade de Fixação Não Pontuada" nesta página. Nada foi alterado.'],
+    ['duas faixas: nenhum H5P muda', pageOf([QUIZ], { band: BAND + '\n<div><p>x</p></div>\n' + BAND }), null,
+      '⚠ Achei 2 faixas "Atividade de Fixação" nesta página — deve haver só uma. Nada foi alterado.'],
+    ['caixa sem H5P: os do corpo não mudam', pageOf(['&nbsp;']), null,
+      '⚠ Nenhum H5P na caixa da Atividade de Fixação.' + REST],
+    ['um H5P só no corpo', pageOf([QUIZ], { body: [BODY_H5P[0]] }), pageOf([QUIZ_OK], { body: [BODY_H5P[0]] }),
+      '✓ H5P da Atividade de Fixação ajustado para 100% de largura. O outro H5P da página ficou como estava.'],
+    ['iframe dentro de comentário não atrapalha', pageOf([QUIZ]).replace('<h4>', '<!-- <iframe src="https://x.h5p.com/content/0" width="10"></iframe> --><h4>'),
+      pageOf([QUIZ_OK]).replace('<h4>', '<!-- <iframe src="https://x.h5p.com/content/0" width="10"></iframe> --><h4>'),
+      '✓ H5P da Atividade de Fixação ajustado para 100% de largura.' + REST],
+    ['tags que não batem com o DOM: nada muda', pageOf([QUIZ]).replace('<h4>', '<textarea><iframe src="https://x.h5p.com/content/0"></textarea><h4>'), null,
+      '⚠ Não consegui localizar os iframes da página com segurança. Nada foi alterado.'],
+  ];
+  for (const [name, html, expected, msg] of PLACES) {
+    console.log('Lugar do quiz — ' + name);
+    const page = await newPage();
+    await page.setContent('<textarea style="width:900px;height:300px"></textarea>');
+    await page.evaluate(([h]) => { document.querySelector('textarea').value = h; }, [html]);
+    await run(page);
+    check(await page.inputValue('textarea') === (expected ?? html), expected ? 'só o quiz da caixa muda' : 'texto intacto');
+    check(await toast(page) === msg, 'aviso: ' + await toast(page));
     await page.close();
   }
 
@@ -100,7 +142,7 @@ const toast = page => page.evaluate(() => document.getElementById('__svc-toast__
     await page.waitForFunction(() => window.__view, null, { timeout: 30000 });
     await run(page);
     check(await page.evaluate(() => window.__view.state.doc.toString()) === AFTER, 'documento do CodeMirror ajustado');
-    check(await toast(page) === '✓ 5 H5P ajustado(s) para 100% de largura.', 'aviso: ' + await toast(page));
+    check(await toast(page) === '✓ 5 H5P da Atividade de Fixação ajustados para 100% de largura.' + REST, 'aviso: ' + await toast(page));
     await page.click('.cm-content');
     await page.keyboard.press('Control+z');
     check(await page.evaluate(() => window.__view.state.doc.toString()) === BEFORE, 'um Ctrl+Z desfaz tudo');
@@ -136,7 +178,7 @@ const toast = page => page.evaluate(() => document.getElementById('__svc-toast__
       });
     }), [BEFORE]);
     const previews = await page.evaluate(() => tinymce.activeEditor.getBody().querySelectorAll('.mce-preview-object').length);
-    check(previews === CASES.length, `iframes viram preview objects do plugin media (${previews})`);
+    check(previews === CASES.length + BODY_H5P.length, `iframes viram preview objects do plugin media (${previews})`);
     const before = await page.evaluate(() => tinymce.activeEditor.getContent());
 
     await run(page);
@@ -151,8 +193,9 @@ const toast = page => page.evaluate(() => document.getElementById('__svc-toast__
         })),
       };
     });
-    const f = res.frames;
-    check(f.length === CASES.length, `${f.length} iframes depois de salvar`);
+    const [c0, c1] = res.frames, f = res.frames.slice(BODY_H5P.length);
+    check(res.frames.length === CASES.length + BODY_H5P.length, `${res.frames.length} iframes depois de salvar`);
+    check(c0.sw === '700px' && c0.width === '700' && c1.width === '800' && !c1.sw, 'H5P do corpo (carrossel, imagem) intactos — ' + JSON.stringify([c0, c1]));
     check(f[0].sw === '100%' && f[0].width === '100%' && f[0].sh === '400px' && f[0].height === '400', 'H5P LTI: 100% de largura, altura mantida — ' + JSON.stringify(f[0]));
     check(f[1].sw === '720px' && f[1].width === '720', 'Studio intacto — ' + JSON.stringify(f[1]));
     check(f[2].width === '560' && !f[2].sw, 'YouTube intacto — ' + JSON.stringify(f[2]));
@@ -160,7 +203,7 @@ const toast = page => page.evaluate(() => document.getElementById('__svc-toast__
     check(f[4].sw === '100%' && f[4].smax === '700px' && f[4].sh === '500px', 'H5P com max-width — ' + JSON.stringify(f[4]));
     check(f[5].sw === '100%' && f[5].width === '100%', 'H5P já em 100% — ' + JSON.stringify(f[5]));
     check(res.dirty, 'editor marcado como alterado (o Canvas avisa se sair sem salvar)');
-    check(await toast(page) === '✓ 5 H5P ajustado(s) para 100% de largura.', 'aviso: ' + await toast(page));
+    check(await toast(page) === '✓ 5 H5P da Atividade de Fixação ajustados para 100% de largura.' + REST, 'aviso: ' + await toast(page));
     await page.screenshot({ path: path.join(OUT, `h5p-tinymce-${ver}.png`) });
 
     await page.evaluate(() => tinymce.activeEditor.undoManager.undo());
