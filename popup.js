@@ -3007,6 +3007,490 @@ async function doBulkApply() {
   btn.innerHTML = '✅  Aplicar substituição';
 }
 
+// ── Vídeos em lote ───────────────────────────────────────────────────
+// Passa nas páginas dos módulos marcados do curso da aba e põe todos os
+// vídeos (Studio, YouTube, Vimeo, mídia do Canvas...) no tamanho das
+// Configurações — a mesma regra do "Redimensionar vídeos da página"
+// (video-size.js, carregado pelo popup.html). Só os atributos de tamanho dos
+// vídeos mudam; o resto do HTML fica byte a byte igual. Primeiro a prévia; o
+// "Aplicar" só começa depois de redigitar o número do curso da aba, e cada
+// página é lida de novo na hora de gravar.
+
+const VID_RECENT_MIN = 30;   // página editada há menos que isso: avisa na prévia
+
+let _vidCourseId = null;      // curso que gerou a lista de módulos
+let _vidModules  = [];        // [{ id, name, pages: [{ url, title }] }]
+let _vidChecked  = new Set(); // ids dos módulos marcados
+let _vidPreview  = null;      // { courseId, w, h, rows }
+let _vidBusy     = false;
+let _vidGen      = 0;         // muda a cada mudança na seleção: prévia em curso é descartada
+
+function vidStatus(msg, color) {
+  const el = $('vid-status');
+  el.textContent = msg;
+  el.style.color = color || '#94a3b8';
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function vidProgress(msg) {
+  $('vid-progress').textContent   = msg || '';
+  $('vid-progress').style.display = msg ? 'block' : 'none';
+}
+
+async function openVideos() {
+  show('canvas-videos');
+  $('vid-size-label').textContent = `${S.video_width}×${S.video_height}`;
+  if (_vidBusy) return;
+  const courseId = await getCanvasCourseId();
+  $('vid-course-label').textContent = courseId ? `curso #${courseId}` : 'nenhum curso nesta aba';
+  // Mudou de curso: módulos e prévia do anterior não valem mais.
+  if (_vidCourseId && courseId !== _vidCourseId) vidReset();
+}
+
+function vidReset() {
+  _vidCourseId = null;
+  _vidModules  = [];
+  _vidChecked  = new Set();
+  vidDropPreview();
+  $('vid-module-section').style.display = 'none';
+  $('btn-vid-modules').textContent = '📚  Ler módulos do curso';
+  vidStatus('');
+}
+
+function vidDropPreview() {
+  _vidGen++;
+  _vidPreview = null;
+  $('vid-results').innerHTML = '';
+  $('btn-vid-apply').style.display = 'none';
+}
+
+function vidSyncUI() {
+  $('btn-vid-modules').disabled = _vidBusy;
+  $('btn-vid-preview').disabled = _vidBusy;
+  $('btn-vid-apply').disabled   = _vidBusy;
+  $('btn-vid-toggle-all').disabled = _vidBusy;
+  document.querySelectorAll('#vid-modules-list input').forEach(cb => { cb.disabled = _vidBusy || cb.dataset.empty === '1'; });
+  const withPages = _vidModules.filter(m => m.pages.length);
+  $('btn-vid-toggle-all').textContent =
+    withPages.length && withPages.every(m => _vidChecked.has(m.id)) ? 'desmarcar todos' : 'marcar todos';
+}
+
+// Páginas dos módulos marcados, sem repetir a que aparece em dois módulos.
+function vidSelectedPages() {
+  const seen = new Set(), out = [];
+  for (const m of _vidModules) {
+    if (!_vidChecked.has(m.id)) continue;
+    for (const pg of m.pages) {
+      if (seen.has(pg.url)) continue;
+      seen.add(pg.url);
+      out.push({ ...pg, module: m.name });
+    }
+  }
+  return out;
+}
+
+async function vidExec(tabId, courseId, op, p) {
+  const res = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: vidCanvasMain,
+    args: [op, courseId, p || null],
+  });
+  const out = res[0]?.result;
+  if (out && out.__error) throw new Error(out.__error);
+  return out;
+}
+
+// Roda na aba do Canvas (sessão + CSRF). Uma só função serializada para as
+// operações: 'modules' (módulos com as páginas de cada um), 'get' e 'put'.
+function vidCanvasMain(op, courseId, p) {
+  return (async () => {
+    try {
+      const api   = `/api/v1/courses/${courseId}`;
+      const delay = ms => new Promise(r => setTimeout(r, ms));
+
+      async function safeFetch(url, opts = {}) {
+        for (let attempt = 0; attempt <= 2; attempt++) {
+          const res = await fetch(url, opts);
+          if (res.status === 429) { await delay(2000 * (attempt + 1)); continue; }
+          const remaining = parseFloat(res.headers.get('X-Rate-Limit-Remaining') || '999');
+          if (remaining < 30) await delay(800);
+          return res;
+        }
+        throw new Error('Limite de requisições do Canvas esgotado após 3 tentativas');
+      }
+
+      async function fetchAll(url) {
+        const out = [];
+        let next = url;
+        while (next) {
+          const res = await safeFetch(next);
+          if (!res.ok) throw new Error(`HTTP ${res.status} ao ler ${url.split('?')[0]}`);
+          const data = await res.json();
+          if (Array.isArray(data)) out.push(...data);
+          const m = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/);
+          next = m ? m[1] : null;
+        }
+        return out;
+      }
+
+      if (op === 'modules') {
+        const mods = await fetchAll(`${api}/modules?include[]=items&per_page=100`);
+        const out  = [];
+        for (const m of mods) {
+          // Módulo com muitos itens vem sem a lista: busca à parte.
+          const items = Array.isArray(m.items) ? m.items : await fetchAll(`${api}/modules/${m.id}/items?per_page=100`);
+          out.push({
+            id: m.id, name: m.name,
+            pages: items.filter(it => it.type === 'Page' && it.page_url).map(it => ({ url: it.page_url, title: it.title })),
+          });
+        }
+        return out;
+      }
+
+      const pageApi = `${api}/pages/${encodeURIComponent(p.url)}`;
+
+      if (op === 'get') {
+        const res = await safeFetch(pageApi);
+        if (!res.ok) throw new Error(`HTTP ${res.status} ao ler a página`);
+        const pg = await res.json();
+        return { body: pg.body || '', updatedAt: pg.updated_at || null, editor: pg.last_edited_by?.display_name || '' };
+      }
+
+      if (op === 'put') {
+        const rawCsrf = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('_csrf_token='));
+        const csrf = rawCsrf
+          ? decodeURIComponent(rawCsrf.split('=').slice(1).join('='))
+          : decodeURIComponent(document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
+        const res = await safeFetch(pageApi, {
+          method:  'PUT',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+          body:    JSON.stringify({ wiki_page: { body: p.body } }),
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`HTTP ${res.status} ao gravar${text ? ' — ' + text.slice(0, 120) : ''}`);
+        let saved = null;
+        try { saved = text ? JSON.parse(text) : null; } catch { saved = null; }
+        return { body: typeof saved?.body === 'string' ? saved.body : null };
+      }
+
+      return { __error: 'Operação desconhecida: ' + op };
+    } catch (err) {
+      return { __error: err.message };
+    }
+  })();
+}
+
+async function doVidLoadModules() {
+  if (_vidBusy) return;
+  const btn = $('btn-vid-modules');
+  _vidBusy = true;
+  vidSyncUI();
+  btn.innerHTML = '<span class="spinner"></span>Lendo módulos...';
+
+  try {
+    const { tabId, courseId } = await matCanvasTab();
+    const mods = await vidExec(tabId, courseId, 'modules');
+    vidReset();
+    _vidCourseId = courseId;
+    _vidModules  = mods;
+    // Começa com todos os módulos que têm páginas marcados.
+    _vidChecked  = new Set(mods.filter(m => m.pages.length).map(m => m.id));
+    $('vid-course-label').textContent = `curso #${courseId}`;
+    const pages = vidSelectedPages().length;
+    if (!mods.length) {
+      vidStatus(`Nenhum módulo no curso #${courseId}.`, '#f97316');
+    } else {
+      vidStatus(`${mods.length} módulo(s), ${pages} página(s) no curso #${courseId}`, '#4ade80');
+      buildVidModules();
+      $('vid-module-section').style.display = 'block';
+    }
+  } catch (err) {
+    vidStatus('✗ ' + err.message, '#f87171');
+  }
+
+  _vidBusy = false;
+  btn.textContent = _vidModules.length ? '🔄  Reler módulos do curso' : '📚  Ler módulos do curso';
+  vidSyncUI();
+}
+
+function buildVidModules() {
+  const list = $('vid-modules-list');
+  list.innerHTML = '';
+  for (const m of _vidModules) {
+    const row = document.createElement('label');
+    row.className = 'bulk-page-item vid-mod-item' + (m.pages.length ? '' : ' empty');
+
+    const cb = document.createElement('input');
+    cb.type    = 'checkbox';
+    cb.id      = 'vid-mod-' + m.id;
+    cb.checked = _vidChecked.has(m.id);
+    if (!m.pages.length) cb.dataset.empty = '1';
+    cb.addEventListener('change', () => {
+      if (cb.checked) _vidChecked.add(m.id); else _vidChecked.delete(m.id);
+      vidDropPreview();
+      vidSyncUI();
+    });
+    row.appendChild(cb);
+
+    const title = document.createElement('span');
+    title.className   = 'bulk-page-title';
+    title.textContent = m.name;
+    row.appendChild(title);
+
+    const count = document.createElement('span');
+    count.className   = 'vid-mod-count';
+    count.textContent = m.pages.length ? `${m.pages.length} pág.` : 'sem páginas';
+    row.appendChild(count);
+
+    list.appendChild(row);
+  }
+  vidSyncUI();
+}
+
+function vidToggleAll() {
+  const withPages = _vidModules.filter(m => m.pages.length);
+  const allOn = withPages.every(m => _vidChecked.has(m.id));
+  _vidChecked = new Set(allOn ? [] : withPages.map(m => m.id));
+  vidDropPreview();
+  buildVidModules();
+}
+
+// Aba do curso dos módulos lidos — trocar de aba no meio não muda o destino.
+async function vidCourseTab() {
+  const tab = await matCanvasTab();
+  if (tab.courseId !== _vidCourseId) {
+    throw new Error(`A aba ativa é do curso #${tab.courseId}, mas os módulos lidos são do curso #${_vidCourseId}. Volte para a aba do curso ou clique em "Reler módulos do curso".`);
+  }
+  return tab;
+}
+
+const vidVideoList = (videos, w, h, applied) => videos.map(v => v.changed
+  ? `${v.label} ${v.size} → ${w}×${h}`
+  : `<span class="vid-ok">${v.label} ${v.size}${applied ? '' : ' (já está)'}</span>`).join(' · ');
+
+function buildVidResults(rows, applied, w, h) {
+  const box = $('vid-results');
+  box.innerHTML = '';
+
+  const changed = rows.filter(r => r.changes > 0 && r.status !== 'error');
+  const videos  = changed.reduce((n, r) => n + r.changes, 0);
+  const errors  = rows.filter(r => r.status === 'error').length;
+  const nothing = rows.length - changed.length - errors;
+
+  const head = document.createElement('div');
+  head.className = 'small';
+  head.style.marginBottom = '6px';
+  const tail = (nothing ? ` ${nothing} página(s) sem nada a mudar.` : '') + (errors ? ` ${errors} com erro.` : '');
+  if (applied) {
+    head.style.color = videos ? '#4ade80' : '#94a3b8';
+    head.textContent = (videos ? `✅ ${videos} vídeo(s) gravado(s) em ${w}×${h}, em ${changed.length} página(s).` : 'Nada foi alterado.') + tail;
+  } else {
+    head.style.color = videos ? '#60a5fa' : '#f97316';
+    head.textContent = (videos
+      ? `Prévia — ${videos} vídeo(s) em ${changed.length} página(s) vão para ${w}×${h}.`
+      : 'Prévia — nenhum vídeo para mudar.') + tail + ' Nada foi gravado ainda.';
+  }
+  box.appendChild(head);
+
+  for (const r of rows) {
+    const row = document.createElement('div');
+    row.className = 'bulk-course-row ' + r.status;
+
+    const h1 = document.createElement('div');
+    h1.className = 'bulk-course-row-head';
+    const icon = { ok: '✅', zero: '—', warn: '⚠', error: '✗' }[r.status] || '—';
+    h1.innerHTML = `<span>${icon}</span><span class="bulk-page-title" title="${clEsc(r.module)}">${clEsc(r.title)}</span>` +
+      (r.changes ? `<span class="bulk-count">${r.changes}×</span>` : '');
+    row.appendChild(h1);
+
+    if (r.videos?.length) {
+      const vl = document.createElement('div');
+      vl.className = 'vid-video-list';
+      vl.innerHTML = vidVideoList(r.videos, w, h, applied);
+      row.appendChild(vl);
+    }
+
+    const note = r.note || (r.status === 'zero' && !r.videos?.length ? 'Sem vídeos nesta página.' : '');
+    if (note) {
+      const n = document.createElement('div');
+      n.className   = 'bulk-course-note';
+      n.textContent = note;
+      row.appendChild(n);
+    }
+    box.appendChild(row);
+  }
+}
+
+async function doVidPreview() {
+  if (_vidBusy) return;
+  const pages = vidSelectedPages();
+  if (!pages.length) { vidStatus('✗ Marque ao menos um módulo com páginas.', '#f87171'); return; }
+
+  let tab;
+  try { tab = await vidCourseTab(); } catch (err) { vidStatus('✗ ' + err.message, '#f87171'); return; }
+
+  const { videoEdits } = window.__svcVideoSize;
+  const courseId = _vidCourseId, w = S.video_width, h = S.video_height;
+  vidDropPreview();
+  const gen = _vidGen;
+  _vidBusy = true;
+  vidSyncUI();
+  vidStatus('');
+  $('btn-vid-preview').innerHTML = '<span class="spinner"></span>Lendo páginas...';
+
+  const rows = [];
+  for (let i = 0; i < pages.length; i++) {
+    vidProgress(`Lendo página ${i + 1} de ${pages.length}...`);
+    const pg  = pages[i];
+    const row = { url: pg.url, title: pg.title, module: pg.module, changes: 0 };
+    try {
+      const got = await vidExec(tab.tabId, courseId, 'get', { url: pg.url });
+      const r   = videoEdits(got.body, w, h);
+      row.changes = r.edits.length;
+      row.videos  = r.videos;
+      row.status  = r.edits.length ? 'ok' : 'zero';
+      // Alguém pode estar com a página aberta no editor: se salvar depois do
+      // lote, a versão dessa pessoa sobrescreve a mudança nesta página.
+      const mins = got.updatedAt ? (Date.now() - new Date(got.updatedAt).getTime()) / 60000 : Infinity;
+      if (r.edits.length && mins < VID_RECENT_MIN) {
+        row.status = 'warn';
+        row.note   = `Editada há ${Math.max(1, Math.round(mins))} min${got.editor ? ' por ' + got.editor : ''}. Se a página ainda estiver aberta no editor e for salva depois, a mudança se perde nela.`;
+      }
+    } catch (err) {
+      row.status = 'error';
+      row.note   = err.message;
+    }
+    rows.push(row);
+  }
+
+  _vidBusy = false;
+  vidProgress('');
+  $('btn-vid-preview').textContent = '👁  Ver prévia';
+  if (gen === _vidGen) {
+    _vidPreview = { courseId, w, h, rows };
+    buildVidResults(rows, false, w, h);
+    const n = rows.filter(r => r.changes > 0 && r.status !== 'error').length;
+    if (n) {
+      $('btn-vid-apply').textContent   = `✅  Aplicar em ${n} página(s)`;
+      $('btn-vid-apply').style.display = 'block';
+    }
+  }
+  vidSyncUI();
+}
+
+// Modal próprio (diálogos nativos não aparecem direito no side panel). Só
+// libera quando o número digitado é o do curso da aba ativa — e esse curso
+// tem que ser o da prévia. Devolve a aba ({ tabId, courseId }) ou null.
+function askVidConfirm(pages, videos, preview) {
+  return new Promise(resolve => {
+    const modal = $('modal-vid-confirm');
+    const input = $('vid-confirm-course');
+    const alertEl = $('vid-confirm-alert');
+    const row = (label, html) => `<div class="bc-row"><span class="bc-label">${label}:</span> ${html}</div>`;
+
+    $('vid-confirm-sub').textContent =
+      `${videos} vídeo(s) em ${pages.length} página(s) vão para ${preview.w}×${preview.h}. Grava direto no Canvas.`;
+    $('vid-confirm-detail').innerHTML =
+      row('Tamanho', `<code>${preview.w}×${preview.h}</code>`) +
+      row('Páginas', pages.map(p => clEsc(p.title)).join(', '));
+    input.value = '';
+    alertEl.style.display = 'none';
+    modal.style.display = 'flex';
+    input.focus();
+
+    const warn = msg => { alertEl.textContent = '⚠ ' + msg; alertEl.style.display = 'block'; input.focus(); input.select(); };
+
+    function finish(value) {
+      modal.style.display = 'none';
+      document.removeEventListener('keydown', onKey);
+      input.onkeydown = null;
+      resolve(value);
+    }
+    function onKey(e) { if (e.key === 'Escape') finish(null); }
+
+    async function tryOk() {
+      const typed = input.value.trim();
+      if (!/^\d+$/.test(typed)) { warn('Digite o número do curso (só os algarismos).'); return; }
+      let tab;
+      try { tab = await matCanvasTab(); } catch (err) { warn(err.message); return; }
+      if (typed !== tab.courseId) {
+        warn(`O número digitado (${typed}) não é o do curso da aba aberta. Confira a aba e o número — nada foi alterado.`);
+        return;
+      }
+      if (tab.courseId !== preview.courseId) {
+        warn(`A aba aberta é de outro curso, não do curso da prévia (#${preview.courseId}). Volte para a aba desse curso ou rode a prévia de novo — nada foi alterado.`);
+        return;
+      }
+      finish(tab);
+    }
+
+    $('btn-vid-confirm-ok').onclick     = tryOk;
+    $('btn-vid-confirm-cancel').onclick = () => finish(null);
+    input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); tryOk(); } };
+    document.addEventListener('keydown', onKey);
+  });
+}
+
+async function doVidApply() {
+  if (_vidBusy) return;
+  const preview = _vidPreview;
+  if (!preview) { vidStatus('✗ Rode a prévia antes de aplicar.', '#f87171'); return; }
+  if (S.video_width !== preview.w || S.video_height !== preview.h) {
+    vidDropPreview();
+    vidStatus('✗ O tamanho das Configurações mudou depois da prévia — rode a prévia de novo.', '#f87171');
+    return;
+  }
+  const targets = preview.rows.filter(r => r.changes > 0 && r.status !== 'error');
+  if (!targets.length) { vidStatus('✗ Nenhuma página com vídeo para mudar.', '#f87171'); return; }
+
+  const tab = await askVidConfirm(targets, targets.reduce((n, r) => n + r.changes, 0), preview);
+  if (!tab) return;
+
+  // Trava antes do primeiro await seguinte — senão um duplo clique grava duas vezes.
+  _vidBusy = true;
+  vidSyncUI();
+  vidStatus('');
+  $('btn-vid-apply').innerHTML = '<span class="spinner"></span>Gravando...';
+
+  const { videoEdits, applyEdits } = window.__svcVideoSize;
+  const { w, h, courseId } = preview;
+  const rows = [];
+  for (let i = 0; i < targets.length; i++) {
+    vidProgress(`Gravando página ${i + 1} de ${targets.length}... mantenha o painel aberto.`);
+    const t   = targets[i];
+    const row = { url: t.url, title: t.title, module: t.module, changes: 0 };
+    try {
+      // Lê de novo: se alguém salvou depois da prévia, vale o conteúdo novo.
+      const got = await vidExec(tab.tabId, courseId, 'get', { url: t.url });
+      const r   = videoEdits(got.body, w, h);
+      row.videos = r.videos;
+      if (!r.edits.length) {
+        row.status = 'zero';
+        row.note   = `Os vídeos já estavam em ${w}×${h} — nada gravado.`;
+      } else {
+        const saved = await vidExec(tab.tabId, courseId, 'put', { url: t.url, body: applyEdits(got.body, r.edits) });
+        row.changes = r.edits.length;
+        // Confere o que o Canvas gravou.
+        const left = saved.body === null ? 0 : videoEdits(saved.body, w, h).edits.length;
+        row.status = left ? 'warn' : 'ok';
+        if (left) row.note = `O Canvas gravou a página, mas ${left} vídeo(s) não ficaram em ${w}×${h}. Confira no editor.`;
+      }
+    } catch (err) {
+      row.status = 'error';
+      row.note   = err.message;
+    }
+    rows.push(row);
+  }
+
+  _vidBusy = false;
+  vidProgress('');
+  _vidPreview = null;
+  $('btn-vid-apply').style.display = 'none';
+  $('btn-vid-apply').textContent   = '✅  Aplicar';
+  buildVidResults(rows, true, w, h);
+  vidSyncUI();
+}
+
 // ── Importar materiais complementares ────────────────────────────────
 // Lê os módulos do curso, sobe os arquivos na ordem escolhida para a pasta do
 // módulo em Arquivos, adiciona cada um como item no fim do módulo e lista os
@@ -4974,6 +5458,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('bulk-toggle-inclusive').addEventListener('change', invalidateBulk);
   $('bulk-courses-input').addEventListener('input', invalidateBulk);
   $('bulk-mode').addEventListener('change', () => { bulkSyncMode(); invalidateBulk(); });
+
+  // ── Vídeos em lote ────────────────────────────────────────────────
+  $('btn-canvas-videos').addEventListener('click', openVideos);
+  $('btn-back-canvas-videos').addEventListener('click', () => show('canvas'));
+  $('btn-vid-modules').addEventListener('click', doVidLoadModules);
+  $('btn-vid-toggle-all').addEventListener('click', vidToggleAll);
+  $('btn-vid-preview').addEventListener('click', doVidPreview);
+  $('btn-vid-apply').addEventListener('click', () => {
+    doVidApply().catch(err => { _vidBusy = false; vidSyncUI(); vidStatus('✗ ' + err.message, '#f87171'); });
+  });
 
   // ── Materiais complementares ──────────────────────────────────────
   $('btn-canvas-materiais').addEventListener('click', openMaterials);

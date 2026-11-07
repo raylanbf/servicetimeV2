@@ -1,11 +1,12 @@
 'use strict';
 
-// Regra do "Redimensionar vídeos da página": os vídeos ficam com a largura e a
-// altura das Configurações (padrão 620×398). O background.js injeta este
-// arquivo (com o editor-access.js) antes do videoResizeMain; roda no mundo
-// MAIN e fica em window.__svcVideoSize. Só os atributos width/height e o
-// width/height do style dos vídeos são reescritos; o resto do texto fica byte
-// a byte igual. Regressão: .claude/skills/h5p-quiz/scripts/test-video.js
+// Regra dos vídeos: ficam com a largura e a altura das Configurações (padrão
+// 620×398). Usada pelo menu "Redimensionar vídeos da página" (o background.js
+// injeta este arquivo, com o editor-access.js, antes do videoResizeMain, no
+// mundo MAIN) e pelo "Vídeos em lote" do painel (o popup.html o carrega). Fica
+// em window.__svcVideoSize. Só os atributos width/height e o width/height do
+// style dos vídeos são reescritos; o resto do texto fica byte a byte igual.
+// Regressão: .claude/skills/h5p-quiz/scripts/test-video.js e test-video-batch.js
 window.__svcVideoSize = (() => {
   // Vídeo é reconhecido pelo player no src — não basta ter tela cheia
   // (allowfullscreen): Genially, H5P, apresentações e formulários também têm.
@@ -45,7 +46,18 @@ window.__svcVideoSize = (() => {
   const declOf   = (style, prop) => style.match(declRe(prop))?.[3].trim();
   const setDecl  = (style, prop, v) => style.replace(declRe(prop), `$1$2${prop}: ${v}`);
 
-  // Ajusta uma tag <iframe ...>; devolve null se não é vídeo com tamanho fixo.
+  // Nome do player, para a prévia do "Vídeos em lote".
+  function labelOf(attrs) {
+    const src = attrs.src?.value || '';
+    if ('data-studio-resizable' in attrs || /instructuremedia/i.test(src)) return 'Studio';
+    if (/youtu/i.test(src)) return 'YouTube';
+    if (/vimeo/i.test(src)) return 'Vimeo';
+    if (/media_(?:attachments|objects)_iframe/i.test(src) || /^video$/i.test(attrs['data-media-type']?.value || '')) return 'Mídia do Canvas';
+    return 'Vídeo';
+  }
+
+  // Ajusta uma tag <iframe ...>. Devolve null se não é vídeo com tamanho
+  // fixo; senão { out: tag nova (igual se já está em w×h), label, size }.
   function patchTag(tag, w, h) {
     const attrs = parseAttrs(tag);
     const video = 'data-studio-resizable' in attrs || /^video$/i.test(attrs['data-media-type']?.value || '') ||
@@ -76,23 +88,33 @@ window.__svcVideoSize = (() => {
     }
     let out = tag;
     for (const e of edits.sort((x, y) => y.from - x.from)) out = out.slice(0, e.from) + e.insert + out.slice(e.to);
-    return out;
+    // Tamanho de antes: o do style, que é o que aparece; senão o do atributo.
+    const num  = v => v === undefined ? '?' : String(parseFloat(v));
+    const size = `${num(sw ?? (aw ? attrs.width.value : undefined))}×${num(sh ?? (ah ? attrs.height.value : undefined))}`;
+    return { out, label: labelOf(attrs), size };
   }
 
   // Edições { from, to, insert } que põem os vídeos do texto em w×h.
-  // found = vídeos com tamanho fixo encontrados (mudando ou não).
+  // found = vídeos com tamanho fixo encontrados (mudando ou não);
+  // videos = [{ label, size, changed }], na ordem da página.
   function videoEdits(html, w, h) {
-    const edits = [];
-    let found = 0;
+    const edits = [], videos = [];
     for (const m of html.matchAll(/<!--[\s\S]*?-->|<iframe\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi)) {
       if (m[0].startsWith('<!--')) continue;
-      const out = patchTag(m[0], w, h);
-      if (out === null) continue;
-      found++;
-      if (out !== m[0]) edits.push({ from: m.index, to: m.index + m[0].length, insert: out });
+      const r = patchTag(m[0], w, h);
+      if (r === null) continue;
+      const changed = r.out !== m[0];
+      videos.push({ label: r.label, size: r.size, changed });
+      if (changed) edits.push({ from: m.index, to: m.index + m[0].length, insert: r.out });
     }
-    return { found, edits };
+    return { found: videos.length, edits, videos };
   }
 
-  return { videoEdits };
+  function applyEdits(text, edits) {
+    let out = text;
+    for (const e of [...edits].reverse()) out = out.slice(0, e.from) + e.insert + out.slice(e.to);
+    return out;
+  }
+
+  return { videoEdits, applyEdits };
 })();

@@ -158,6 +158,16 @@ A função só faz chamadas PUT nos itens que precisam ser alterados, evitando c
 
 > Funciona com a sessão ativa do Canvas — não requer token de API.
 
+### Redimensionar vídeos em lote
+
+O botão **📐 Redimensionar vídeos em lote** passa nas páginas dos módulos escolhidos do curso da aba e põe todos os vídeos (Canvas Studio, YouTube, Vimeo, mídia do Canvas) no tamanho de **Dimensões padrão dos vídeos** das Configurações. Genially, H5P e outros embeds não mudam, nem o resto da página.
+
+1. **Ler módulos do curso** — todos os módulos com páginas já vêm marcados.
+2. **Ver prévia** — mostra os vídeos que vão mudar em cada página (`Studio 700×442 → 620×398`), sem gravar nada, e avisa páginas editadas há menos de 30 minutos.
+3. **Aplicar** — pede para redigitar o número do curso; se não for o da aba aberta (ou se a aba mudou de curso depois da prévia), dá um alerta e não grava.
+
+Cada página é lida de novo na hora de gravar, e só as tags dos vídeos mudam. Entram só as Páginas dos módulos.
+
 ---
 
 ## Teste de Clipboard
