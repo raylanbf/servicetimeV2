@@ -173,6 +173,17 @@ O botão **📐 Redimensionar vídeos em lote** passa nas páginas dos módulos 
 
 Cada página é lida de novo na hora de gravar, e só as tags dos vídeos mudam. Entram só as Páginas dos módulos.
 
+### Inserir vídeos do Studio
+
+O botão **🎬 Inserir vídeos do Studio** põe as videoaulas da coleção do curso no Studio nas páginas já montadas, seguindo uma planilha. Cada vídeo entra no lugar de um parágrafo que só tem texto entre colchetes (`[videoaula]` ou outro), e o título logo acima dele recebe o texto da planilha com a mesma formatação.
+
+1. **Ler vídeos do Studio** — abre o Studio do curso numa aba, lê a coleção inteira (todas as páginas da lista) e volta. Fica guardado em `studioVideos:<curso>`.
+2. **Planilha** — `Página | Título acima do vídeo | Nome do vídeo no Studio`, uma linha por vídeo, na ordem da página. `.xlsx`, `.csv` ou linhas coladas do Excel/Google Sheets. **📥 Baixar exemplo** baixa o modelo `modelos/planilha-videos-studio.xlsx`.
+3. **Ler módulos do curso** — nenhum vem marcado; as páginas só são procuradas nos módulos marcados.
+4. **Ver prévia** e **Aplicar** (redigitando o número do curso).
+
+A página não é gravada se o nome for ambíguo, se um vídeo não estiver na coleção, se houver mais vídeos que espaços ou se faltar o título acima de um espaço. Regra em `video-slots.js`; leitura do Studio em `studio-hook.js` (mundo MAIN, pede as páginas seguintes da lista com os cabeçalhos da própria SPA) e `studio-capture.js`; `.xlsx` lido por `xlsx-read.js`.
+
 ---
 
 ## Teste de Clipboard

@@ -3214,21 +3214,26 @@ async function doVidLoadModules() {
 }
 
 function buildVidModules() {
-  const list = $('vid-modules-list');
+  buildModuleChecks($('vid-modules-list'), _vidModules, _vidChecked, 'vid', () => { vidDropPreview(); vidSyncUI(); });
+  vidSyncUI();
+}
+
+// Lista de módulos com caixa de marcar (Vídeos em lote e Vídeos do Studio).
+// checked é o Set de ids marcados; onChange roda a cada clique.
+function buildModuleChecks(list, modules, checked, prefix, onChange) {
   list.innerHTML = '';
-  for (const m of _vidModules) {
+  for (const m of modules) {
     const row = document.createElement('label');
     row.className = 'bulk-page-item vid-mod-item' + (m.pages.length ? '' : ' empty');
 
     const cb = document.createElement('input');
     cb.type    = 'checkbox';
-    cb.id      = 'vid-mod-' + m.id;
-    cb.checked = _vidChecked.has(m.id);
+    cb.id      = `${prefix}-mod-${m.id}`;
+    cb.checked = checked.has(m.id);
     if (!m.pages.length) cb.dataset.empty = '1';
     cb.addEventListener('change', () => {
-      if (cb.checked) _vidChecked.add(m.id); else _vidChecked.delete(m.id);
-      vidDropPreview();
-      vidSyncUI();
+      if (cb.checked) checked.add(m.id); else checked.delete(m.id);
+      onChange();
     });
     row.appendChild(cb);
 
@@ -3244,7 +3249,6 @@ function buildVidModules() {
 
     list.appendChild(row);
   }
-  vidSyncUI();
 }
 
 function vidToggleAll() {
@@ -3378,21 +3382,27 @@ async function doVidPreview() {
   vidSyncUI();
 }
 
+const confirmRow = (label, html) => `<div class="bc-row"><span class="bc-label">${label}:</span> ${html}</div>`;
+
+function askVidConfirm(pages, videos, preview) {
+  return askCourseConfirm(
+    `${videos} vídeo(s) em ${pages.length} página(s) vão para ${preview.w}×${preview.h}. Grava direto no Canvas.`,
+    confirmRow('Tamanho', `<code>${preview.w}×${preview.h}</code>`) +
+    confirmRow('Páginas', pages.map(p => clEsc(p.title)).join(', ')),
+    preview.courseId);
+}
+
 // Modal próprio (diálogos nativos não aparecem direito no side panel). Só
 // libera quando o número digitado é o do curso da aba ativa — e esse curso
-// tem que ser o da prévia. Devolve a aba ({ tabId, courseId }) ou null.
-function askVidConfirm(pages, videos, preview) {
+// tem que ser o da prévia (courseId). Devolve a aba ({ tabId, courseId }) ou null.
+function askCourseConfirm(sub, detailHtml, courseId) {
   return new Promise(resolve => {
     const modal = $('modal-vid-confirm');
     const input = $('vid-confirm-course');
     const alertEl = $('vid-confirm-alert');
-    const row = (label, html) => `<div class="bc-row"><span class="bc-label">${label}:</span> ${html}</div>`;
 
-    $('vid-confirm-sub').textContent =
-      `${videos} vídeo(s) em ${pages.length} página(s) vão para ${preview.w}×${preview.h}. Grava direto no Canvas.`;
-    $('vid-confirm-detail').innerHTML =
-      row('Tamanho', `<code>${preview.w}×${preview.h}</code>`) +
-      row('Páginas', pages.map(p => clEsc(p.title)).join(', '));
+    $('vid-confirm-sub').textContent = sub;
+    $('vid-confirm-detail').innerHTML = detailHtml;
     input.value = '';
     alertEl.style.display = 'none';
     modal.style.display = 'flex';
@@ -3417,8 +3427,8 @@ function askVidConfirm(pages, videos, preview) {
         warn(`O número digitado (${typed}) não é o do curso da aba aberta. Confira a aba e o número — nada foi alterado.`);
         return;
       }
-      if (tab.courseId !== preview.courseId) {
-        warn(`A aba aberta é de outro curso, não do curso da prévia (#${preview.courseId}). Volte para a aba desse curso ou rode a prévia de novo — nada foi alterado.`);
+      if (tab.courseId !== courseId) {
+        warn(`A aba aberta é de outro curso, não do curso da prévia (#${courseId}). Volte para a aba desse curso ou rode a prévia de novo — nada foi alterado.`);
         return;
       }
       finish(tab);
@@ -3489,6 +3499,484 @@ async function doVidApply() {
   $('btn-vid-apply').textContent   = '✅  Aplicar';
   buildVidResults(rows, true, w, h);
   vidSyncUI();
+}
+
+// ── Inserir vídeos do Studio ──────────────────────────────────────────
+// 1) Lê os vídeos da coleção do curso no Studio: abre o Studio do curso numa
+//    aba; studio-hook.js + studio-capture.js gravam a lista em
+//    studioVideos:<curso> e esta tela acompanha a chave. 2) A planilha (Página ·
+//    Título · Vídeo) vem de .xlsx/.csv ou colada. 3) As páginas são procuradas
+//    só nos módulos marcados (começa sem nenhum: a unidade é escolhida de
+//    propósito). A prévia casa página e vídeo pelo nome e mostra o que entra em
+//    cada espaço [ ... ] (regra em video-slots.js). Gravar segue as travas do
+//    "Vídeos em lote": redigitar o número do curso, ler cada página de novo
+//    (e parar se ela mudou) e conferir o que o Canvas gravou.
+
+const STU_TOOL_ID = 33;      // Studio na conta da PUC: /courses/<id>/external_tools/33
+const STU_WAIT_MS = 45000;   // tempo para o Studio abrir e mandar a lista
+const STU_SETTLE  = 6000;    // lista incompleta parada há tanto tempo: fica com o que veio
+
+let _stuCourseId = null;      // curso dos módulos lidos
+let _stuModules  = [];        // [{ id, name, pages: [{ url, title }] }]
+let _stuChecked  = new Set();
+let _stuRows     = [];        // linhas da planilha com página
+let _stuSheetBad = [];        // linhas sem página: [{ line, msg }]
+let _stuPreview  = null;      // { courseId, w, h, studio, pages }
+let _stuBusy     = false;
+let _stuGen      = 0;         // muda quando algo da prévia muda: prévia em curso é descartada
+let _stuReading  = null;      // leitura do Studio em andamento
+
+function stuStatus(msg, color) {
+  const el = $('stu-status');
+  el.textContent = msg;
+  el.style.color = color || '#94a3b8';
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function stuProgress(msg) {
+  $('stu-progress').textContent   = msg || '';
+  $('stu-progress').style.display = msg ? 'block' : 'none';
+}
+
+async function openStudio() {
+  show('canvas-studio');
+  if (_stuBusy) return;
+  const courseId = await getCanvasCourseId();
+  $('stu-course-label').textContent = courseId ? `curso #${courseId}` : 'nenhum curso nesta aba';
+  if (_stuCourseId && courseId !== _stuCourseId) stuReset();
+  stuRenderStudio(await stuLoadStudio(courseId), courseId);
+  stuSyncUI();
+}
+
+function stuReset() {
+  _stuCourseId = null;
+  _stuModules  = [];
+  _stuChecked  = new Set();
+  stuDropPreview();
+  $('stu-module-section').style.display = 'none';
+  $('btn-stu-modules').textContent = '📚  3. Ler módulos do curso';
+  stuStatus('');
+}
+
+function stuDropPreview() {
+  _stuGen++;
+  _stuPreview = null;
+  $('stu-results').innerHTML = '';
+  $('btn-stu-apply').style.display = 'none';
+}
+
+function stuSyncUI() {
+  const busy = _stuBusy || !!_stuReading;
+  $('btn-stu-read').disabled     = busy;
+  $('btn-stu-file').disabled     = _stuBusy;
+  $('stu-sheet').disabled        = _stuBusy;
+  $('btn-stu-modules').disabled  = _stuBusy;
+  $('btn-stu-preview').disabled  = _stuBusy || !_stuChecked.size;
+  $('btn-stu-apply').disabled    = _stuBusy;
+  $('btn-stu-toggle-all').disabled = _stuBusy;
+  document.querySelectorAll('#stu-modules-list input').forEach(cb => { cb.disabled = _stuBusy || cb.dataset.empty === '1'; });
+  const withPages = _stuModules.filter(m => m.pages.length);
+  $('btn-stu-toggle-all').textContent =
+    withPages.length && withPages.every(m => _stuChecked.has(m.id)) ? 'desmarcar todos' : 'marcar todos';
+}
+
+// ── 1. Vídeos do Studio ──
+async function stuLoadStudio(courseId) {
+  if (!courseId) return null;
+  const key = 'studioVideos:' + courseId;
+  return (await chrome.storage.local.get(key))[key] || null;
+}
+
+function stuAgo(ts) {
+  const min = Math.round((Date.now() - ts) / 60000);
+  if (min < 1) return 'agora';
+  if (min < 60) return `há ${min} min`;
+  if (min < 48 * 60) return `há ${Math.round(min / 60)} h`;
+  return 'em ' + new Date(ts).toLocaleDateString('pt-BR');
+}
+
+function stuRenderStudio(rec, courseId) {
+  const el = $('stu-studio-info');
+  el.style.color = '';
+  if (!courseId) { el.textContent = 'Abra uma aba de um curso no Canvas.'; return; }
+  if (!rec) { el.textContent = 'Ainda não lidos neste curso.'; return; }
+  const n = rec.videos.length;
+  const partial = rec.total != null && n < rec.total;
+  el.textContent = `${n}${partial ? ` de ${rec.total}` : ''} vídeo(s)` +
+    (rec.collectionName ? ` · coleção "${rec.collectionName}"` : '') + ` · lidos ${stuAgo(rec.capturedAt)}` +
+    (partial ? ' — lista incompleta, leia de novo.' : '');
+  el.style.color = partial ? '#f97316' : '#4ade80';
+}
+
+async function doStuRead() {
+  if (_stuBusy || _stuReading) return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const m = (tab?.url || '').match(/^(https:\/\/[^/]+)\/courses\/(\d+)/);
+  if (!m) { stuStatus('✗ Abra uma aba de um curso no Canvas para ler os vídeos do Studio.', '#f87171'); return; }
+  stuStatus('');
+  const r = _stuReading = { courseId: m[2], prevTabId: tab.id, tabId: null, since: Date.now(), got: null, timer: null, settle: null };
+  $('btn-stu-read').innerHTML = '<span class="spinner"></span>Lendo o Studio...';
+  stuSyncUI();
+  try {
+    const studioTab = await chrome.tabs.create({ url: `${m[1]}/courses/${m[2]}/external_tools/${STU_TOOL_ID}`, active: true });
+    r.tabId = studioTab.id;
+    r.timer = setTimeout(stuReadTimeout, STU_WAIT_MS);
+  } catch (err) {
+    _stuReading = null;
+    $('btn-stu-read').textContent = '🎬  Ler vídeos do Studio';
+    stuStatus('✗ Não consegui abrir o Studio: ' + err.message, '#f87171');
+    stuSyncUI();
+  }
+}
+
+// studio-capture.js gravou (ou atualizou) a lista de um curso.
+async function stuOnStudio(courseId, rec) {
+  if (courseId === (await getCanvasCourseId())) stuRenderStudio(rec, courseId);
+  if (!_stuBusy && _stuPreview?.courseId === courseId) stuDropPreview();
+  const r = _stuReading;
+  if (!r || r.courseId !== courseId || !rec || rec.capturedAt < r.since) return;
+  r.got = rec;
+  clearTimeout(r.settle);
+  // Completa: pronto. Senão, as outras páginas da lista ainda podem chegar.
+  r.settle = setTimeout(stuReadDone, rec.total != null && rec.videos.length >= rec.total ? 0 : STU_SETTLE);
+}
+
+function stuReadDone() {
+  const r = _stuReading;
+  if (!r) return;
+  clearTimeout(r.timer);
+  clearTimeout(r.settle);
+  _stuReading = null;
+  const rec = r.got;
+  $('btn-stu-read').textContent = rec ? '🔄  Ler vídeos do Studio de novo' : '🎬  Ler vídeos do Studio';
+  if (rec) {
+    // A aba do Studio foi aberta só para a leitura: fecha e volta para o curso.
+    chrome.tabs.update(r.prevTabId, { active: true }).catch(() => {});
+    if (r.tabId != null) chrome.tabs.remove(r.tabId).catch(() => {});
+    stuRenderStudio(rec, r.courseId);
+    if (rec.total != null && rec.videos.length < rec.total) {
+      stuStatus(`⚠ A coleção tem ${rec.total} vídeos, mas só ${rec.videos.length} foram lidos. Os que faltaram vão aparecer como "não está na coleção do Studio".`, '#f97316');
+    }
+  }
+  stuSyncUI();
+}
+
+function stuReadTimeout() {
+  const r = _stuReading;
+  if (!r) return;
+  if (r.got) { stuReadDone(); return; }
+  clearTimeout(r.settle);
+  _stuReading = null;
+  $('btn-stu-read').textContent = '🎬  Ler vídeos do Studio';
+  stuStatus('✗ O Studio não mandou a lista de vídeos. Na aba do Studio que ficou aberta, confira se a coleção do curso aparece (se pedir login, entre): a leitura acontece sozinha quando a lista carregar. Ou clique de novo em "Ler vídeos do Studio".', '#f87171');
+  stuSyncUI();
+}
+
+// ── 2. Planilha ──
+async function stuOnFile(e) {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    let text;
+    if (/\.xlsx$/i.test(file.name)) {
+      const table = await window.__svcXlsx.readSheet(await file.arrayBuffer());
+      // Vira texto separado por tab — o mesmo de colar —, para dar para conferir e corrigir aqui.
+      text = table.map(r => r.map(c => /[\t\n"]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c).join('\t')).join('\n');
+    } else {
+      text = await file.text();
+    }
+    $('stu-sheet').value = text;
+    stuParseSheet();
+  } catch (err) {
+    stuStatus(`✗ Não consegui ler ${file.name}: ${err.message}`, '#f87171');
+  }
+}
+
+function stuParseSheet() {
+  const { parseTable, sheetRows, groupByPage } = window.__svcVideoSlots;
+  const text = $('stu-sheet').value;
+  const info = $('stu-sheet-info');
+  stuDropPreview();
+  const { rows, problems } = text.trim() ? sheetRows(parseTable(text)) : { rows: [], problems: [] };
+  _stuRows = rows;
+  _stuSheetBad = problems;
+  if (!text.trim()) { info.style.display = 'none'; stuSyncUI(); return; }
+  const noVideo = rows.filter(r => r.problem);
+  let msg = rows.length ? `${rows.length} vídeo(s) em ${groupByPage(rows).length} página(s).` : 'Nenhuma linha com página e vídeo.';
+  const bad = [...problems, ...noVideo.map(r => ({ line: r.line, msg: 'falta o nome do vídeo' }))].sort((a, b) => a.line - b.line);
+  if (bad.length) msg += ' ' + bad.slice(0, 3).map(p => `Linha ${p.line}: ${p.msg}.`).join(' ') + (bad.length > 3 ? ` (+${bad.length - 3})` : '');
+  info.textContent = msg;
+  info.style.color = bad.length || !rows.length ? '#f97316' : '#4ade80';
+  info.style.display = 'block';
+  stuSyncUI();
+}
+
+// ── 3. Módulos ──
+async function doStuLoadModules() {
+  if (_stuBusy) return;
+  const btn = $('btn-stu-modules');
+  _stuBusy = true;
+  stuSyncUI();
+  btn.innerHTML = '<span class="spinner"></span>Lendo módulos...';
+  try {
+    const { tabId, courseId } = await matCanvasTab();
+    const mods = await vidExec(tabId, courseId, 'modules');
+    stuReset();
+    _stuCourseId = courseId;
+    _stuModules  = mods;
+    $('stu-course-label').textContent = `curso #${courseId}`;
+    if (!mods.length) {
+      stuStatus(`Nenhum módulo no curso #${courseId}.`, '#f97316');
+    } else {
+      buildModuleChecks($('stu-modules-list'), _stuModules, _stuChecked, 'stu', () => { stuDropPreview(); stuSyncUI(); });
+      $('stu-module-section').style.display = 'block';
+    }
+  } catch (err) {
+    stuStatus('✗ ' + err.message, '#f87171');
+  }
+  _stuBusy = false;
+  btn.textContent = _stuModules.length ? '🔄  3. Reler módulos do curso' : '📚  3. Ler módulos do curso';
+  stuSyncUI();
+}
+
+function stuToggleAll() {
+  const withPages = _stuModules.filter(m => m.pages.length);
+  const allOn = withPages.every(m => _stuChecked.has(m.id));
+  _stuChecked = new Set(allOn ? [] : withPages.map(m => m.id));
+  stuDropPreview();
+  buildModuleChecks($('stu-modules-list'), _stuModules, _stuChecked, 'stu', () => { stuDropPreview(); stuSyncUI(); });
+  stuSyncUI();
+}
+
+// Páginas dos módulos (marcados ou todos), sem repetir, com o nome do módulo.
+function stuPages(onlyChecked) {
+  const seen = new Set(), out = [];
+  for (const m of _stuModules) {
+    if (onlyChecked && !_stuChecked.has(m.id)) continue;
+    for (const pg of m.pages) {
+      if (seen.has(pg.url)) continue;
+      seen.add(pg.url);
+      out.push({ ...pg, module: m.name });
+    }
+  }
+  return out;
+}
+
+// ── Prévia e gravação ──
+async function doStuPreview() {
+  if (_stuBusy) return;
+  const VS = window.__svcVideoSlots;
+  let tab;
+  try {
+    tab = await matCanvasTab();
+    if (tab.courseId !== _stuCourseId) throw new Error(`A aba ativa é do curso #${tab.courseId}, mas os módulos lidos são do curso #${_stuCourseId}. Volte para a aba do curso ou clique em "Reler módulos do curso".`);
+  } catch (err) { stuStatus('✗ ' + err.message, '#f87171'); return; }
+
+  const courseId = _stuCourseId, w = S.video_width, h = S.video_height;
+  const studio = await stuLoadStudio(courseId);
+  stuParseSheet();
+  if (!studio?.videos?.length) { stuStatus('✗ Leia os vídeos do Studio deste curso primeiro (passo 1).', '#f87171'); return; }
+  if (!_stuRows.length) { stuStatus('✗ Envie ou cole a planilha (passo 2).', '#f87171'); return; }
+  if (_stuSheetBad.length) { stuStatus(`✗ Linha ${_stuSheetBad[0].line} da planilha sem o nome da página. Corrija antes da prévia: não dá para saber em que página esse vídeo entra.`, '#f87171'); return; }
+  if (!_stuChecked.size) { stuStatus('✗ Marque o módulo (ou os módulos) onde estão as páginas.', '#f87171'); return; }
+
+  const checkedPages = stuPages(true), allPages = stuPages(false);
+  const groups = VS.groupByPage(_stuRows);
+  const gen = _stuGen;
+  _stuBusy = true;
+  stuSyncUI();
+  stuStatus('');
+  $('btn-stu-preview').innerHTML = '<span class="spinner"></span>Lendo páginas...';
+
+  const rows = [];
+  for (let i = 0; i < groups.length; i++) {
+    stuProgress(`Lendo página ${i + 1} de ${groups.length}...`);
+    const g = groups[i];
+    const row = { name: g.name, rows: g.rows, page: null, plan: null, status: 'error', note: '' };
+    rows.push(row);
+    const m = VS.matchPage(g.name, checkedPages);
+    if (!m.page) {
+      const other = m.notFound ? VS.matchPage(g.name, allPages) : null;
+      if (other?.page) {
+        row.page   = other.page;
+        row.status = 'skip';
+        row.note   = `Está no módulo "${other.page.module}", que não está marcado — fica como está.`;
+      } else {
+        row.note = m.error;
+      }
+      continue;
+    }
+    row.page = m.page;
+    try {
+      const got  = await vidExec(tab.tabId, courseId, 'get', { url: m.page.url });
+      const plan = VS.planPage({ body: got.body, rows: g.rows, videos: studio.videos, courseId, studioDomain: studio.studioDomain, w, h });
+      row.plan   = plan;
+      row.status = plan.html ? 'ok' : 'error';
+      const notes = [];
+      if (plan.html && plan.left) notes.push(`${plan.left} espaço(s) da página ficam sem vídeo: a planilha tem menos linhas.`);
+      const mins = got.updatedAt ? (Date.now() - new Date(got.updatedAt).getTime()) / 60000 : Infinity;
+      if (plan.html && mins < VID_RECENT_MIN) notes.push(`Editada há ${Math.max(1, Math.round(mins))} min${got.editor ? ' por ' + got.editor : ''}. Se ainda estiver aberta no editor e for salva depois, a mudança se perde.`);
+      if (plan.html && notes.length) row.status = 'warn';
+      row.note = notes.join(' ');
+    } catch (err) {
+      row.note = err.message;
+    }
+  }
+
+  // Dois nomes da planilha caindo na mesma página: não dá para saber a ordem.
+  const byUrl = new Map();
+  for (const r of rows) if (r.page && r.status !== 'skip') byUrl.set(r.page.url, [...(byUrl.get(r.page.url) || []), r]);
+  for (const list of byUrl.values()) {
+    if (list.length < 2) continue;
+    for (const r of list) {
+      r.status = 'error';
+      r.note = `Na planilha, ${list.map(x => `"${x.name}"`).join(' e ')} caem na mesma página. Use um nome só.`;
+    }
+  }
+
+  _stuBusy = false;
+  stuProgress('');
+  $('btn-stu-preview').textContent = '👁  Ver prévia';
+  if (gen === _stuGen) {
+    _stuPreview = { courseId, w, h, studio, pages: rows };
+    buildStuResults(rows, false);
+    const n = rows.filter(stuReady).length;
+    if (n) {
+      $('btn-stu-apply').textContent   = `✅  Aplicar em ${n} página(s)`;
+      $('btn-stu-apply').style.display = 'block';
+    }
+  }
+  stuSyncUI();
+}
+
+const stuReady = r => (r.status === 'ok' || r.status === 'warn') && !!r.plan?.html;
+
+function buildStuResults(rows, applied) {
+  const box = $('stu-results');
+  box.innerHTML = '';
+  const ready  = rows.filter(r => applied ? r.status === 'ok' || r.status === 'warn' : stuReady(r));
+  const videos = ready.reduce((n, r) => n + r.rows.length, 0);
+  const errors = rows.filter(r => r.status === 'error').length;
+  const skips  = rows.filter(r => r.status === 'skip').length;
+
+  const head = document.createElement('div');
+  head.className = 'small';
+  head.style.marginBottom = '6px';
+  const tail = (errors ? ` ${errors} página(s) com problema${applied ? '' : ' não serão gravadas'}.` : '') +
+    (skips ? ` ${skips} fora dos módulos marcados.` : '');
+  if (applied) {
+    head.style.color = videos ? '#4ade80' : '#94a3b8';
+    head.textContent = (videos ? `✅ ${videos} vídeo(s) inseridos em ${ready.length} página(s).` : 'Nada foi gravado.') + tail;
+  } else {
+    head.style.color = videos ? '#60a5fa' : '#f97316';
+    head.textContent = (videos ? `Prévia — ${videos} vídeo(s) em ${ready.length} página(s).` : 'Prévia — nenhuma página pronta.') + tail + ' Nada foi gravado ainda.';
+  }
+  box.appendChild(head);
+
+  for (const r of rows) {
+    const row = document.createElement('div');
+    row.className = 'bulk-course-row ' + (r.status === 'skip' ? 'zero' : r.status);
+
+    const h1 = document.createElement('div');
+    h1.className = 'bulk-course-row-head';
+    const icon = { ok: '✅', warn: '⚠', error: '✗', skip: '—' }[r.status] || '—';
+    const title = r.page ? r.page.title : r.name;
+    h1.innerHTML = `<span>${icon}</span><span class="bulk-page-title" title="${clEsc(r.page?.module || '')}">${clEsc(title)}</span>` +
+      `<span class="bulk-count">${r.rows.length}×</span>`;
+    row.appendChild(h1);
+
+    // Um item por linha da planilha: espaço da página → título · vídeo.
+    if (r.status !== 'skip') {
+      const items = r.plan ? r.plan.items : r.rows.map(x => ({ line: x.line, title: x.title, video: x.video }));
+      const vl = document.createElement('div');
+      vl.className = 'vid-video-list';
+      vl.innerHTML = items.map((it, i) => {
+        if (it.problem) return `<span class="stu-bad">✗ linha ${it.line} · ${clEsc(it.video || '—')}: ${clEsc(it.problem)}</span>`;
+        if (!it.studio) return `linha ${it.line} · ${clEsc(it.video)}`;
+        const where = it.headingText && it.title ? `${clEsc(it.headingText)} → "${clEsc(it.title)}"` : clEsc(it.headingText || it.slotText);
+        return `${i + 1}. ${where} · 🎬 ${clEsc(it.studio.title)}`;
+      }).join('<br>');
+      row.appendChild(vl);
+    }
+
+    if (r.note) {
+      const n = document.createElement('div');
+      n.className   = 'bulk-course-note';
+      n.textContent = r.note;
+      row.appendChild(n);
+    }
+    box.appendChild(row);
+  }
+}
+
+async function doStuApply() {
+  if (_stuBusy) return;
+  const preview = _stuPreview;
+  if (!preview) { stuStatus('✗ Rode a prévia antes de aplicar.', '#f87171'); return; }
+  if (S.video_width !== preview.w || S.video_height !== preview.h) {
+    stuDropPreview();
+    stuStatus('✗ O tamanho das Configurações mudou depois da prévia — rode a prévia de novo.', '#f87171');
+    return;
+  }
+  const targets = preview.pages.filter(stuReady);
+  if (!targets.length) { stuStatus('✗ Nenhuma página pronta para gravar.', '#f87171'); return; }
+  const videos = targets.reduce((n, r) => n + r.rows.length, 0);
+
+  const tab = await askCourseConfirm(
+    `${videos} vídeo(s) do Studio entram em ${targets.length} página(s). Grava direto no Canvas.`,
+    confirmRow('Tamanho', `<code>${preview.w}×${preview.h}</code>`) +
+    confirmRow('Páginas', targets.map(r => clEsc(r.page.title)).join(', ')),
+    preview.courseId);
+  if (!tab) return;
+
+  // Trava antes do primeiro await seguinte — senão um duplo clique grava duas vezes.
+  _stuBusy = true;
+  stuSyncUI();
+  stuStatus('');
+  $('btn-stu-apply').innerHTML = '<span class="spinner"></span>Gravando...';
+
+  const VS = window.__svcVideoSlots;
+  const { courseId, w, h, studio } = preview;
+  const rows = [];
+  for (let i = 0; i < targets.length; i++) {
+    stuProgress(`Gravando página ${i + 1} de ${targets.length}... mantenha o painel aberto.`);
+    const t   = targets[i];
+    const row = { ...t, status: 'error', note: '' };
+    rows.push(row);
+    try {
+      // Lê de novo: se alguém mexeu na página depois da prévia, para nela.
+      const got  = await vidExec(tab.tabId, courseId, 'get', { url: t.page.url });
+      const plan = VS.planPage({ body: got.body, rows: t.rows, videos: studio.videos, courseId, studioDomain: studio.studioDomain, w, h });
+      row.plan = plan;
+      if (!plan.html || plan.slotCount !== t.plan.slotCount) {
+        row.note = `A página mudou depois da prévia (tinha ${t.plan.slotCount} espaço(s) de vídeo, agora tem ${plan.slotCount}). Nada gravado nela — rode a prévia de novo.`;
+        continue;
+      }
+      const saved = await vidExec(tab.tabId, courseId, 'put', { url: t.page.url, body: plan.html });
+      // Confere o que o Canvas gravou: os vídeos estão lá e só sobraram os espaços esperados.
+      const body = saved.body;
+      const missing = body === null ? [] : plan.items.filter(it => !body.includes(it.studio.id));
+      const left    = body === null ? plan.left : VS.findSlots(body).length;
+      if (missing.length || left !== plan.left) {
+        row.status = 'warn';
+        row.note = `O Canvas gravou a página, mas ${missing.length ? `${missing.length} vídeo(s) não aparecem nela` : `sobraram ${left} espaço(s) com colchetes`}. Confira no editor.`;
+      } else {
+        row.status = 'ok';
+        row.note = plan.left ? `${plan.left} espaço(s) ficaram sem vídeo.` : '';
+      }
+    } catch (err) {
+      row.note = err.message;
+    }
+  }
+
+  _stuBusy = false;
+  stuProgress('');
+  _stuPreview = null;
+  $('btn-stu-apply').style.display = 'none';
+  $('btn-stu-apply').textContent   = '✅  Aplicar';
+  buildStuResults(rows, true);
+  stuSyncUI();
 }
 
 // ── Importar materiais complementares ────────────────────────────────
@@ -5472,6 +5960,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-vid-preview').addEventListener('click', doVidPreview);
   $('btn-vid-apply').addEventListener('click', () => {
     doVidApply().catch(err => { _vidBusy = false; vidSyncUI(); vidStatus('✗ ' + err.message, '#f87171'); });
+  });
+
+  // ── Vídeos do Studio ──────────────────────────────────────────────
+  $('btn-canvas-studio').addEventListener('click', openStudio);
+  $('btn-back-canvas-studio').addEventListener('click', () => show('canvas'));
+  $('btn-stu-read').addEventListener('click', doStuRead);
+  $('btn-stu-example').addEventListener('click', () => chrome.downloads.download({
+    url: chrome.runtime.getURL('modelos/planilha-videos-studio.xlsx'),
+    filename: 'Modelo - vídeos do Studio.xlsx',
+  }).catch(err => stuStatus('✗ Não consegui baixar o exemplo: ' + err.message, '#f87171')));
+  $('btn-stu-file').addEventListener('click', () => $('stu-file').click());
+  $('stu-file').addEventListener('change', stuOnFile);
+  $('stu-sheet').addEventListener('input', stuParseSheet);
+  $('btn-stu-modules').addEventListener('click', doStuLoadModules);
+  $('btn-stu-toggle-all').addEventListener('click', stuToggleAll);
+  $('btn-stu-preview').addEventListener('click', doStuPreview);
+  $('btn-stu-apply').addEventListener('click', () => {
+    doStuApply().catch(err => { _stuBusy = false; stuSyncUI(); stuStatus('✗ ' + err.message, '#f87171'); });
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    for (const key of Object.keys(changes)) {
+      if (key.startsWith('studioVideos:')) stuOnStudio(key.slice('studioVideos:'.length), changes[key].newValue);
+    }
   });
 
   // ── Materiais complementares ──────────────────────────────────────

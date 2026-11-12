@@ -127,6 +127,7 @@
   <span class="small muted">Edição em escala</span>
   <button id="btn-canvas-bulk" class="btn btn-surface btn-full mt4">⚡  Editar páginas em massa</button>
   <button id="btn-canvas-videos" class="btn btn-surface btn-full mt4">📐  Redimensionar vídeos em lote</button>
+  <button id="btn-canvas-studio" class="btn btn-surface btn-full mt4">🎬  Inserir vídeos do Studio</button>
   <button id="btn-canvas-thumb" class="btn btn-surface btn-full mt4">🖼  Criar capa de vídeo</button>
   <button id="btn-canvas-materiais" class="btn btn-surface btn-full mt4">📎  Importar materiais complementares</button>
   <button id="btn-canvas-banner" class="btn btn-surface btn-full mt4">🖼  Trocar banner dos cursos</button>
@@ -491,6 +492,61 @@
   <button id="btn-vid-apply" class="btn btn-green btn-full mt6" style="display:none">✅  Aplicar</button>
 </div>
 
+<!-- ── Inserir vídeos do Studio ──────────────────── -->
+<div id="view-canvas-studio" class="view">
+  <div class="view-header">
+    <button id="btn-back-canvas-studio" class="btn-icon">←</button>
+    <span class="view-title">Vídeos do Studio</span>
+  </div>
+
+  <div class="row-between">
+    <span class="field-label" style="margin-bottom:0">Curso</span>
+    <span id="stu-course-label" class="small muted"></span>
+  </div>
+  <span class="small muted" style="display:block;opacity:.6;margin-top:3px">Põe os vídeos da coleção do curso no Studio nas páginas, na ordem da planilha. Cada vídeo entra no lugar de um texto entre colchetes (ex.: [videoaula]) e o título logo acima dele recebe o texto da planilha, com a mesma formatação. Tamanho: o de Configurações › Dimensões padrão dos vídeos.</span>
+
+  <div class="divider"></div>
+  <span class="field-label">1. Vídeos do Studio</span>
+  <div id="stu-studio-info" class="small muted"></div>
+  <button id="btn-stu-read" class="btn btn-surface btn-full mt4">🎬  Ler vídeos do Studio</button>
+
+  <div class="divider"></div>
+  <span class="field-label">2. Planilha</span>
+  <span class="small muted" style="display:block;opacity:.6;margin-bottom:4px">Uma linha por vídeo, na ordem em que eles aparecem na página — a página se repete. Título vazio: o título da página não muda. Exemplo:</span>
+  <table class="stu-example">
+    <thead><tr><th>Página</th><th>Título acima do vídeo</th><th>Nome do vídeo no Studio</th></tr></thead>
+    <tbody>
+      <tr><td>Associações contábeis</td><td>Introdução às associações contábeis</td><td>ASSOC_01</td></tr>
+      <tr><td>Associações contábeis</td><td>Tipos de associação</td><td>ASSOC_02</td></tr>
+      <tr><td>Associações contábeis</td><td>Registro das operações</td><td>ASSOC_03</td></tr>
+      <tr class="alt"><td>Ativo e passivo</td><td>Conceitos de ativo e passivo</td><td>ATIVO_01</td></tr>
+    </tbody>
+  </table>
+  <input id="stu-file" type="file" accept=".xlsx,.csv,.tsv,.txt" style="display:none">
+  <div class="row-btns mt4">
+    <button id="btn-stu-example" class="btn btn-surface" title="Baixa o modelo .xlsx para preencher">📥  Baixar exemplo</button>
+    <button id="btn-stu-file" class="btn btn-surface" title="Envia a planilha preenchida (.xlsx ou .csv)">📄  Enviar planilha</button>
+  </div>
+  <textarea id="stu-sheet" class="comment-textarea mt4" placeholder="…ou cole aqui as linhas copiadas do Excel / Google Sheets" style="min-height:76px;font-size:11px;font-family:'Courier New',monospace;margin-bottom:0;white-space:pre;overflow-x:auto"></textarea>
+  <div id="stu-sheet-info" class="small muted mt4" style="display:none"></div>
+
+  <div class="divider"></div>
+  <button id="btn-stu-modules" class="btn btn-surface btn-full">📚  3. Ler módulos do curso</button>
+  <div id="stu-module-section" style="display:none">
+    <div class="row-between mt6">
+      <span class="field-label" style="margin-bottom:0">Módulos onde procurar as páginas</span>
+      <button id="btn-stu-toggle-all" class="btn-link-sm">marcar todos</button>
+    </div>
+    <div id="stu-modules-list" class="bulk-pages mt4"></div>
+    <button id="btn-stu-preview" class="btn btn-surface btn-full mt6">👁  Ver prévia</button>
+  </div>
+
+  <div id="stu-status" class="small mt4" style="display:none"></div>
+  <div id="stu-progress" class="small muted mt4" style="display:none;text-align:center"></div>
+  <div id="stu-results" class="cl-results mt6"></div>
+  <button id="btn-stu-apply" class="btn btn-green btn-full mt6" style="display:none">✅  Aplicar</button>
+</div>
+
 <!-- ── Importar materiais complementares ─────────── -->
 <div id="view-canvas-materiais" class="view">
   <div class="view-header">
@@ -619,6 +675,8 @@
 </div>
 
 <script src="video-size.js"></script>
+<script src="video-slots.js"></script>
+<script src="xlsx-read.js"></script>
 <script src="popup.js"></script>
 </body>
 </html>

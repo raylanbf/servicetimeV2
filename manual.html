@@ -248,6 +248,7 @@
   <a class="nav-item" href="#canvas">Canvas LMS</a>
   <a class="nav-item" href="#canvas-revisions">↳ Histórico de edições</a>
   <a class="nav-item" href="#canvas-videos-lote">↳ Vídeos em lote</a>
+  <a class="nav-item" href="#canvas-studio-videos">↳ Vídeos do Studio</a>
   <a class="nav-item" href="#canvas-checklist">↳ Checklist de publicação</a>
   <a class="nav-item" href="#canvas-editor">↳ Edição de página</a>
   <a class="nav-item" href="#canvas-editor-dup">　· Duplicar bloco</a>
@@ -475,6 +476,18 @@ PROVA FINAL</pre>
     <div class="callout yellow">
       Para mudar o tamanho, altere em Configurações e rode a prévia de novo. Se o tamanho mudar depois da prévia, o "Aplicar" pede uma prévia nova.
     </div>
+
+    <h3 id="canvas-studio-videos">🎬 Inserir vídeos do Studio</h3>
+    <p>Põe as videoaulas da coleção do curso no Canvas Studio nas páginas já montadas (ex.: páginas de pós com Unidade 1, 2, 3…), seguindo uma planilha. Em cada página, cada vídeo entra no lugar de um parágrafo que só tem um texto entre colchetes — <code>[videoaula]</code> ou qualquer outro — e o título logo acima dele (ex.: "Tema") recebe o texto da planilha, com o mesmo negrito, fonte e cor. Acesse pelo painel em <strong>🎓 Canvas LMS → 🎬 Inserir vídeos do Studio</strong>, com uma aba do curso aberta.</p>
+    <ol>
+      <li><strong>Ler vídeos do Studio:</strong> abre o Studio do curso numa aba, lê a lista de vídeos da coleção do curso (todas as páginas dela), fecha a aba e volta. A lista fica guardada; leia de novo quando subirem vídeos novos.</li>
+      <li><strong>Planilha:</strong> três colunas — <em>Página</em>, <em>Título acima do vídeo</em> e <em>Nome do vídeo no Studio</em> —, uma linha por vídeo, na ordem em que os vídeos aparecem na página (a página se repete). A tela mostra um exemplo, e <strong>📥 Baixar exemplo</strong> baixa um modelo <code>.xlsx</code> pronto para preencher. Envie o <code>.xlsx</code> (vale a aba que estava aberta ao salvar) ou o <code>.csv</code>, ou cole as linhas copiadas do Excel ou do Google Sheets. A linha de cabeçalho é opcional; célula de página vazia (mesclada) vale a página da linha de cima. Título vazio: o título da página não muda.</li>
+      <li><strong>Ler módulos do curso</strong> e marcar a unidade: as páginas são procuradas só nos módulos marcados, e nenhum vem marcado. Página da planilha que está num módulo desmarcado aparece como "fora dos módulos marcados" e não muda.</li>
+      <li><strong>Ver prévia:</strong> mostra, por página, o que entra em cada espaço (<code>1. Tema → "Introdução" · 🎬 ASSOC_01.mp4</code>). Nada é gravado nesse passo.</li>
+      <li><strong>Aplicar:</strong> para confirmar, digite o número do curso da aba aberta.</li>
+    </ol>
+    <p>O nome da página pode ser só o final do título ("Associações contábeis" acha "Unidade 1 - 2. Associações contábeis"). O do vídeo tem que ser igual ao do Studio, sem contar acento, maiúsculas, pontuação e a extensão (<code>ASSOC_01</code> = <code>assoc 01.mp4</code>). Uma página <strong>não é gravada</strong> quando: o nome bate com duas páginas ou com dois vídeos; um vídeo não está na coleção; a planilha tem mais vídeos que espaços; uma linha tem título mas o espaço não tem título logo acima; ou uma linha da página está sem o nome do vídeo. Espaço sobrando só gera aviso e fica com o texto entre colchetes. O marcador do quiz H5P (<code>[iframe - Atividade de Fixação H5P]</code>) nunca é usado.</p>
+    <p>Na hora de gravar, cada página é lida de novo: se o número de espaços mudou depois da prévia, ela não é gravada. Só o parágrafo do espaço e o texto do título mudam; o resto do HTML fica igual. Rodar a mesma planilha de novo não duplica vídeos: os espaços já preenchidos somem da página. Cada página pode voltar à versão anterior pelo histórico de revisões do Canvas.</p>
   </section>
 
   <!-- ── Checklist de publicação ── -->

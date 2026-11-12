@@ -60,6 +60,19 @@
       "world": "MAIN"
     },
     {
+      "matches": ["https://*.instructuremedia.com/*"],
+      "js": ["studio-hook.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://*.instructuremedia.com/*"],
+      "js": ["studio-capture.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
       "matches": ["https://*.h5p.com/lti/*"],
       "js": ["h5p-search.js"],
       "run_at": "document_idle",

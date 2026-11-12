@@ -651,6 +651,14 @@ input[type=text]:focus { border-color: #60a5fa; }
 .vid-mod-count { font-size: 10px; color: #64748b; flex-shrink: 0; }
 .vid-video-list { font-size: 10px; color: #94a3b8; margin-top: 3px; line-height: 1.5; }
 .vid-video-list .vid-ok { color: #64748b; }
+.vid-video-list .stu-bad { color: #f87171; }
+.stu-example { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10px; line-height: 1.3; }
+.stu-example th, .stu-example td { border: 1px solid #3a3a4e; padding: 3px 4px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.stu-example th { background: #2ba588; color: #fff; font-weight: 600; }
+.stu-example th:nth-child(1) { width: 31%; }
+.stu-example th:nth-child(3) { width: 27%; }
+.stu-example td { color: #cbd5e1; }
+.stu-example tr.alt td { background: rgba(43, 165, 136, .12); }
 
 /* ── Materiais complementares ─────────────────────────────────────── */
 .mat-files {
