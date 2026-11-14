@@ -1,7 +1,7 @@
 'use strict';
 
 // Regra dos vídeos: ficam com a largura e a altura das Configurações (padrão
-// 620×398). Usada pelo menu "Redimensionar vídeos da página" (o background.js
+// 700×422). Usada pelo menu "Redimensionar vídeos da página" (o background.js
 // injeta este arquivo, com o editor-access.js, antes do videoResizeMain, no
 // mundo MAIN) e pelo "Vídeos em lote" do painel (o popup.html o carrega). Fica
 // em window.__svcVideoSize. Só os atributos width/height e o width/height do

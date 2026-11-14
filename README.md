@@ -136,7 +136,7 @@ HTML gerado ao colar e visualizar o código no editor:
 
 | Opção | Descrição |
 |---|---|
-| 📐 Redimensionar vídeos da página | Ajusta os vídeos (YouTube, Vimeo, Canvas Studio, mídia do Canvas) às dimensões configuradas (padrão 620×398), no editor visual ou HTML; Genially, H5P e outros embeds ficam como estão |
+| 📐 Redimensionar vídeos da página | Ajusta os vídeos (YouTube, Vimeo, Canvas Studio, mídia do Canvas) às dimensões configuradas (padrão 700×422), no editor visual ou HTML; Genially, H5P e outros embeds ficam como estão |
 | 📐 Redimensionar H5P (largura 100%) | Põe em 100% só o quiz H5P da caixa abaixo da faixa "Atividade de Fixação"; os outros H5P da página ficam como estão |
 | 🔍 Localizar e substituir | Abre painel flutuante para busca e substituição em campos de texto da página |
 
@@ -168,7 +168,7 @@ A função só faz chamadas PUT nos itens que precisam ser alterados, evitando c
 O botão **📐 Redimensionar vídeos em lote** passa nas páginas dos módulos escolhidos do curso da aba e põe todos os vídeos (Canvas Studio, YouTube, Vimeo, mídia do Canvas) no tamanho de **Dimensões padrão dos vídeos** das Configurações. Genially, H5P e outros embeds não mudam, nem o resto da página.
 
 1. **Ler módulos do curso** — todos os módulos com páginas já vêm marcados.
-2. **Ver prévia** — mostra os vídeos que vão mudar em cada página (`Studio 700×442 → 620×398`), sem gravar nada, e avisa páginas editadas há menos de 30 minutos.
+2. **Ver prévia** — mostra os vídeos que vão mudar em cada página (`Studio 620×398 → 700×422`), sem gravar nada, e avisa páginas editadas há menos de 30 minutos.
 3. **Aplicar** — pede para redigitar o número do curso; se não for o da aba aberta (ou se a aba mudou de curso depois da prévia), dá um alerta e não grava.
 
 Cada página é lida de novo na hora de gravar, e só as tags dos vídeos mudam. Entram só as Páginas dos módulos.
@@ -213,7 +213,7 @@ Acessível pelo botão **⚙** no topo do painel.
 
 | Campo | Descrição |
 |---|---|
-| Dimensões dos vídeos | Largura × altura para o redimensionador (padrão: 620×398) |
+| Dimensões dos vídeos | Largura × altura para o redimensionador (padrão: 700×422) |
 
 ### Canvas LMS
 
