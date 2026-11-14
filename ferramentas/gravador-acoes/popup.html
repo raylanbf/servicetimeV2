@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Gravador de Ações</title>
+<style>
+  body { margin: 0; width: 300px; font: 13px/1.4 system-ui, sans-serif; background: #0f172a; color: #e2e8f0; }
+  main { padding: 12px 14px; }
+  h1 { font-size: 14px; margin: 0 0 8px; }
+  .site { color: #94a3b8; word-break: break-all; margin-bottom: 10px; }
+  button { border: 0; border-radius: 6px; padding: 7px 12px; cursor: pointer; font: 600 13px system-ui, sans-serif; color: #fff; }
+  .start { background: #dc2626; width: 100%; }
+  .stop  { background: #334155; width: 100%; }
+  .small { background: #334155; padding: 3px 8px; font-size: 11px; }
+  .hint { color: #94a3b8; font-size: 11px; margin-top: 10px; }
+  ul { list-style: none; padding: 0; margin: 6px 0 0; }
+  li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid #1e293b; word-break: break-all; }
+  h2 { font-size: 12px; color: #94a3b8; margin: 14px 0 0; font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🔴 Gravador de Ações</h1>
+  <div class="site" id="site"></div>
+  <button id="toggle" class="start" hidden></button>
+  <div class="hint" id="hint"></div>
+  <h2 id="others-title" hidden>Gravando também em</h2>
+  <ul id="others"></ul>
+</main>
+<script src="popup.js"></script>
+</body>
+</html>

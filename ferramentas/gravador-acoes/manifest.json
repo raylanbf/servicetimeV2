@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Gravador de Ações",
+  "version": "1.0",
+  "description": "Grava o que um site faz (pedidos, formulários, cliques, janelas) enquanto você o usa, e salva tudo num .json sem senhas nem tokens.",
+  "action": {
+    "default_title": "Gravador de Ações",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["scripting", "tabs"],
+  "host_permissions": ["<all_urls>"]
+}
