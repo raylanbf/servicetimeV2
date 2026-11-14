@@ -184,6 +184,18 @@ O botão **🎬 Inserir vídeos do Studio** põe as videoaulas da coleção do c
 
 A página não é gravada se o nome for ambíguo, se um vídeo não estiver na coleção, se houver mais vídeos que espaços ou se faltar o título acima de um espaço. Regra em `video-slots.js`; leitura do Studio em `studio-hook.js` (mundo MAIN, pede as páginas seguintes da lista com os cabeçalhos da própria SPA) e `studio-capture.js`; `.xlsx` lido por `xlsx-read.js`.
 
+### Pasta H5P
+
+O botão **📁 Pasta H5P**, na página de Módulos ao lado do **+ Módulo**, prepara a UDA no H5P.com (por enquanto em *My Content*), em até três passos escolhidos na confirmação:
+
+1. **Pasta** com o nome da disciplina (editável).
+2. **1 quiz por tópico** — um Multiple Choice para cada página "Tópico N", com o título exato da página, pergunta e alternativas provisórias e "Toolbar Below Content" desmarcado. Um por vez, com pausa entre eles.
+3. **Inserir nas páginas** — cada quiz vai para a caixa abaixo da faixa "Atividade de Fixação" da sua página. Prévia por página (dá para desmarcar e testar numa só) e número do curso redigitado antes de gravar; cada página é lida de novo e conferida depois.
+
+Nada é duplicado nem apagado. O H5P.com não tem API: o `background.js` usa a sessão aberta no Chrome e os mesmos formulários da tela (`h5p-folder.js`; o formulário de criação de quiz é lido no documento offscreen, `offscreen.js`). A regra da caixa é a do botão H5P do editor (`h5p-width.js`), e a inserção em `h5p-insert.js`. Regressão: `.claude/skills/h5p-quiz/scripts/test-h5p-folder.js`.
+
+> Para descobrir como um site faz uma ação (sem API), use o **Gravador de Ações** em `ferramentas/gravador-acoes/` — extensão separada, veja o README da pasta.
+
 ---
 
 ## Teste de Clipboard

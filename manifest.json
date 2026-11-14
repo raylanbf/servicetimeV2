@@ -50,7 +50,7 @@
     },
     {
       "matches": ["https://*.instructure.com/courses/*", "https://canvas.pucminas.br/courses/*"],
-      "js": ["canvas-course-type.js", "canvas-h5p-bridge.js"],
+      "js": ["canvas-course-type.js", "canvas-h5p-bridge.js", "h5p-width.js", "h5p-insert.js", "canvas-h5p-folder.js"],
       "run_at": "document_idle"
     },
     {

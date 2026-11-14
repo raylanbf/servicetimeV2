@@ -1,6 +1,8 @@
 'use strict';
 
-const HEARTBEAT_PERIOD_MIN = 0.5;        // 30s — prova de vida do timer em andamento
+importScripts('h5p-folder.js');   // H5P_FOLDER — botão "📁 Pasta H5P" da página de módulos
+
+const HEARTBEAT_PERIOD_MIN = 0.5;       // 30s — prova de vida do timer em andamento
 const STALE_GAP_MS         = 150 * 1000; // >150s sem prova de vida = navegador fechado / PC desligado ou dormindo
 
 async function applyIcon(state) {
@@ -404,17 +406,22 @@ function justifyText(tabId) {
 
 // Lê o texto da área de transferência pelo documento offscreen (ver
 // offscreen.js). Devolve '' se não conseguir ou se não houver texto.
+// O mesmo documento serve à área de transferência e à leitura de formulários
+// do H5P.com (DOMParser), então é criado com os dois motivos.
+async function ensureOffscreen() {
+  if (await chrome.offscreen.hasDocument()) return;
+  // Pode falhar se outra chamada acabou de criar o documento — nesse caso a
+  // mensagem seguinte chega nele do mesmo jeito.
+  await chrome.offscreen.createDocument({
+    url: 'offscreen.html',
+    reasons: ['CLIPBOARD', 'DOM_PARSER'],
+    justification: 'Ler a fórmula copiada para o editor de equação do Canvas e ler o formulário de criação de quiz do H5P.com',
+  }).catch(() => {});
+}
+
 async function readClipboardText() {
   try {
-    if (!(await chrome.offscreen.hasDocument())) {
-      // Pode falhar se outra chamada acabou de criar o documento — nesse
-      // caso a mensagem abaixo chega nele do mesmo jeito.
-      await chrome.offscreen.createDocument({
-        url: 'offscreen.html',
-        reasons: ['CLIPBOARD'],
-        justification: 'Ler a fórmula copiada para colar no editor de equação do Canvas',
-      }).catch(() => {});
-    }
+    await ensureOffscreen();
     return (await chrome.runtime.sendMessage({ action: 'read-clipboard' })) || '';
   } catch (e) {
     console.warn('Não foi possível ler a área de transferência:', e);
@@ -1420,6 +1427,28 @@ function addPeriods(tabId, frameId, selectionText) {
     args: [normalized, processed],
   });
 }
+
+// ── Pasta e quizzes no H5P.com (botão "📁 Pasta H5P" da página de módulos) ─
+// Pelo service worker: com host_permissions não há CORS e os cookies do
+// H5P.com (samesite=none) vão junto. A lógica (listar, criar pasta, criar
+// quiz) fica no h5p-folder.js; a página do Canvas pede um passo por vez.
+// Quizzes: o formulário de criação do H5P.com é lido no documento offscreen
+// (DOMParser + FormData), para ir com as mesmas opções padrão da tela.
+async function parseFormOffscreen(html, formId) {
+  await ensureOffscreen();
+  return chrome.runtime.sendMessage({ action: 'parse-form', html, formId });
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  const fetchFn = fetch.bind(globalThis);
+  let job;
+  if (msg?.action === 'h5p-create-folder') job = H5P_FOLDER.create(fetchFn, { title: msg.title, parent: msg.parent || '' });
+  else if (msg?.action === 'h5p-create-quiz') job = H5P_FOLDER.createQuiz(fetchFn, parseFormOffscreen, { title: msg.title, parent: msg.parent });
+  else if (msg?.action === 'h5p-list') job = H5P_FOLDER.list(fetchFn, msg.parent || '').then(({ items }) => ({ status: 'ok', items }));
+  else return;
+  job.then(sendResponse, e => sendResponse({ status: 'error', code: e.code || 'error', message: e.message || String(e) }));
+  return true;   // resposta assíncrona
+});
 
 // ── Upload delegado pelo popup ────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender) => {

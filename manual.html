@@ -249,6 +249,7 @@
   <a class="nav-item" href="#canvas-revisions">↳ Histórico de edições</a>
   <a class="nav-item" href="#canvas-videos-lote">↳ Vídeos em lote</a>
   <a class="nav-item" href="#canvas-studio-videos">↳ Vídeos do Studio</a>
+  <a class="nav-item" href="#canvas-h5p-pasta">↳ Pasta H5P</a>
   <a class="nav-item" href="#canvas-checklist">↳ Checklist de publicação</a>
   <a class="nav-item" href="#canvas-editor">↳ Edição de página</a>
   <a class="nav-item" href="#canvas-editor-dup">　· Duplicar bloco</a>
@@ -488,6 +489,18 @@ PROVA FINAL</pre>
     </ol>
     <p>O nome da página pode ser só o final do título ("Associações contábeis" acha "Unidade 1 - 2. Associações contábeis"). O do vídeo tem que ser igual ao do Studio, sem contar acento, maiúsculas, pontuação e a extensão (<code>ASSOC_01</code> = <code>assoc 01.mp4</code>). Uma página <strong>não é gravada</strong> quando: o nome bate com duas páginas ou com dois vídeos; um vídeo não está na coleção; a planilha tem mais vídeos que espaços; uma linha tem título mas o espaço não tem título logo acima; ou uma linha da página está sem o nome do vídeo. Espaço sobrando só gera aviso e fica com o texto entre colchetes. O marcador do quiz H5P (<code>[iframe - Atividade de Fixação H5P]</code>) nunca é usado.</p>
     <p>Na hora de gravar, cada página é lida de novo: se o número de espaços mudou depois da prévia, ela não é gravada. Só o parágrafo do espaço e o texto do título mudam; o resto do HTML fica igual. Rodar a mesma planilha de novo não duplica vídeos: os espaços já preenchidos somem da página. Cada página pode voltar à versão anterior pelo histórico de revisões do Canvas.</p>
+
+    <h3 id="canvas-h5p-pasta">📁 Pasta H5P</h3>
+    <p>Botão na página de <strong>Módulos</strong> do curso, ao lado do <strong>+ Módulo</strong>. Prepara a UDA no H5P.com em até três passos, escolhidos na confirmação:</p>
+    <ol>
+      <li><strong>Pasta:</strong> cria no H5P.com (por enquanto em <em>My Content</em>) uma pasta com o nome da disciplina. O nome vem do Canvas e pode ser editado antes de criar.</li>
+      <li><strong>1 quiz por tópico:</strong> dentro da pasta, um <em>Multiple Choice</em> para cada página "Tópico N" dos módulos, com o título exato da página — o mesmo que o botão H5P do editor procura. Pergunta e alternativas vão provisórias ("Pergunta", "Alternativa A–D"), para a equipe trocar no editor do H5P.com; "Toolbar Below Content" vem desmarcado. Os quizzes são criados um por vez.</li>
+      <li><strong>Inserir nas páginas:</strong> põe cada quiz na sua página, na caixa logo abaixo da faixa "Atividade de Fixação Não Pontuada" (no lugar do marcador <code>[iframe - Atividade de Fixação H5P]</code> ou de outro H5P que esteja lá). Antes de gravar, mostra uma prévia por página — dá para desmarcar páginas e testar numa só — e pede o número do curso. Página com outro conteúdo na caixa, sem a faixa ou sem quiz de mesmo título na pasta fica de fora, com o motivo.</li>
+    </ol>
+    <p>Nada é duplicado nem apagado: pasta, quiz ou página que já estão certos ficam como estão, então dá para clicar de novo para completar o que faltou. O H5P.com é acessado com a sessão aberta no Chrome (sem abrir aba); se não houver sessão, o aviso pede para entrar. Só a caixa do quiz muda em cada página; o resto do HTML fica igual, e cada página pode voltar à versão anterior pelo histórico de revisões do Canvas.</p>
+    <div class="callout yellow">
+      Depois de inserir, abra uma página em <strong>Ver como aluno</strong> e confira se o quiz carrega. Como o quiz é ligado à página pelo id, o que a equipe mudar nele no H5P.com aparece na página sem mexer no Canvas.
+    </div>
   </section>
 
   <!-- ── Checklist de publicação ── -->
