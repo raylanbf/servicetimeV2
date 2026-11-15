@@ -4638,6 +4638,403 @@ async function doMatImport() {
   showMatResult(files, prep, notas);
 }
 
+// ── Analisar disciplina ──────────────────────────────────────────────
+// Diagnóstico da disciplina aberta: sincronização das tarefas com o SIS e,
+// no boletim, notas vazias, zeros suspeitos e notas acima do máximo. Somente
+// consulta — só faz GET na API do Canvas, pela sessão da aba. Portado da
+// extensão Analisador de Disciplina (avaGraducao).
+
+const AN_MAX_PAGES = 50;   // segurança: até 5000 itens por listagem
+let _anBusy = false;
+
+// Roda na aba do Canvas: um GET same-origin. Em 403 de rate limit, espera e
+// tenta de novo (as chamadas já são sequenciais, uma página por vez).
+function analiseFetchPage(url) {
+  return (async () => {
+    try {
+      for (let attempt = 0; ; attempt++) {
+        const res  = await fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } });
+        const text = await res.text();
+        if (res.status === 403 && /rate limit/i.test(text) && attempt < 2) {
+          await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+          continue;
+        }
+        return { ok: res.ok, status: res.status, text, link: res.headers.get('Link') || '' };
+      }
+    } catch (err) {
+      return { ok: false, status: 0, text: err.message, link: '' };
+    }
+  })();
+}
+
+async function anGet(tabId, url) {
+  const res = await chrome.scripting.executeScript({ target: { tabId }, func: analiseFetchPage, args: [url] });
+  const out = res[0]?.result;
+  if (!out) throw new Error('a aba do Canvas não respondeu');
+  if (!out.ok) {
+    let msg = out.text || '';
+    try { msg = JSON.parse(msg).errors?.[0]?.message || msg; } catch { /* não é JSON */ }
+    throw new Error(`HTTP ${out.status}${msg ? ' — ' + msg.slice(0, 160) : ''}`);
+  }
+  return out;
+}
+
+// Todas as páginas de uma listagem, seguindo rel="next" do header Link.
+async function anGetAll(tabId, url, onProgress) {
+  const all = [];
+  let next = url;
+  for (let i = 0; next && i < AN_MAX_PAGES; i++) {
+    const res = await anGet(tabId, next);
+    all.push(...JSON.parse(res.text));
+    if (onProgress) onProgress(all.length);
+    const m = res.link.match(/<([^>]+)>;\s*rel="next"/);
+    next = m ? m[1] : null;
+  }
+  return all;
+}
+
+// ── Análises (funções puras) ──
+
+const anPts = a => a.points_possible ?? 0;
+
+// Toda tarefa com pontos deveria estar com "Sincronizar com o SIS" ligado.
+function anSisSync(assignments) {
+  const active     = assignments.filter(a => a.workflow_state !== 'deleted');
+  const withPoints = active.filter(a => anPts(a) > 0);
+  const ok         = withPoints.filter(a => a.post_to_sis === true);
+  const missing    = withPoints.filter(a => a.post_to_sis !== true);
+  const sum        = list => list.reduce((n, a) => n + anPts(a), 0);
+  return {
+    ok,
+    missing,
+    zeroPoints:    active.filter(a => !(anPts(a) > 0)),
+    total:         active.length,
+    okPoints:      sum(ok),
+    missingPoints: sum(missing),
+  };
+}
+
+const anStudentName = s => s.user?.name ?? `Aluno #${s.user_id}`;
+
+// Agrupa por tarefa, com as de mais alunos primeiro.
+function anGroupByAssignment(byId, sortStudents) {
+  return [...byId.values()]
+    .filter(e => e.students.length > 0)
+    .map(e => ({
+      name:     e.assignment.name,
+      url:      e.assignment.html_url,
+      students: e.students.sort(sortStudents),
+    }))
+    .sort((a, b) => b.students.length - a.students.length);
+}
+
+// Nas tarefas com SIS, todo aluno precisa de nota (pode ser 0, não vazia).
+// Ficam de fora: reavaliação (nem todos fazem), colunas em % e sem pontuação.
+function anMissingGrades(subs, assignments) {
+  const ignored = [];
+  const byId    = new Map();
+  for (const a of assignments) {
+    if (a.workflow_state === 'deleted' || !a.published || a.post_to_sis !== true) continue;
+    const plain = a.name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+    const reason =
+      plain.includes('reavaliacao')  ? 'reavaliação — nem todos fazem' :
+      a.grading_type === 'percent'   ? 'coluna calculada em %' :
+      anPts(a) <= 0                  ? 'sem pontuação máxima' : null;
+    if (reason) ignored.push({ name: a.name, reason });
+    else byId.set(a.id, { assignment: a, students: [] });
+  }
+  for (const s of subs) {
+    const entry = byId.get(s.assignment_id);
+    if (!entry || s.excused || s.score != null) continue;
+    entry.students.push(anStudentName(s));
+  }
+  const items = anGroupByAssignment(byId, (a, b) => a.localeCompare(b, 'pt-BR'));
+  return { items, ignored, checked: byId.size, total: items.reduce((n, i) => n + i.students.length, 0) };
+}
+
+// Zeros que não vieram de um lançamento manual publicado costumam ser
+// ignorados pelo SIS; redigitar o 0 no boletim regulariza.
+function anSuspiciousZeros(subs, assignments) {
+  const byId = new Map(
+    assignments
+      .filter(a => a.workflow_state !== 'deleted' && a.published && a.post_to_sis === true
+        && a.grading_type !== 'percent' && anPts(a) > 0)
+      .map(a => [a.id, { assignment: a, students: [] }]));
+  let zerosChecked = 0;
+  for (const s of subs) {
+    const entry = byId.get(s.assignment_id);
+    if (!entry || s.excused || s.score !== 0) continue;
+    zerosChecked++;
+    const signals = [];
+    if (s.late_policy_status === 'missing')      signals.push('zero automático da política de entregas faltantes');
+    if (s.workflow_state !== 'graded')           signals.push('não marcada como avaliada');
+    if (s.grader_id == null || s.grader_id < 0)  signals.push('sem avaliador humano (lançamento automático)');
+    if (s.posted_at == null)                     signals.push('nota oculta (não publicada)');
+    if (signals.length) entry.students.push({ name: anStudentName(s), signals });
+  }
+  const items = anGroupByAssignment(byId, (a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  return { items, zerosChecked, total: items.reduce((n, i) => n + i.students.length, 0) };
+}
+
+function anScoreOverMax(subs, assignments) {
+  const byId = new Map(assignments.map(a => [a.id, a]));
+  const over = [];
+  let checked = 0;
+  for (const s of subs) {
+    if (s.score == null || s.excused) continue;
+    const a = byId.get(s.assignment_id);
+    if (!a || a.workflow_state === 'deleted') continue;
+    const max = anPts(a);
+    if (max <= 0) continue;   // sem máximo real (ex.: coluna calculada em %)
+    checked++;
+    if (s.score > max) over.push({ student: anStudentName(s), name: a.name, url: a.html_url, score: s.score, max });
+  }
+  over.sort((x, y) => (y.score - y.max) - (x.score - x.max));
+  return { over, checked };
+}
+
+// ── Tela ──
+
+function anFmtPoints(p) {
+  if (p == null) return '—';
+  return Number.isInteger(p) ? String(p) : p.toFixed(2).replace('.', ',');
+}
+
+const anPlural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+function anEl(tag, className, text) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (text != null) el.textContent = text;
+  return el;
+}
+
+function anLink(text, url, className) {
+  const a = anEl('a', className, text);
+  a.href   = url;
+  a.target = '_blank';
+  a.rel    = 'noreferrer';
+  a.title  = text;
+  return a;
+}
+
+function anStatus(msg, color) {
+  const el = $('an-status');
+  el.textContent   = msg;
+  el.style.color   = color || '#94a3b8';
+  el.style.display = msg ? 'block' : 'none';
+}
+
+// Cada análise tem um cartão fixo: rodar de novo troca o conteúdo no lugar.
+function anCard(id, title, subtitle) {
+  let card = document.getElementById(id);
+  if (!card) {
+    card = anEl('div', 'an-card');
+    card.id = id;
+    $('an-results').appendChild(card);
+  }
+  card.innerHTML = '';
+  card.appendChild(anEl('div', 'an-card-title', title));
+  card.appendChild(anEl('div', 'an-card-sub', subtitle));
+  return card;
+}
+
+function anSection(parent, title, count, tone, open) {
+  const det = anEl('details', 'an-section');
+  det.open = !!open;
+  const sum = anEl('summary');
+  sum.appendChild(anEl('span', 'an-section-title', title));
+  sum.appendChild(anEl('span', 'an-badge ' + tone, String(count)));
+  det.appendChild(sum);
+  const body = anEl('div', 'an-section-body');
+  det.appendChild(body);
+  parent.appendChild(det);
+  return body;
+}
+
+function anAssignmentRow(a) {
+  const row = anEl('div', 'an-item');
+  row.appendChild(anLink(a.name, a.html_url, 'an-item-name'));
+  const due = a.due_at
+    ? new Date(a.due_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+    : 'sem prazo';
+  row.appendChild(anEl('div', 'an-item-sub',
+    `${anFmtPoints(a.points_possible)} pts · ${due}${a.published ? '' : ' · não publicada'}`));
+  return row;
+}
+
+function anRenderSis(r) {
+  const card = anCard('an-card-sis', 'Sincronização com o SIS',
+    'Tarefas com pontuação devem estar com "Sincronizar com o SIS" habilitado.');
+  const stats = anEl('div', 'an-stats');
+  for (const [n, label, tone] of [[r.total, 'tarefas', ''], [r.ok.length, 'com SIS', 'green'], [r.missing.length, 'sem SIS', 'red']]) {
+    const box = anEl('div', 'an-stat ' + tone);
+    box.appendChild(anEl('b', '', String(n)));
+    box.appendChild(anEl('span', '', label));
+    stats.appendChild(box);
+  }
+  card.appendChild(stats);
+  card.appendChild(anEl('div', 'an-msg',
+    `Pontos das tarefas sincronizadas: ${anFmtPoints(r.okPoints)}`
+    + (r.missingPoints > 0 ? ` · fora do SIS: ${anFmtPoints(r.missingPoints)} pts` : '')));
+  if (!r.missing.length) {
+    card.appendChild(anEl('div', 'an-msg green', '✓ Todas as tarefas com pontos estão sincronizadas com o SIS.'));
+  } else {
+    const body = anSection(card, 'Com pontos, sem SIS', r.missing.length, 'red', true);
+    r.missing.forEach(a => body.appendChild(anAssignmentRow(a)));
+  }
+  const okBody = anSection(card, 'Com pontos e SIS ok', r.ok.length, 'green');
+  r.ok.forEach(a => okBody.appendChild(anAssignmentRow(a)));
+  const zeroBody = anSection(card, 'Sem pontuação (SIS não se aplica)', r.zeroPoints.length, 'gray');
+  r.zeroPoints.forEach(a => zeroBody.appendChild(anAssignmentRow(a)));
+}
+
+// Uma seção por tarefa, com o link dela e a lista de alunos.
+function anRenderByAssignment(card, items, studentRow) {
+  for (const item of items) {
+    const body = anSection(card, item.name, item.students.length, 'red');
+    const box  = anEl('div', 'an-item');
+    box.appendChild(anLink('Abrir tarefa no Canvas ↗', item.url, 'an-open'));
+    item.students.forEach(st => studentRow(box, st));
+    body.appendChild(box);
+  }
+}
+
+function anRenderMissing(r) {
+  const card = anCard('an-card-missing', 'Fechamento de diário — notas vazias',
+    'Nas tarefas com SIS habilitado, todo aluno precisa ter nota (pode ser 0, não pode ficar vazia).');
+  if (r.ignored.length) {
+    const box = anEl('div', 'an-msg');
+    box.appendChild(anEl('b', '', 'Fora da verificação:'));
+    r.ignored.forEach(ig => box.appendChild(anEl('div', '', `• ${ig.name} (${ig.reason})`)));
+    card.appendChild(box);
+  }
+  if (!r.total) {
+    card.appendChild(anEl('div', 'an-msg green',
+      `✓ Nenhuma nota vazia nas ${anPlural(r.checked, 'tarefa', 'tarefas')} com SIS — diário pronto para fechar.`));
+    return;
+  }
+  card.appendChild(anEl('div', 'an-msg red',
+    `⚠ ${anPlural(r.total, 'nota vazia', 'notas vazias')} em ${anPlural(r.items.length, 'tarefa', 'tarefas')} com SIS.`));
+  anRenderByAssignment(card, r.items, (box, name) => box.appendChild(anEl('div', 'an-student', '• ' + name)));
+}
+
+function anRenderZeros(r) {
+  const card = anCard('an-card-zeros', 'Zeros suspeitos — podem travar a sincronização',
+    'Zeros aplicados automaticamente, ocultos ou não avaliados costumam ser ignorados pelo SIS. Redigitar o 0 no boletim regulariza.');
+  const checked = anPlural(r.zerosChecked, 'zero verificado', 'zeros verificados');
+  if (!r.total) {
+    card.appendChild(anEl('div', 'an-msg green', `✓ Nenhum zero suspeito (${checked} nas tarefas com SIS).`));
+    return;
+  }
+  card.appendChild(anEl('div', 'an-msg red',
+    `⚠ ${anPlural(r.total, 'zero suspeito', 'zeros suspeitos')} em ${anPlural(r.items.length, 'tarefa', 'tarefas')} (${checked}).`));
+  anRenderByAssignment(card, r.items, (box, st) => {
+    box.appendChild(anEl('div', 'an-student', '• ' + st.name));
+    box.appendChild(anEl('div', 'an-item-sub an-signals', st.signals.join(' · ')));
+  });
+}
+
+function anRenderOverMax(r) {
+  const card = anCard('an-card-over', 'Notas acima do máximo',
+    'Notas do boletim maiores que a pontuação máxima da tarefa.');
+  if (!r.over.length) {
+    card.appendChild(anEl('div', 'an-msg green', `✓ Nenhuma nota acima do máximo (${r.checked} notas verificadas).`));
+    return;
+  }
+  card.appendChild(anEl('div', 'an-msg red',
+    `⚠ ${anPlural(r.over.length, 'nota acima', 'notas acima')} do máximo (${r.checked} verificadas).`));
+  for (const item of r.over) {
+    const row = anEl('div', 'an-item');
+    row.appendChild(anEl('div', 'an-student', item.student));
+    row.appendChild(anLink(item.name, item.url, 'an-item-name'));
+    row.appendChild(anEl('div', 'an-item-sub',
+      `nota ${anFmtPoints(item.score)} de no máximo ${anFmtPoints(item.max)}`));
+    card.appendChild(row);
+  }
+}
+
+async function openAnalise() {
+  show('canvas-analise');
+  if (_anBusy) return;
+  const courseId = await getCanvasCourseId();
+  const label    = $('an-course-label');
+  label.textContent = courseId ? `curso #${courseId}` : 'nenhum curso nesta aba';
+  // Mudou de disciplina: o diagnóstico exibido era da anterior.
+  if (label.dataset.courseId !== (courseId || '')) {
+    label.dataset.courseId = courseId || '';
+    $('an-results').innerHTML = '';
+    anStatus('');
+  }
+}
+
+// Roda uma verificação com a aba e o curso atuais, travando os botões.
+async function anRun(btnId, work) {
+  if (_anBusy) return;
+  const btn   = $(btnId);
+  const label = btn.textContent;
+  try {
+    const [tab]    = await chrome.tabs.query({ active: true, currentWindow: true });
+    const courseId = (tab?.url || '').match(/\/courses\/(\d+)/)?.[1];
+    if (!courseId) {
+      anStatus('✗ Abra a página de uma disciplina no Canvas (endereço com /courses/…).', '#f87171');
+      return;
+    }
+    _anBusy = true;
+    $('btn-an-tarefas').disabled = $('btn-an-boletim').disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Verificando...';
+    const elLabel = $('an-course-label');
+    if (elLabel.dataset.courseId !== courseId) $('an-results').innerHTML = '';
+    elLabel.dataset.courseId = courseId;
+    elLabel.textContent      = `curso #${courseId}`;
+
+    await work(tab.id, new URL(tab.url).origin + `/api/v1/courses/${courseId}`);
+    anStatus('');
+  } catch (err) {
+    anStatus('✗ ' + err.message, '#f87171');
+  } finally {
+    _anBusy = false;
+    $('btn-an-tarefas').disabled = $('btn-an-boletim').disabled = false;
+    btn.textContent = label;
+  }
+}
+
+function doAnaliseTarefas() {
+  return anRun('btn-an-tarefas', async (tabId, base) => {
+    anStatus('Carregando tarefas...');
+    anRenderSis(anSisSync(await anGetAll(tabId, `${base}/assignments?per_page=100`)));
+  });
+}
+
+function doAnaliseBoletim() {
+  return anRun('btn-an-boletim', async (tabId, base) => {
+    anStatus('Carregando tarefas...');
+    const assignments = await anGetAll(tabId, `${base}/assignments?per_page=100`);
+
+    // enrollment_type=student tira o aluno teste; active tira os inativos —
+    // igual ao boletim da tela.
+    anStatus('Carregando alunos ativos...');
+    const students = await anGetAll(tabId,
+      `${base}/users?enrollment_type[]=student&enrollment_state[]=active&per_page=100`);
+
+    anStatus('Carregando notas do boletim...');
+    let subs;
+    try {
+      subs = await anGetAll(tabId,
+        `${base}/students/submissions?student_ids[]=all&include[]=user&enrollment_state=active&per_page=100`,
+        n => anStatus(`Carregando notas do boletim... ${n} notas`));
+    } catch (err) {
+      throw new Error(`Não foi possível ler o boletim (é preciso estar como professor na disciplina). ${err.message}`);
+    }
+
+    const activeIds  = new Set(students.map(s => s.id));
+    const activeSubs = subs.filter(s => activeIds.has(s.user_id));
+    anRenderMissing(anMissingGrades(activeSubs, assignments));
+    anRenderZeros(anSuspiciousZeros(activeSubs, assignments));
+    anRenderOverMax(anScoreOverMax(activeSubs, assignments));
+  });
+}
+
 // ── Trocar banner dos cursos ─────────────────────────────────────────
 // Procura as imagens de banner em Arquivos › Layout de cada curso e sobe a
 // nova imagem por cima delas, com o MESMO nome e on_duplicate "overwrite": o
@@ -6043,6 +6440,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (_matPhase === 'done') matNewBatch();
     doMatImport();
   });
+
+  // ── Analisar disciplina ───────────────────────────────────────────
+  $('btn-canvas-analise').addEventListener('click', openAnalise);
+  $('btn-back-canvas-analise').addEventListener('click', () => show('canvas'));
+  $('btn-an-tarefas').addEventListener('click', doAnaliseTarefas);
+  $('btn-an-boletim').addEventListener('click', doAnaliseBoletim);
 
   // ── Trocar banner ─────────────────────────────────────────────────
   $('btn-canvas-banner').addEventListener('click', openBanner);

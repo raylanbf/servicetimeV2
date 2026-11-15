@@ -112,6 +112,7 @@
   </div>
   <button id="btn-canvas-revisions" class="btn btn-surface btn-full mt4">👥  Ver histórico de edições</button>
   <button id="btn-canvas-checklist" class="btn btn-surface btn-full mt4">📋  Checklist de publicação</button>
+  <button id="btn-canvas-analise" class="btn btn-surface btn-full mt4">🩺  Analisar disciplina</button>
 
   <div class="divider"></div>
   <span class="small muted">Edição de páginas</span>
@@ -597,6 +598,34 @@
     <button id="btn-mat-import" class="btn btn-green btn-full mt6" disabled>⬆  Importar materiais</button>
     <div id="mat-result" class="mt6" style="display:none"></div>
   </div>
+</div>
+
+<!-- ── Analisar disciplina ───────────────────────── -->
+<div id="view-canvas-analise" class="view">
+  <div class="view-header">
+    <button id="btn-back-canvas-analise" class="btn-icon">←</button>
+    <span class="view-title">Analisar disciplina</span>
+    <span id="an-course-label" class="small muted" style="margin-left:auto"></span>
+  </div>
+
+  <span class="small muted" style="display:block;opacity:.6">Diagnóstico da disciplina aberta na aba: sincronização das tarefas com o SIS e lançamento de notas no boletim. Somente consulta — nada é alterado no Canvas.</span>
+
+  <div class="row-btns mt6" style="gap:4px">
+    <button id="btn-an-tarefas" class="btn btn-surface" style="flex:1">📝  Verificar tarefas</button>
+    <button id="btn-an-boletim" class="btn btn-surface" style="flex:1">📊  Verificar boletim</button>
+  </div>
+  <div id="an-status" class="small mt4" style="display:none"></div>
+
+  <div id="an-results" class="cl-results mt6"></div>
+
+  <details class="an-manual mt6">
+    <summary>? Como funciona</summary>
+    <p><b>Verificar tarefas</b> — lista as tarefas com pontuação que estão sem "Sincronizar com o SIS" (essas notas não chegam ao SIS) e soma os pontos das sincronizadas, para conferir se o total fecha.</p>
+    <p><b>Verificar boletim</b> — exige estar como professor. Lê as notas dos alunos ativos (inativos e aluno teste ficam de fora) e roda três análises:</p>
+    <p><b>Notas vazias</b> — nas tarefas com SIS, todo aluno precisa de nota; pode ser 0, não pode ficar vazia. Ficam de fora reavaliação, colunas em % e tarefas sem pontuação; dispensados não contam.</p>
+    <p><b>Zeros suspeitos</b> — um 0 automático (entregas faltantes, autocorreção), não avaliado ou oculto costuma ser ignorado pelo SIS. Para corrigir, troque a nota por outro valor no boletim e volte para 0.</p>
+    <p><b>Notas acima do máximo</b> — nota lançada maior que a pontuação da tarefa, dos maiores estouros para os menores.</p>
+  </details>
 </div>
 
 <!-- ── Trocar banner dos cursos ──────────────────── -->
