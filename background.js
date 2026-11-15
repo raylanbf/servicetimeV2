@@ -1443,7 +1443,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const fetchFn = fetch.bind(globalThis);
   let job;
   if (msg?.action === 'h5p-create-folder') job = H5P_FOLDER.create(fetchFn, { title: msg.title, parent: msg.parent || '' });
-  else if (msg?.action === 'h5p-create-quiz') job = H5P_FOLDER.createQuiz(fetchFn, parseFormOffscreen, { title: msg.title, parent: msg.parent });
+  else if (msg?.action === 'h5p-create-quiz') job = H5P_FOLDER.createQuiz(fetchFn, parseFormOffscreen, { title: msg.title, parent: msg.parent, params: msg.params ?? null });
   else if (msg?.action === 'h5p-list') job = H5P_FOLDER.list(fetchFn, msg.parent || '').then(({ items }) => ({ status: 'ok', items }));
   else return;
   job.then(sendResponse, e => sendResponse({ status: 'error', code: e.code || 'error', message: e.message || String(e) }));

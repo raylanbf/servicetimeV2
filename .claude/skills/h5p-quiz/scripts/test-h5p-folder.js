@@ -97,6 +97,53 @@ const parseForm = async (html, formId) => {
 const BIG = '1293060630437481148';   // 19 dígitos: não pode virar número
 const FOLDER = '1293060648414498908';
 
+// ── .h5p como o Extrator de Questões (Machine-Learning, src/h5p.ts) gera ──
+const zlib = require('zlib');
+// ZIP mínimo: deflate (8), como o fflate do Extrator, ou sem compressão (0), como o .zip de vários .h5p.
+function zip(files, method = 8) {
+  const parts = [], central = [];
+  let offset = 0;
+  for (const [name, content] of Object.entries(files)) {
+    const data = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
+    const packed = method === 8 ? zlib.deflateRawSync(data) : data;
+    const nm = Buffer.from(name, 'utf8');
+    const crc = zlib.crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x800, 6); local.writeUInt16LE(method, 8);
+    local.writeUInt32LE(crc, 14); local.writeUInt32LE(packed.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(nm.length, 26);
+    const c = Buffer.alloc(46);
+    c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt16LE(0x800, 8); c.writeUInt16LE(method, 10);
+    c.writeUInt32LE(crc, 16); c.writeUInt32LE(packed.length, 20); c.writeUInt32LE(data.length, 24); c.writeUInt16LE(nm.length, 28); c.writeUInt32LE(offset, 42);
+    parts.push(local, nm, packed);
+    central.push(c, nm);
+    offset += 30 + nm.length + packed.length;
+  }
+  const cd = Buffer.concat(central), n = Object.keys(files).length;
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(n, 8); end.writeUInt16LE(n, 10); end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, cd, end]);
+}
+const MC_PARAMS = (q, correct = 1) => ({
+  media: { disableImageZooming: false },
+  question: `<p>Enunciado de ${q}: qual alternativa está correta?</p>\n`,
+  answers: ['A', 'B', 'C', 'D'].map((l, i) => ({ correct: i === correct, tipsAndFeedback: { tip: '', chosenFeedback: `<div>Justificativa ${l}</div>\n`, notChosenFeedback: '' }, text: `<div>Alternativa ${l} de ${q}</div>\n` })),
+  overallFeedback: [{ from: 0, to: 100 }],
+  behaviour: { enableRetry: true, enableSolutionsButton: false, enableCheckButton: true, type: 'auto', singlePoint: false, randomAnswers: true,
+    showSolutionsRequiresInput: false, confirmCheckDialog: false, confirmRetryDialog: false, autoCheck: false, passPercentage: 100, showScorePoints: false },
+  UI: { checkAnswerButton: 'Verificar', tryAgainButton: 'Tentar novamente' },
+});
+const H5P_JSON = (title, main = 'H5P.MultiChoice', deps = [['H5P.MultiChoice', 1, 16]]) => JSON.stringify({
+  title, language: 'pt', defaultLanguage: 'pt-br', mainLibrary: main, embedTypes: ['iframe'], license: 'U',
+  preloadedDependencies: deps.map(([machineName, majorVersion, minorVersion]) => ({ machineName, majorVersion, minorVersion })),
+});
+const MC_FILE = (title, params = MC_PARAMS(title), extra = {}, deps) => zip({ 'h5p.json': H5P_JSON(title, 'H5P.MultiChoice', deps), 'content/content.json': JSON.stringify(params), ...extra });
+const QS_FILE = (titles, library = 'H5P.MultiChoice 1.16') => zip({
+  'h5p.json': H5P_JSON('Questões_FIXAÇÃO_rev_prof', 'H5P.QuestionSet', [['H5P.QuestionSet', 1, 20], ['H5P.MultiChoice', 1, 16]]),
+  'content/content.json': JSON.stringify({ introPage: { showIntroPage: false }, progressType: 'dots', passPercentage: 50,
+    questions: titles.map(t => ({ params: MC_PARAMS(t), library, metadata: { contentType: 'Multiple Choice', license: 'U', title: t }, subContentId: 'x' })) }),
+});
+const toAB = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
+
 (async () => {
   await ok('lê a lista: pastas e quizzes, id de 19 dígitos intacto, nome decodificado, pasta-mãe', () => {
     const html = ROW({ id: BIG, title: 'Ciência & Tecnologia "UDA"' }) + ROW({ id: '1', title: 'Quiz', folder: false })
@@ -210,6 +257,92 @@ const FOLDER = '1293060648414498908';
     await assert.rejects(F.createQuiz(h.fetchFn, parseForm, { title: 'X', parent: FOLDER }), e => e.code === 'login');
     assert.ok(!h.calls.some(c => c.method === 'POST'));
     await assert.rejects(F.createQuiz(fakeH5p({ postStatus: 419 }).fetchFn, parseForm, { title: 'X', parent: FOLDER }), e => e.code === 'expired');
+  });
+
+  await ok('quiz — com a questão do .h5p: parameters leva o conteúdo do arquivo com o título da página; o resto do formulário igual', async () => {
+    const h = fakeH5p({ items: [{ id: FOLDER, title: 'Ambiente teste - Raylan', parent: '' }] });
+    const params = MC_PARAMS('TÓPICO 1');
+    assert.strictEqual((await F.createQuiz(h.fetchFn, parseForm, { title: T1, parent: FOLDER, params })).status, 'created');
+    const f = h.calls[2].fields;
+    const get = k => f.filter(([n]) => n === k).map(([, v]) => v);
+    same(JSON.parse(get('parameters')[0]), { params, metadata: { title: T1, license: 'U', defaultLanguage: 'pt-br' } });
+    same([get('title'), get('library'), get('frame'), get('submitter')], [[T1], ['H5P.MultiChoice 1.16'], [], ['Save']]);
+  });
+
+  await ok('quiz — questão inválida (sem alternativas, lista, texto) é recusada antes de abrir o H5P.com', async () => {
+    for (const params of [{ question: '<p>x</p>' }, [1, 2], 'x']) {
+      const h = fakeH5p();
+      await assert.rejects(F.createQuiz(h.fetchFn, parseForm, { title: T1, parent: FOLDER, params }), e => e.code === 'params');
+      assert.strictEqual(h.calls.length, 0);
+    }
+  });
+
+  // ── h5p-package.js ──
+  const pctx = { TextDecoder, Blob, Response, DecompressionStream, console };
+  pctx.globalThis = pctx;
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'h5p-package.js'), 'utf8'), pctx);
+  const P = pctx.__svcH5pPackage;
+  const PAGES = ['Tópico 1 – Níveis de Maturidade', 'Tópico 2 – Fundamentos', 'Tópico 3 – Riscos', 'Tópico 4 – LGPD', 'Tópico 10 – Encerramento'].map(title => ({ title }));
+  const load = async files => {
+    const r = await P.load(files.map(([name, buf]) => ({ name, buffer: toAB(buf) })), PAGES);
+    return { map: Object.fromEntries([...r.byTopic].map(([t, q]) => [t, q.source])), byTopic: r.byTopic, problems: [...r.problems] };
+  };
+
+  await ok('pacote — número do tópico: "TÓPICO 1", "Tópico 01 – …", "topico_3", "Tópico 10"; sem número, nada', () => {
+    same(['TÓPICO 1', 'Tópico 01 – Níveis', 'topico_3.h5p', 'Tópico 10 – Fim', 'Tópico–2', 'Tópicos de Aprendizagem', 'Questão 1'].map(P.topicNumber),
+      ['1', '1', '3', '10', '2', null, null]);
+  });
+
+  await ok('pacote — um .h5p de Múltipla escolha por tópico (como o Extrator baixa): cada um vai para a página de mesmo número, com o conteúdo intacto', async () => {
+    const r = await load([['TÓPICO 1.h5p', MC_FILE('TÓPICO 1')], ['TÓPICO 10 (1).h5p', MC_FILE('TÓPICO 10')]]);
+    same(r.map, { [PAGES[0].title]: 'TÓPICO 1.h5p', [PAGES[4].title]: 'TÓPICO 10 (1).h5p' });
+    same(r.byTopic.get(PAGES[0].title).params, MC_PARAMS('TÓPICO 1'));
+    same(r.problems, []);
+  });
+
+  await ok('pacote — o .zip com os .h5p (sem compressão) e o Question Set: cada questão separada no seu tópico', async () => {
+    const z = zip({ 'Questões/TÓPICO 1.h5p': MC_FILE('TÓPICO 1'), 'Questões/TÓPICO 2.h5p': MC_FILE('TÓPICO 2') }, 0);
+    const r = await load([['Questões - questões H5P.zip', z], ['Questões_FIXAÇÃO_rev_prof.h5p', QS_FILE(['TÓPICO 3', 'TÓPICO 4'])]]);
+    same(r.map, { [PAGES[0].title]: 'TÓPICO 1.h5p', [PAGES[1].title]: 'TÓPICO 2.h5p',
+      [PAGES[2].title]: 'Questões_FIXAÇÃO_rev_prof.h5p › TÓPICO 3', [PAGES[3].title]: 'Questões_FIXAÇÃO_rev_prof.h5p › TÓPICO 4' });
+    same(r.byTopic.get(PAGES[3].title).params, MC_PARAMS('TÓPICO 4'));
+    same(r.problems, []);
+  });
+
+  await ok('pacote — título sem número: usa o nome do arquivo; sem número em nenhum, fica de fora', async () => {
+    const r = await load([['Tópico_02.h5p', MC_FILE('Questão 1')], ['questao.h5p', MC_FILE('Questão 7')]]);
+    same(r.map, { [PAGES[1].title]: 'Tópico_02.h5p' });
+    same(r.problems, ['questao.h5p: sem "Tópico N" no título nem no nome do arquivo.']);
+  });
+
+  await ok('pacote — fica de fora, com o motivo: imagem, outra versão, outro tipo, sem correta, sem página, dois para o mesmo tópico, arquivo que não é .h5p', async () => {
+    const semCorreta = MC_PARAMS('TÓPICO 3', -1);
+    const r = await load([
+      ['TÓPICO 1.h5p', MC_FILE('TÓPICO 1', undefined, { 'content/images/fig.png': Buffer.from([137, 80, 78, 71]) })],
+      ['TÓPICO 2.h5p', MC_FILE('TÓPICO 2', undefined, {}, [['H5P.MultiChoice', 1, 14]])],
+      ['TÓPICO 3.h5p', MC_FILE('TÓPICO 3', semCorreta)],
+      ['TÓPICO 4.h5p', zip({ 'h5p.json': H5P_JSON('TÓPICO 4', 'H5P.TrueFalse', [['H5P.TrueFalse', 1, 8]]), 'content/content.json': '{}' })],
+      ['TÓPICO 5.h5p', MC_FILE('TÓPICO 5')],
+      ['a.h5p', MC_FILE('TÓPICO 10')], ['b.h5p', MC_FILE('TÓPICO 10')],
+      ['set.h5p', QS_FILE(['TÓPICO 4'], 'H5P.TrueFalse 1.8')],
+      ['FIC.docx', Buffer.from('não é zip')],
+    ]);
+    same(r.map, {});
+    same(r.problems, [
+      'TÓPICO 1.h5p: tem imagem, áudio ou vídeo — suba este pelo H5P.com.',
+      'TÓPICO 2.h5p: é H5P.MultiChoice 1.14; o H5P.com da PUC usa H5P.MultiChoice 1.16.',
+      'TÓPICO 3.h5p: nenhuma alternativa marcada como correta.',
+      'TÓPICO 4.h5p: é H5P.TrueFalse — só entram Múltipla escolha e Question Set de múltipla escolha.',
+      'set.h5p › TÓPICO 4: é H5P.TrueFalse 1.8 — só entra Múltipla escolha (H5P.MultiChoice 1.16).',
+      'FIC.docx: não é um .h5p nem um .zip válido.',
+      'TÓPICO 5.h5p: não há página "Tópico 5" nos módulos.',
+      'Tópico 10: 2 questões (a.h5p; b.h5p) — deixe só uma.',
+    ]);
+  });
+
+  await ok('pacote — duas páginas "Tópico 1" nos módulos: a questão não vai para nenhuma', async () => {
+    const r = await P.load([{ name: 'TÓPICO 1.h5p', buffer: toAB(MC_FILE('TÓPICO 1')) }], [{ title: 'Tópico 1 – A' }, { title: 'Tópico 1 – B' }]);
+    same([r.byTopic.size, [...r.problems]], [0, ['TÓPICO 1.h5p: há 2 páginas "Tópico 1" nos módulos.']]);
   });
 
   // ── 2. Chrome sem tela ────────────────────────────────────────────────
@@ -431,7 +564,7 @@ async function canvasTests(browser) {
     } });
   });
   await page.goto(`${CANVAS}/courses/${COURSE}/modules`);
-  for (const f of ['h5p-width.js', 'h5p-insert.js', 'canvas-h5p-folder.js']) await page.addScriptTag({ content: fs.readFileSync(path.join(ROOT, f), 'utf8') });
+  for (const f of ['h5p-width.js', 'h5p-insert.js', 'h5p-package.js', 'canvas-h5p-folder.js']) await page.addScriptTag({ content: fs.readFileSync(path.join(ROOT, f), 'utf8') });
 
   const BTN = '#__svc-h5p-folder__', MODAL = '#__svc-h5p-folder-modal__', TOAST = '#__svc-h5p-folder-toast__';
   const CREATE = `${MODAL} button[data-create]`;
@@ -534,6 +667,50 @@ async function canvasTests(browser) {
     await startQuizzesOnly();
     await waitToast(/3 quiz\(zes\) criado\(s\) · 1 já existia\(m\)/);
     assert.strictEqual(await toastText(), 'Pasta "Ambiente teste - Raylan" já existia no H5P.com (My Content).\n3 quiz(zes) criado(s) · 1 já existia(m).Abrir pasta');
+  });
+
+  const FILES = `${MODAL} input[data-h5p-files]`;
+  const chooseFiles = async files => {
+    await page.setInputFiles(FILES, files.map(([name, buffer]) => ({ name, mimeType: 'application/zip', buffer })));
+    await page.waitForFunction(() => /tópico\(s\) com a questão do arquivo|Não consegui ler/.test(document.getElementById('__svc-h5p-folder-modal__')?.textContent || ''));
+  };
+
+  await ok('canvas — arquivos .h5p: a lista mostra o arquivo de cada tópico e o que ficou de fora; o quiz sai com a questão do arquivo, os outros provisórios', async () => {
+    await reset();
+    await setup('created');
+    await page.click(BTN);
+    await chooseFiles([['TÓPICO 1.h5p', MC_FILE('TÓPICO 1')], ['Questões_FIXAÇÃO.h5p', QS_FILE(['TÓPICO 3'])], ['TÓPICO 9.h5p', MC_FILE('TÓPICO 9')]]);
+    same(await page.$$eval(`${MODAL} li span[data-file]`, ss => ss.map(s => s.getAttribute('data-file'))), ['TÓPICO 1.h5p', '', 'Questões_FIXAÇÃO.h5p › TÓPICO 3', '']);
+    assert.match(await page.textContent(MODAL), /3 arquivo\(s\) · 2 de 4 tópico\(s\) com a questão do arquivo/);
+    assert.match(await page.textContent(`${MODAL} [data-h5p-problems]`), /TÓPICO 9\.h5p: não há página "Tópico 9" nos módulos\./);
+    await page.uncheck(`${MODAL} input[data-insert]`);
+    await page.click(CREATE);
+    await waitToast(/quiz\(zes\) criado/);
+    const quizzes = (await sent()).filter(m => m.action === 'h5p-create-quiz');
+    same(quizzes.map(m => [m.title, !!m.params]), TOPICS.map((t, i) => [t, i === 0 || i === 2]));
+    same(quizzes[0].params, MC_PARAMS('TÓPICO 1'));
+    same(quizzes[2].params, MC_PARAMS('TÓPICO 3'));
+    assert.strictEqual(await toastText(), '✓ Pasta "Ambiente teste - Raylan" criada no H5P.com (My Content).\n4 quiz(zes) criado(s) (2 com a questão do .h5p).Abrir pasta');
+  });
+
+  await ok('canvas — arquivo para um quiz que já existia: não troca e avisa; com "1 quiz por tópico" desmarcado, os arquivos não vão', async () => {
+    await reset();
+    await setup('exists', { [TOPICS[0]]: 'exists' });
+    await page.click(BTN);
+    await chooseFiles([['TÓPICO 1.h5p', MC_FILE('TÓPICO 1')], ['TÓPICO 2.h5p', MC_FILE('TÓPICO 2')]]);
+    await page.uncheck(`${MODAL} input[data-insert]`);
+    await page.click(CREATE);
+    await waitToast(/não foi\(ram\) trocado/);
+    assert.match(await toastText(), /3 quiz\(zes\) criado\(s\) \(1 com a questão do \.h5p\) · 1 já existia\(m\)\.\n⚠ Já existia\(m\) na pasta e não foi\(ram\) trocado\(s\) pelo \.h5p: Tópico 1 – Níveis de Maturidade — troque a questão no H5P\.com\./);
+    await reset();
+    await page.click(BTN);
+    await chooseFiles([['TÓPICO 2.h5p', MC_FILE('TÓPICO 2')]]);
+    await page.uncheck(`${MODAL} input[data-quizzes]`);
+    assert.ok(await page.$eval(`${MODAL} input[data-h5p-files]`, i => i.previousElementSibling.disabled), 'botão dos arquivos apagado');
+    await page.uncheck(`${MODAL} input[data-insert]`);
+    await page.click(CREATE);
+    await waitToast(/Nada foi criado/);
+    same((await sent()).map(m => m.action), ['h5p-create-folder']);
   });
 
   await ok('canvas — erro no meio (sessão caiu no 2º quiz): para ali, diz onde parou e não mexe nas páginas', async () => {

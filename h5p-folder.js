@@ -15,7 +15,8 @@
 //   • quiz: o formulário #laravel-h5p-form de /content/create?parent=<pasta>,
 //     com as opções padrão da tela, e o que o editor do H5P põe ao salvar
 //     (content-form/editor-parent.js do H5P.com): title, library
-//     ("H5P.MultiChoice 1.16") e parameters = JSON {params, metadata}.
+//     ("H5P.MultiChoice 1.16") e parameters = JSON {params, metadata}; params
+//     é a questão provisória ou a de um .h5p escolhido (h5p-package.js).
 //     O H5P.com responde redirecionando para /content/<id novo>.
 // IDs têm 19 dígitos: ficam sempre como texto.
 globalThis.H5P_FOLDER = (() => {
@@ -155,14 +156,20 @@ globalThis.H5P_FOLDER = (() => {
     return { params, metadata: { title, license: 'U', defaultLanguage: 'pt-br' } };
   }
 
+  // Conteúdo do quiz: a questão de um .h5p (params, já conferido pelo
+  // h5p-package.js) ou a provisória. O título é sempre o da página.
+  const quizContent = (title, params) => (params
+    ? { params, metadata: { title, license: 'U', defaultLanguage: 'pt-br' } }
+    : quizParams(title));
+
   // Campos que o editor do H5P.com preenche ao salvar; o resto vem do
   // formulário como a tela o abre. "Toolbar Below Content" (frame) vem
   // marcado e a equipe sempre desmarca: sai desmarcado (checkbox desmarcado
   // não vai no envio).
   const DROP = new Set(['submitter', 'frame']);
-  function quizFields(entries, { title, parent }) {
+  function quizFields(entries, { title, parent, params }) {
     const set = {
-      title, library: QUIZ_LIBRARY, parameters: JSON.stringify(quizParams(title)), parent: String(parent),
+      title, library: QUIZ_LIBRARY, parameters: JSON.stringify(quizContent(title, params)), parent: String(parent),
       timezone_offset: String(new Date().getTimezoneOffset()),
     };
     const out = [], done = new Set();
@@ -186,11 +193,15 @@ globalThis.H5P_FOLDER = (() => {
 
   // { status: 'created' | 'exists', item, title }
   // parseForm(html, formId) → [[nome, valor], …] como o navegador enviaria
-  // (no documento offscreen, que tem DOMParser).
-  async function createQuiz(fetchFn, parseForm, { title, parent }) {
+  // (no documento offscreen, que tem DOMParser). params: a questão de um
+  // .h5p (opcional; sem ela, a provisória). Quiz que já existe não muda.
+  async function createQuiz(fetchFn, parseForm, { title, parent, params = null }) {
     title = cleanTitle(title);
     if (!title) throw fail('title', 'Título do quiz vazio.');
     if (!/^\d+$/.test(String(parent || ''))) throw fail('parent', 'Pasta do quiz não informada.');
+    if (params !== null && (typeof params !== 'object' || Array.isArray(params) || !Array.isArray(params.answers))) {
+      throw fail('params', `A questão do arquivo .h5p para "${title}" não é uma Múltipla escolha válida.`);
+    }
 
     const { items } = await list(fetchFn, parent);
     const same = items.find(i => !i.folder && norm(i.title) === norm(title));
@@ -203,7 +214,7 @@ globalThis.H5P_FOLDER = (() => {
       throw fail('form', 'Não encontrei o formulário de criação do H5P.com (a tela pode ter mudado).');
     }
     const body = new FormData();
-    for (const [k, v] of quizFields(entries, { title, parent })) body.append(k, v);
+    for (const [k, v] of quizFields(entries, { title, parent, params })) body.append(k, v);
 
     const res = await request(fetchFn, `${ORIGIN}/content`, { method: 'POST', body });
     if (res.status === 419) throw fail('expired', 'A sessão do H5P.com expirou. Recarregue o H5P.com e tente de novo.');

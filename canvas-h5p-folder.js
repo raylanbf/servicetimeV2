@@ -1,9 +1,10 @@
 // Botão "📁 Pasta H5P" na página de módulos do Canvas, ao lado do "+ Módulo",
 // em até três passos, escolhidos na confirmação:
 //   1. cria no H5P.com uma pasta com o nome da disciplina;
-//   2. dentro dela, um quiz (Multiple Choice, com pergunta e alternativas
-//      provisórias) para cada página "Tópico N" dos módulos, com o título
-//      exato da página — o mesmo que o botão H5P do editor procura;
+//   2. dentro dela, um quiz (Multiple Choice) para cada página "Tópico N"
+//      dos módulos, com o título exato da página — o mesmo que o botão H5P
+//      do editor procura. A questão vem do .h5p escolhido na confirmação
+//      (Extrator de Questões; h5p-package.js) ou vai provisória;
 //   3. põe cada quiz na sua página, na caixa depois da faixa "Atividade de
 //      Fixação" (h5p-insert.js), com prévia, número do curso redigitado e
 //      conferência de cada página depois de gravar.
@@ -227,32 +228,93 @@
     });
   }
 
-  // Confirmação: nome editável e o que fazer com os tópicos.
-  // Resolve { title, quizzes: bool, insert: bool } ou null.
+  // Confirmação: nome editável e o que fazer com os tópicos; opcionalmente,
+  // os .h5p com as questões (h5p-package.js), ligados pelo "Tópico N".
+  // Resolve { title, quizzes: bool, insert: bool, files: Map | null } ou null.
   function ask(name, topics) {
     return modal(ui => {
       ui.line('📁 Criar pasta no H5P.com?', { fontSize: '14px', fontWeight: 'bold', color: '#e2e8f0' });
       ui.line(`Onde: ${WHERE} (pucminasvirtual.h5p.com). Nome da pasta:`);
       const input = ui.input(name, 'Nome da pasta');
-      let quizzes = null, insert = null;
+      let quizzes = null, insert = null, files = null, reading = false;
+      const { yes, enable } = ui.buttons('Cancelar', 'Criar');
+      const sync = () => enable(!!input.value.trim() && !reading);
       if (topics.length) {
         quizzes = ui.check(`Criar também 1 quiz por tópico (${topics.length}), dentro da pasta:`, true, 'data-quizzes');
         const ul = document.createElement('ul');
         Object.assign(ul.style, { margin: '0 0 8px', padding: '0 0 0 22px', fontSize: '12px', color: '#cbd5e1', maxHeight: '160px', overflowY: 'auto', lineHeight: '1.5' });
-        for (const t of topics) { const li = document.createElement('li'); li.textContent = t.title; ul.appendChild(li); }
+        const renderList = () => {
+          ul.replaceChildren(...topics.map(t => {
+            const li = document.createElement('li');
+            li.textContent = t.title;
+            if (files) {
+              const q = files.get(t.title);
+              const s = document.createElement('span');
+              s.setAttribute('data-file', q ? q.source : '');
+              s.textContent = q ? ` ← ${q.source}` : ' — provisória';
+              s.style.color = q ? '#4ade80' : '#94a3b8';
+              li.appendChild(s);
+            }
+            return li;
+          }));
+        };
+        renderList();
         ui.box.appendChild(ul);
-        ui.line('Cada quiz é um Multiple Choice com o título exato da página, pergunta e alternativas provisórias para a equipe trocar.', { fontSize: '11px', color: '#94a3b8' });
+
+        // Arquivos .h5p (ou o .zip do Extrator de Questões).
+        const row = document.createElement('div');
+        Object.assign(row.style, { display: 'flex', gap: '8px', alignItems: 'center', margin: '0 0 6px', fontSize: '12px' });
+        const pick = document.createElement('button');
+        pick.type = 'button';
+        pick.textContent = '📎 Escolher arquivos .h5p';
+        Object.assign(pick.style, { padding: '5px 10px', borderRadius: '4px', border: '1px solid #475569', background: '#2a2a3e', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' });
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file'; fileInput.multiple = true; fileInput.accept = '.h5p,.zip';
+        fileInput.setAttribute('data-h5p-files', '');
+        fileInput.style.display = 'none';
+        const status = document.createElement('span');
+        status.style.color = '#94a3b8';
+        status.textContent = 'opcional — sem arquivo, a questão vai provisória';
+        row.append(pick, fileInput, status);
+        ui.box.appendChild(row);
+        const problems = ui.line('', { fontSize: '11px', color: '#fbbf24', whiteSpace: 'pre-line', display: 'none' });
+        problems.setAttribute('data-h5p-problems', '');
+        pick.onclick = () => fileInput.click();
+        fileInput.onchange = async () => {
+          const chosen = [...fileInput.files];
+          fileInput.value = '';
+          if (!chosen.length) return;
+          reading = true; sync();
+          status.textContent = 'Lendo os arquivos…';
+          try {
+            const r = await window.__svcH5pPackage.load(await Promise.all(chosen.map(async f => ({ name: f.name, buffer: await f.arrayBuffer() }))), topics);
+            files = r.byTopic;
+            status.textContent = `${chosen.length} arquivo(s) · ${files.size} de ${topics.length} tópico(s) com a questão do arquivo`;
+            status.style.color = files.size ? '#4ade80' : '#fbbf24';
+            problems.textContent = r.problems.length ? `Fora:\n• ${r.problems.join('\n• ')}` : '';
+            problems.style.display = r.problems.length ? 'block' : 'none';
+          } catch (e) {
+            files = null;
+            status.textContent = `Não consegui ler os arquivos: ${e.message}`;
+            status.style.color = '#f87171';
+          }
+          renderList();
+          reading = false; sync();
+        };
+        const syncPick = () => { pick.disabled = !quizzes.checked; row.style.opacity = quizzes.checked ? '1' : '.5'; };
+        quizzes.addEventListener('change', syncPick);
+
+        ui.line('Cada quiz é um Multiple Choice com o título exato da página. Com o .h5p do Extrator de Questões, já vai com a questão e as configurações do arquivo; sem ele, com pergunta e alternativas provisórias para a equipe trocar.', { fontSize: '11px', color: '#94a3b8' });
         insert = ui.check('Inserir cada quiz na sua página (caixa da "Atividade de Fixação") — antes de gravar, mostra a prévia.', true, 'data-insert');
       } else {
         ui.line('Nenhuma página "Tópico N" nos módulos: só a pasta será criada.', { fontSize: '11px', color: '#94a3b8' });
       }
       ui.line('O que já existir com o mesmo nome fica como está — nada é duplicado nem apagado.', { fontSize: '11px', color: '#94a3b8' });
-      const { yes, enable } = ui.buttons('Cancelar', 'Criar');
-      const result = () => ({ title: input.value.trim(), quizzes: !!quizzes?.checked, insert: !!insert?.checked });
-      const sync = () => enable(!!input.value.trim());
+      ui.box.appendChild(yes.parentElement);   // botões no fim
+      const result = () => ({ title: input.value.trim(), quizzes: !!quizzes?.checked, insert: !!insert?.checked, files: quizzes?.checked ? files : null });
       input.addEventListener('input', sync);
-      input.addEventListener('keydown', e => { if (e.key === 'Enter' && input.value.trim()) { e.preventDefault(); ui.done(result()); } });
-      yes.onclick = () => ui.done(result());
+      input.addEventListener('keydown', e => { if (e.key === 'Enter' && !yes.disabled) { e.preventDefault(); ui.done(result()); } });
+      yes.onclick = () => { if (!yes.disabled) ui.done(result()); };
       sync();
       return input;
     });
@@ -340,18 +402,22 @@
     toast(`${r?.message || 'Erro desconhecido.'}${what ? '\n' + what : ''}`, 'err');
   }
 
-  async function createQuizzes(folder, titles, folderLine) {
-    const made = [], existed = [];
-    for (let i = 0; i < titles.length; i++) {
-      toast(`${folderLine}\nCriando quizzes: ${i + 1} de ${titles.length}…`, 'busy');
-      const r = await send({ action: 'h5p-create-quiz', title: titles[i], parent: folder.id });
-      if (r?.status === 'created') made.push(r.item);
-      else if (r?.status === 'exists') existed.push(r.item);
+  // files: Map(título da página → questão do .h5p) ou null.
+  async function createQuizzes(folder, topics, folderLine, files) {
+    const made = [], existed = [], unused = [];
+    let fromFile = 0;
+    for (let i = 0; i < topics.length; i++) {
+      const title = topics[i].title;
+      const q = files?.get(title);
+      toast(`${folderLine}\nCriando quizzes: ${i + 1} de ${topics.length}…`, 'busy');
+      const r = await send({ action: 'h5p-create-quiz', title, parent: folder.id, ...(q ? { params: q.params } : {}) });
+      if (r?.status === 'created') { made.push(r.item); if (q) fromFile++; }
+      else if (r?.status === 'exists') { existed.push(r.item); if (q) unused.push(title); }
       else {
-        problem(r, `${folderLine}\nQuizzes: ${made.length} criado(s), ${existed.length} já existia(m) — parou em "${titles[i]}".`);
+        problem(r, `${folderLine}\nQuizzes: ${made.length} criado(s), ${existed.length} já existia(m) — parou em "${title}".`);
         return null;
       }
-      if (r.status === 'created' && i < titles.length - 1) await sleep(PAUSE_MS);
+      if (r.status === 'created' && i < topics.length - 1) await sleep(PAUSE_MS);
     }
     // Confere na lista da pasta: se os quizzes novos não aparecerem, a leitura
     // da lista falhou — clicar de novo poderia duplicar.
@@ -361,7 +427,7 @@
       const ids = new Set((l?.items || []).filter(i => !i.folder).map(i => i.id));
       unseen = made.filter(m => !ids.has(m.id)).length;
     }
-    return { made, existed, unseen };
+    return { made, existed, unseen, fromFile, unused };
   }
 
   // Prévia de uma página: o que o h5p-insert.js faria com o quiz de mesmo título.
@@ -372,7 +438,8 @@
     return I.plan(body, { contentId: quiz.id, embed });
   }
 
-  async function insertQuizzes(folder, topics, intro) {
+  // note: aviso dos quizzes, repetido no resultado final.
+  async function insertQuizzes(folder, topics, intro, note = '') {
     toast(`${intro}\nLendo a pasta e as páginas…`, 'busy');
     const l = await send({ action: 'h5p-list', parent: folder.id });
     if (l?.status !== 'ok') return problem(l, intro);
@@ -426,7 +493,8 @@
     if (done.same.length) parts.push(`${done.same.length} já tinha(m) o quiz.`);
     if (done.warn.length) parts.push(`⚠ Gravado, mas o quiz não ficou na caixa em: ${done.warn.join('; ')} — confira no editor.`);
     if (done.error.length) parts.push(`✗ Não gravado: ${done.error.join('; ')}`);
-    toast(parts.join('\n'), done.error.length || done.warn.length ? 'warn' : 'ok');
+    if (note) parts.push(note);
+    toast(parts.join('\n'), done.error.length || done.warn.length || note ? 'warn' : 'ok');
   }
 
   let busy = false;
@@ -456,19 +524,23 @@
         ? `✓ Pasta "${r.folder.title}" criada no H5P.com (${WHERE}).`
         : `Pasta "${r.folder.title}" já existia no H5P.com (${WHERE}).`;
 
+      let note = '';
       if (choice.quizzes) {
-        const q = await createQuizzes(r.folder, topics.map(t => t.title), line);
+        const q = await createQuizzes(r.folder, topics, line, choice.files);
         if (!q) return;
-        const parts = [`${q.made.length} quiz(zes) criado(s)`];
+        const parts = [`${q.made.length} quiz(zes) criado(s)${q.fromFile ? ` (${q.fromFile} com a questão do .h5p)` : ''}`];
         if (q.existed.length) parts.push(`${q.existed.length} já existia(m)`);
         line += `\n${parts.join(' · ')}.`;
+        // Quiz que já existia não muda: a questão do arquivo ficou de fora.
+        if (q.unused.length) note = `⚠ Já existia(m) na pasta e não foi(ram) trocado(s) pelo .h5p: ${q.unused.join('; ')} — troque a questão no H5P.com.`;
         if (q.unseen) {
           // Lista da pasta não confiável: inserir agora poderia apontar errado.
-          return toast(`${line}\n⚠ ${q.unseen} quiz(zes) novo(s) não apareceram na lista da pasta: confira no H5P.com antes de clicar de novo.`, 'warn', open);
+          return toast(`${line}\n⚠ ${q.unseen} quiz(zes) novo(s) não apareceram na lista da pasta: confira no H5P.com antes de clicar de novo.${note ? '\n' + note : ''}`, 'warn', open);
         }
       }
-      if (choice.insert) return await insertQuizzes(r.folder, topics, line);
-      toast(line + (!choice.quizzes && r.status === 'exists' ? ' Nada foi criado.' : ''), r.status === 'created' || choice.quizzes ? 'ok' : 'info', open);
+      if (choice.insert) return await insertQuizzes(r.folder, topics, line, note);
+      toast(line + (!choice.quizzes && r.status === 'exists' ? ' Nada foi criado.' : '') + (note ? '\n' + note : ''),
+        note ? 'warn' : r.status === 'created' || choice.quizzes ? 'ok' : 'info', open);
     } finally {
       busy = false;
       setBtn(label, false);
