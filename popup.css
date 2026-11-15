@@ -736,7 +736,17 @@ input[type=text]:focus { border-color: #60a5fa; }
 .ban-preview-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #cbd5e1; }
 .ban-course-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ban-files { display: flex; flex-direction: column; gap: 3px; margin-top: 5px; }
-.ban-files .mat-file { background: #21212f; }
+.ban-files .mat-file { background: #21212f; flex-wrap: wrap; }
+.ban-thumb {
+  flex: 0 0 100%;
+  width: 100%;
+  max-height: 80px;
+  object-fit: contain;
+  border-radius: 3px;
+  background: #16161f;
+  margin-bottom: 2px;
+}
+.ban-thumb-off { opacity: .35; }
 .ban-check { accent-color: #4ade80; cursor: pointer; flex-shrink: 0; margin: 0; }
 label.mat-file, label.bulk-course-row-head { cursor: pointer; }
 .ban-off { color: #64748b; text-decoration: line-through; }

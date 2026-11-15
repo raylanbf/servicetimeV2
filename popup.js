@@ -4827,7 +4827,13 @@ function bannerCanvasMain(op, p) {
               courseId,
               name:     course.name,
               folderId: folder.id,
-              files:    files.map(f => ({ id: f.id, name: f.display_name, size: f.size })),
+              // `url` já vem com o verifier do Canvas — serve de miniatura no painel.
+              files:    files.map(f => ({
+                id:   f.id,
+                name: f.display_name,
+                size: f.size,
+                url:  f.url ? new URL(f.url, location.origin).href : '',
+              })),
             };
           } catch (err) {
             return { courseId, error: err.message };
@@ -4928,6 +4934,19 @@ function bannerFileRow(course, file, editing) {
   const row = document.createElement(editing ? 'label' : 'div');
   row.className = 'mat-file'
     + (prog?.status === 'ok' ? ' ok' : prog?.status === 'error' ? ' error' : '');
+
+  // Miniatura em cima, nome embaixo. Depois de substituído, mostra a imagem
+  // nova (a URL antiga ainda devolveria o banner velho, do cache).
+  const thumbUrl = prog?.status === 'ok' && _banImageUrl ? _banImageUrl : file.url;
+  if (thumbUrl) {
+    const img = document.createElement('img');
+    img.className = 'ban-thumb' + (file.checked ? '' : ' ban-thumb-off');
+    img.alt       = '';
+    img.loading   = 'lazy';
+    img.addEventListener('error', () => img.remove());
+    img.src       = thumbUrl;
+    row.appendChild(img);
+  }
 
   if (editing) {
     const cb = document.createElement('input');
