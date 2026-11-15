@@ -235,8 +235,16 @@
     });
   }
 
+  // Nome sem a sigla da frente ("UDA - ", "MF - ", "(UDA) "…), para achar na
+  // pasta da equipe uma pasta com o mesmo nome e outro prefixo. Só serve para
+  // avisar: o nome nunca é mudado sozinho (há UDA, MF e outras siglas).
+  const fold = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[‐-―]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
+  const coreName = s => fold(String(s || '').replace(/^\s*(?:\([A-Z]{1,6}\)|[A-Z]{1,6}\s*[-‐-―:])\s*/, ''));
+
   // Confirmação: nome editável e o que fazer com os tópicos; opcionalmente,
   // os .h5p com as questões (h5p-package.js), ligados pelo "Tópico N".
+  // dest.folders (modo equipe): as pastas que já existem lá, para o aviso de
+  // nome igual (a pasta existente é usada) ou parecido (só cria escolhendo).
   // Resolve { title, quizzes: bool, insert: bool, files: Map | null } ou null.
   function ask(name, topics, dest) {
     return modal(ui => {
@@ -250,9 +258,62 @@
       }
       ui.line(`Onde: ${dest.label} (pucminasvirtual.h5p.com). Nome da pasta:`);
       const input = ui.input(name, 'Nome da pasta');
+      const note = document.createElement('div');
+      note.setAttribute('data-name-note', '');
+      Object.assign(note.style, { margin: '-6px 0 12px', fontSize: '12px', lineHeight: '1.4' });
+      ui.box.appendChild(note);
       let quizzes = null, insert = null, files = null, reading = false;
+      let blocked = false, anyway = false, lastCore = null;
       const { yes, enable } = ui.buttons('Cancelar', 'Criar');
-      const sync = () => enable(!!input.value.trim() && !reading);
+      const sync = () => enable(!!input.value.trim() && !reading && !blocked);
+
+      // Nome igual a uma pasta da equipe: ela é usada. Mesmo nome com outro
+      // prefixo: "Criar" só libera usando a existente ou marcando "criar outra".
+      const existing = dest.team ? (dest.folders || []) : [];
+      function checkName() {
+        const typed = input.value.trim();
+        const core = coreName(typed);
+        if (core !== lastCore) anyway = false;   // a escolha vale só para o nome em que foi feita
+        lastCore = core;
+        const same = existing.find(f => norm(f.title) === norm(typed));
+        const similar = same || !core ? [] : existing.filter(f => coreName(f.title) === core);
+        note.replaceChildren();
+        blocked = false;
+        if (same) {
+          note.style.color = '#93c5fd';
+          note.textContent = `Já existe "${same.title}" na pasta da equipe: ela será usada, e nada novo é criado.`;
+          return;
+        }
+        if (!similar.length) return;
+        blocked = !anyway;
+        note.style.color = '#fbbf24';
+        const head = document.createElement('div');
+        head.textContent = '⚠ Já existe na pasta da equipe uma pasta com esse nome, com outro prefixo:';
+        note.appendChild(head);
+        for (const f of similar.slice(0, 3)) {
+          const row = document.createElement('div');
+          Object.assign(row.style, { display: 'flex', gap: '8px', alignItems: 'center', margin: '4px 0 0 8px' });
+          const t = document.createElement('span');
+          t.textContent = `"${f.title}"`;
+          t.style.color = '#e2e8f0';
+          const use = document.createElement('button');
+          use.type = 'button';
+          use.textContent = 'Usar esta';
+          use.setAttribute('data-use-folder', f.title);
+          Object.assign(use.style, { padding: '2px 8px', borderRadius: '4px', border: '1px solid #475569', background: '#2a2a3e', color: '#e2e8f0', cursor: 'pointer', fontSize: '11px' });
+          use.onclick = () => { input.value = f.title; checkName(); sync(); };
+          row.append(t, use);
+          note.appendChild(row);
+        }
+        const lab = document.createElement('label');
+        Object.assign(lab.style, { display: 'flex', gap: '6px', alignItems: 'center', margin: '6px 0 0', cursor: 'pointer', color: '#cbd5e1' });
+        const c = document.createElement('input');
+        c.type = 'checkbox'; c.checked = anyway; c.setAttribute('data-new-anyway', '');
+        c.onchange = () => { anyway = c.checked; blocked = !anyway; sync(); };
+        lab.append(c, document.createTextNode('Criar outra pasta mesmo assim (lá ela não pode ser apagada)'));
+        note.appendChild(lab);
+      }
+      checkName();
       if (topics.length) {
         quizzes = ui.check(`Criar também 1 quiz por tópico (${topics.length}), dentro da pasta:`, true, 'data-quizzes');
         const ul = document.createElement('ul');
@@ -326,7 +387,7 @@
       ui.line('O que já existir com o mesmo nome fica como está — nada é duplicado nem apagado.', { fontSize: '11px', color: '#94a3b8' });
       ui.box.appendChild(yes.parentElement);   // botões no fim
       const result = () => ({ title: input.value.trim(), quizzes: !!quizzes?.checked, insert: !!insert?.checked, files: quizzes?.checked ? files : null });
-      input.addEventListener('input', sync);
+      input.addEventListener('input', () => { checkName(); sync(); });
       input.addEventListener('keydown', e => { if (e.key === 'Enter' && !yes.disabled) { e.preventDefault(); ui.done(result()); } });
       yes.onclick = () => { if (!yes.disabled) ui.done(result()); };
       sync();
@@ -520,7 +581,14 @@
     const setBtn = (text, disabled) => { const b = document.getElementById(BTN_ID); if (b) { b.textContent = text; b.disabled = disabled; } };
     try {
       setBtn('📁 Lendo…', true);
-      const [name, topics, dest] = await Promise.all([courseName(), topicPages().catch(() => []), destination()]);
+      let [name, topics, dest] = await Promise.all([courseName(), topicPages().catch(() => []), destination()]);
+      // Pasta da equipe: as pastas que já existem lá, para o aviso de nome
+      // igual ou parecido. Sem conseguir ler, nem abre a confirmação.
+      if (dest.team) {
+        const l = await send({ action: 'h5p-list', team: true });
+        if (l?.status !== 'ok') return problem(l, 'Não consegui ler a pasta da equipe — nada foi criado.');
+        dest = { ...dest, folders: (l.items || []).filter(i => i.folder) };
+      }
       setBtn(label, false);
       const choice = await ask(name, topics, dest);
       if (!choice) return;

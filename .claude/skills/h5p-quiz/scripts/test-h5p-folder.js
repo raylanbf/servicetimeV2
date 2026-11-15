@@ -825,9 +825,60 @@ async function canvasTests(browser) {
     await page.uncheck(`${MODAL} input[data-insert]`);
     await page.click(CREATE);
     await waitToast(/criada no H5P/);
-    same(await sent(), [{ action: 'h5p-create-folder', title: 'Ambiente teste - Raylan', parent: '', team: true }]);
+    same(await sent(), [{ action: 'h5p-list', team: true }, { action: 'h5p-create-folder', title: 'Ambiente teste - Raylan', parent: '', team: true }]);
     assert.match(await toastText(), /criada no H5P\.com \(PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM\)\./);
     await page.evaluate(() => window.__setCfg('h5pFolderTeam', false));
+  });
+
+  await ok('canvas — equipe: mesmo nome com outro prefixo ("UDA - …") avisa e segura "Criar" até escolher: usar a existente ou criar outra mesmo assim', async () => {
+    await reset();
+    await setup('created');
+    await page.evaluate(() => {
+      window.__setCfg('h5pFolderTeam', true);
+      window.__h5p.list = m => ({ status: 'ok', items: m.team ? [
+        { id: '701', title: 'UDA - Ambiente teste - Raylan', folder: true, url: 'x' },
+        { id: '702', title: 'MF - Outra disciplina', folder: true, url: 'x' },
+      ] : [] });
+    });
+    const NOTE = `${MODAL} [data-name-note]`;
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    assert.match(await page.textContent(NOTE), /Já existe na pasta da equipe uma pasta com esse nome, com outro prefixo:"UDA - Ambiente teste - Raylan"Usar esta/);
+    assert.strictEqual(await page.$$eval(`${MODAL} button[data-use-folder]`, b => b.length), 1, 'só a parecida, não a MF de outro nome');
+    assert.ok(await page.$eval(CREATE, b => b.disabled), '"Criar" segura');
+    await page.click(`${MODAL} button[data-use-folder]`);
+    assert.strictEqual(await page.inputValue(`${MODAL} input[type=text]`), 'UDA - Ambiente teste - Raylan');
+    assert.match(await page.textContent(NOTE), /Já existe "UDA - Ambiente teste - Raylan" na pasta da equipe: ela será usada, e nada novo é criado\./);
+    assert.ok(!(await page.$eval(CREATE, b => b.disabled)));
+    await page.fill(`${MODAL} input[type=text]`, 'Disciplina nova');
+    assert.strictEqual((await page.textContent(NOTE)).trim(), '', 'nome sem parecida: sem aviso');
+    assert.ok(!(await page.$eval(CREATE, b => b.disabled)));
+    await page.fill(`${MODAL} input[type=text]`, 'Ambiente teste - Raylan');
+    assert.ok(await page.$eval(CREATE, b => b.disabled), 'de volta ao nome parecido: segura de novo');
+    await page.check(`${MODAL} input[data-new-anyway]`);
+    assert.ok(!(await page.$eval(CREATE, b => b.disabled)));
+    await page.uncheck(`${MODAL} input[data-quizzes]`);
+    await page.uncheck(`${MODAL} input[data-insert]`);
+    await page.click(CREATE);
+    await waitToast(/criada no H5P/);
+    same((await sent()).map(m => [m.action, m.title || '', !!m.team]), [['h5p-list', '', true], ['h5p-create-folder', 'Ambiente teste - Raylan', true]]);
+  });
+
+  await ok('canvas — equipe: sem conseguir ler a pasta da equipe (sem sessão), avisa e nem abre a confirmação; no My Content não há essa leitura', async () => {
+    await reset();
+    await page.evaluate(() => { window.__h5p.list = () => ({ status: 'error', code: 'login', message: 'Não há sessão aberta no H5P.com neste Chrome.' }); });
+    await page.click(BTN);
+    await waitToast(/Entre no H5P\.com/);
+    assert.match(await toastText(), /Não consegui ler a pasta da equipe — nada foi criado\./);
+    assert.strictEqual(await page.$(MODAL), null);
+    same((await sent()).map(m => m.action), ['h5p-list']);
+    await page.evaluate(() => window.__setCfg('h5pFolderTeam', false));
+    await reset();
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    assert.strictEqual((await page.textContent(`${MODAL} [data-name-note]`)).trim(), '');
+    await page.click(`${MODAL} button:text-is("Cancelar")`);
+    same(await sent(), []);
   });
 
   await ok('canvas — erro no meio (sessão caiu no 2º quiz): para ali, diz onde parou e não mexe nas páginas', async () => {
