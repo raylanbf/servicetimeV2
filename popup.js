@@ -902,6 +902,11 @@ function buildSettings() {
   };
   $('settings-equation-paste').onchange = () => persist({ equationPasteEnabled: $('settings-equation-paste').checked });
 
+  // Botão "📁 Pasta H5P": também vale na hora — a página de módulos aberta
+  // mostra ou tira o botão sozinha.
+  $('settings-h5p-folder').checked  = !!S.h5pFolderEnabled;
+  $('settings-h5p-folder').onchange = () => persist({ h5pFolderEnabled: $('settings-h5p-folder').checked });
+
   $('btn-save-settings').onclick = async () => {
     const name = $('settings-name').value.trim();
     if (!name) return;
@@ -5841,6 +5846,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     canvasFlowTemplates: saved.canvasFlowTemplates ?? DEFAULT_CANVAS_FLOW_TEMPLATES,
     equationShortcutEnabled: saved.equationShortcutEnabled || false,
     equationPasteEnabled:    saved.equationPasteEnabled    || false,
+    h5pFolderEnabled:        saved.h5pFolderEnabled        || false,
   };
 
   // Bindings estáticos

@@ -186,7 +186,7 @@ A página não é gravada se o nome for ambíguo, se um vídeo não estiver na c
 
 ### Pasta H5P
 
-O botão **📁 Pasta H5P**, na página de Módulos ao lado do **+ Módulo**, prepara a UDA no H5P.com (por enquanto em *My Content*), em até três passos escolhidos na confirmação:
+O botão **📁 Pasta H5P**, na página de Módulos ao lado do **+ Módulo**, prepara a UDA no H5P.com (por enquanto em *My Content*), em até três passos escolhidos na confirmação. Ele só aparece com a chave **Botão "📁 Pasta H5P"** ligada nas configurações (`h5pFolderEnabled`, padrão desligado; vale na hora, sem recarregar).
 
 1. **Pasta** com o nome da disciplina (editável).
 2. **1 quiz por tópico** — um Multiple Choice para cada página "Tópico N", com o título exato da página, pergunta e alternativas provisórias e "Toolbar Below Content" desmarcado. Um por vez, com pausa entre eles.

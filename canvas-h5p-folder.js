@@ -15,6 +15,10 @@
 // neste Chrome; as páginas, pela API do Canvas, com a sessão desta aba. Nada é
 // duplicado: pasta ou quiz com o mesmo nome fica como está; página que já tem
 // o quiz não muda. Os quizzes saem um por vez, com uma pausa entre eles.
+//
+// O botão só aparece com a chave "Botão 📁 Pasta H5P" ligada nas
+// configurações (h5pFolderEnabled, padrão desligado); ligar ou desligar vale
+// na hora, sem recarregar a página.
 (() => {
   'use strict';
 
@@ -472,8 +476,10 @@
   }
 
   // ── Botão ─────────────────────────────────────────────────────────────
+  let enabled = false;   // chave das configurações
+
   function mount() {
-    if (document.getElementById(BTN_ID)) return;
+    if (!enabled || document.getElementById(BTN_ID)) return;
     const add = findAddModule();
     if (!add || !add.parentElement) return;
     const btn = document.createElement('button');
@@ -490,10 +496,28 @@
   // O Canvas monta o cabeçalho dos módulos depois do carregamento e pode
   // refazê-lo: observa e recoloca o botão.
   let queued = false;
-  new MutationObserver(() => {
+  const observer = new MutationObserver(() => {
     if (queued) return;
     queued = true;
     requestAnimationFrame(() => { queued = false; mount(); });
-  }).observe(document.documentElement, { childList: true, subtree: true });
-  mount();
+  });
+
+  // Desligar no meio de uma criação só tira o botão: o que já começou termina.
+  function apply(on) {
+    enabled = !!on;
+    if (enabled) {
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      mount();
+    } else {
+      observer.disconnect();
+      document.getElementById(BTN_ID)?.remove();
+    }
+  }
+
+  chrome.storage.local.get({ h5pFolderEnabled: false })
+    .then(cfg => apply(cfg.h5pFolderEnabled))
+    .catch(() => {});   // extensão recarregada com a página aberta
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && 'h5pFolderEnabled' in changes) apply(changes.h5pFolderEnabled.newValue);
+  });
 })();

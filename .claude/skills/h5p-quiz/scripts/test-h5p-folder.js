@@ -405,16 +405,30 @@ async function canvasTests(browser) {
     return route.fulfill({ contentType: 'text/html', body: PAGE });
   });
   // chrome.runtime.sendMessage falso: responde por ação, com o que o teste definir.
+  // chrome.storage falso: começa com a chave do botão desligada (o padrão);
+  // __setCfg muda e avisa os ouvintes, como o popup faria.
   await page.addInitScript(() => {
     document.cookie = '_csrf_token=abc%2B123; path=/';
     window.__sent = [];
     window.__h5p = { folder: null, quiz: () => null, list: () => ({ status: 'ok', items: [] }) };
-    Object.defineProperty(window, 'chrome', { configurable: true, value: { runtime: { sendMessage: async m => {
-      window.__sent.push(m);
-      if (m.action === 'h5p-create-folder') return window.__h5p.folder;
-      if (m.action === 'h5p-create-quiz') return window.__h5p.quiz(m);
-      if (m.action === 'h5p-list') return window.__h5p.list(m);
-    } } } });
+    const cfg = {}, listeners = [];
+    window.__setCfg = (key, value) => {
+      const oldValue = cfg[key];
+      cfg[key] = value;
+      listeners.forEach(fn => fn({ [key]: { oldValue, newValue: value } }, 'local'));
+    };
+    Object.defineProperty(window, 'chrome', { configurable: true, value: {
+      runtime: { sendMessage: async m => {
+        window.__sent.push(m);
+        if (m.action === 'h5p-create-folder') return window.__h5p.folder;
+        if (m.action === 'h5p-create-quiz') return window.__h5p.quiz(m);
+        if (m.action === 'h5p-list') return window.__h5p.list(m);
+      } },
+      storage: {
+        local: { get: async defaults => Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, k in cfg ? cfg[k] : v])) },
+        onChanged: { addListener: fn => listeners.push(fn) },
+      },
+    } });
   });
   await page.goto(`${CANVAS}/courses/${COURSE}/modules`);
   for (const f of ['h5p-width.js', 'h5p-insert.js', 'canvas-h5p-folder.js']) await page.addScriptTag({ content: fs.readFileSync(path.join(ROOT, f), 'utf8') });
@@ -443,6 +457,21 @@ async function canvasTests(browser) {
   }, [folderStatus, FOLDER, folderUrl, quizFn, listAll, existing]);
   // Só pasta + quizzes (sem a inserção nas páginas).
   const startQuizzesOnly = async () => { await page.click(BTN); await page.uncheck(`${MODAL} input[data-insert]`); await page.click(CREATE); };
+
+  await ok('canvas — com a chave desligada (padrão) não há botão; ligar mostra, desligar tira, sem recarregar', async () => {
+    await page.waitForSelector('.add_module_link');
+    await page.waitForTimeout(150);   // tempo do get() e de um quadro do observador
+    assert.strictEqual(await page.$(BTN), null);
+    await page.evaluate(() => window.__setCfg('h5pFolderEnabled', true));
+    await page.waitForSelector(BTN);
+    await page.evaluate(() => window.__setCfg('h5pFolderEnabled', false));
+    await page.waitForSelector(BTN, { state: 'detached' });
+    // O Canvas refazendo o cabeçalho não traz o botão de volta.
+    await page.evaluate(() => { const a = document.querySelector('.add_module_link'); a.replaceWith(a.cloneNode(true)); });
+    await page.waitForTimeout(150);
+    assert.strictEqual(await page.$(BTN), null);
+    await page.evaluate(() => window.__setCfg('h5pFolderEnabled', true));
+  });
 
   await ok('canvas — botão "📁 Pasta H5P" logo antes do "+ Módulo"', async () => {
     await page.waitForSelector(BTN);
