@@ -97,19 +97,23 @@ const parseForm = async (html, formId) => {
 const BIG = '1293060630437481148';   // 19 dígitos: não pode virar número
 const FOLDER = '1293060648414498908';
 
-// ── Pasta da equipe: a tela de uma pasta como a do H5P.com (gravação de
-// 13/11/2026: botão "New Folder" com data-target do modal, e os dois
-// formulários — pasta comum e pasta da organização — no fim da página).
+// ── Pasta da equipe: a tela como a do H5P.com de verdade (gravação da pasta
+// "UDA - UNIDADE DIGITAL DE APRENDIZAGEM" em 15/11/2026, perfil "author"):
+// o "New Folder" abre o modal da pasta comum (create-folder-form, POST
+// /content, type=1 — as pastas de lá são "Private folder"), aparece duas
+// vezes (o menu escondido repete a barra) e os dois formulários — pasta comum
+// e pasta da organização — ficam no fim da página.
 const TEAM_ID = '1293047322003249328';
-function fakeTeam({ pageTitle = 'UDA - UNIDADE DIGITAL DE APRENDIZAGEM', buttons = ['create-organization-folder-action-modal'], items = null,
+function fakeTeam({ pageTitle = 'UDA - UNIDADE DIGITAL DE APRENDIZAGEM', buttons = ['create-folder-action-modal'], items = null,
   formParent = TEAM_ID, orgAction = `${ORIGIN}/organization-folders`, hideCreated = false } = {}) {
   const calls = [];
   let next = 1293070000000000000n;
   const rows = items ?? [{ id: '1293050000000000001', title: 'Engenharia de Software', parent: TEAM_ID }, { id: '1293050000000000002', title: 'Direito Digital', parent: TEAM_ID }];
   const page = (url, html, status = 200) => ({ url, ok: status >= 200 && status < 300, status, text: async () => html });
+  const bar = () => `<ul class="content-links"><li><a class="btn single-action confirm-content-create-action-button create-content" data-target="#confirm-content-create-action-modal" href="#" title="Add Content"><span class="btn-text">Add Content</span></a></li>
+    ${buttons.map(t => `<li><a class="btn single-action create-folder-action-button" data-target="#${t}" href="#"><span class="btn-text">${/organization/.test(t) ? 'New Organization Folder' : 'New Folder'}</span></a></li>`).join('')}</ul>`;
   const html = () => `<html><head><title>${pageTitle} - H5P.com</title><meta name="csrf-token" content="CSRF123"></head><body>
-    <ul class="content-links"><li><a href="${ORIGIN}/content/create?parent=${TEAM_ID}" class="btn create-content">Add Content</a></li>
-    ${buttons.map(t => `<li><a class="btn single-action create-folder-action-button" data-target="#${t}" href="#"><span class="btn-text">${/organization/.test(t) ? 'New Organization Folder' : 'New Folder'}</span></a></li>`).join('')}</ul>
+    <nav class="navbar">${bar()}</nav><nav class="navbar navbar-hidden" aria-hidden="true">${bar()}</nav>
     <table>${rows.filter(i => !(hideCreated && i.created)).map(ROW).join('')}</table>
     <form method="POST" action="${ORIGIN}/content" id="create-folder-form"><input type="hidden" name="_token" value="CSRF123">
       <div data-action="create-folder" id="create-folder-action-modal"><input type="text" name="title" value="">
@@ -253,18 +257,18 @@ const toAB = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
     assert.strictEqual(r.folder.parent, TEAM_ID);
     const posts = h.calls.filter(c => c.method === 'POST');
     assert.strictEqual(posts.length, 1);
-    assert.strictEqual(posts[0].url, `${ORIGIN}/organization-folders`);
-    same(posts[0].fields, [['_token', 'CSRF123'], ['title', 'Ambiente teste - Raylan'], ['parent', TEAM_ID]]);
+    assert.strictEqual(posts[0].url, `${ORIGIN}/content`);
+    same(posts[0].fields, [['_token', 'CSRF123'], ['title', 'Ambiente teste - Raylan'], ['parent', TEAM_ID], ['type', '1']]);
     assert.ok(h.calls.every(c => c.method === 'POST' || c.url.startsWith(`${ORIGIN}/content/${TEAM_ID}`)), 'só lê a pasta da equipe');
     same([F.TEAM.id, F.TEAM.title], [TEAM_ID, 'UDA - UNIDADE DIGITAL DE APRENDIZAGEM']);
   });
 
-  await ok('equipe — se o "New Folder" da tela abre o formulário de pasta comum, é ele que vai (POST /content com type=1)', async () => {
-    const h = fakeTeam({ buttons: ['create-folder-action-modal'] });
+  await ok('equipe — se o "New Folder" da tela abrir o formulário de pasta da organização, é ele que vai (POST /organization-folders)', async () => {
+    const h = fakeTeam({ buttons: ['create-organization-folder-action-modal'] });
     assert.strictEqual((await F.createInTeam(h.fetchFn, parseFormSimple, { title: 'Nova UDA' })).status, 'created');
     const post = h.calls.find(c => c.method === 'POST');
-    assert.strictEqual(post.url, `${ORIGIN}/content`);
-    same(post.fields, [['_token', 'CSRF123'], ['title', 'Nova UDA'], ['parent', TEAM_ID], ['type', '1']]);
+    assert.strictEqual(post.url, `${ORIGIN}/organization-folders`);
+    same(post.fields, [['_token', 'CSRF123'], ['title', 'Nova UDA'], ['parent', TEAM_ID]]);
   });
 
   await ok('equipe — pasta com o mesmo nome já existe lá: não cria', async () => {
@@ -281,7 +285,7 @@ const toAB = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
       [{ buttons: [] }, /não achei o botão "New Folder"/],
       [{ buttons: ['create-folder-action-modal', 'create-organization-folder-action-modal'] }, /2 botões de pasta nova/],
       [{ formParent: FOLDER }, /não aponta para a pasta da equipe/],
-      [{ orgAction: 'https://outro.exemplo/organization-folders' }, /endereço inesperado/],
+      [{ buttons: ['create-organization-folder-action-modal'], orgAction: 'https://outro.exemplo/organization-folders' }, /endereço inesperado/],
     ];
     for (const [opts, re] of cases) {
       const h = fakeTeam(opts);

@@ -128,6 +128,10 @@ globalThis.H5P_FOLDER = (() => {
   // o botão "New Folder" da própria tela abre (pasta comum, POST /content, ou
   // pasta da organização, POST /organization-folders) e que ele aponta para
   // ela. O formulário vai como a tela o tem, só com o nome preenchido.
+  // Na tela real (gravação de 15/11/2026, perfil "author"), o "New Folder"
+  // de lá abre o da pasta comum: POST /content com parent = pasta da equipe e
+  // type=1 — as pastas das UDAs lá dentro são "Private folder" com
+  // colaboradores. O ensaio sobre esse HTML montou exatamente esse pedido.
   const TEAM = { id: '1293047322003249328', title: 'UDA - UNIDADE DIGITAL DE APRENDIZAGEM', label: 'PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM' };
 
   const pageTitleOf = html => decode(html.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/\s+-\s+H5P\.com\s*$/i, '').replace(/\s+/g, ' ').trim();
