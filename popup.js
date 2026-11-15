@@ -904,8 +904,21 @@ function buildSettings() {
 
   // Botão "📁 Pasta H5P": também vale na hora — a página de módulos aberta
   // mostra ou tira o botão sozinha.
-  $('settings-h5p-folder').checked  = !!S.h5pFolderEnabled;
-  $('settings-h5p-folder').onchange = () => persist({ h5pFolderEnabled: $('settings-h5p-folder').checked });
+  // O destino (My Content privado x pasta da equipe) só faz sentido com o
+  // botão ligado, então fica apagado sem ele. Vale a partir do próximo clique.
+  $('settings-h5p-folder').checked      = !!S.h5pFolderEnabled;
+  $('settings-h5p-folder-team').checked = !!S.h5pFolderTeam;
+  const syncH5pFolderTeam = () => {
+    const on = $('settings-h5p-folder').checked;
+    $('settings-h5p-folder-team').disabled = !on;
+    $('settings-h5p-folder-team-group').classList.toggle('is-disabled', !on);
+  };
+  syncH5pFolderTeam();
+  $('settings-h5p-folder').onchange = () => {
+    persist({ h5pFolderEnabled: $('settings-h5p-folder').checked });
+    syncH5pFolderTeam();
+  };
+  $('settings-h5p-folder-team').onchange = () => persist({ h5pFolderTeam: $('settings-h5p-folder-team').checked });
 
   $('btn-save-settings').onclick = async () => {
     const name = $('settings-name').value.trim();
@@ -5847,6 +5860,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     equationShortcutEnabled: saved.equationShortcutEnabled || false,
     equationPasteEnabled:    saved.equationPasteEnabled    || false,
     h5pFolderEnabled:        saved.h5pFolderEnabled        || false,
+    h5pFolderTeam:           saved.h5pFolderTeam           || false,
   };
 
   // Bindings estáticos

@@ -11,7 +11,10 @@
 //     value=<id> data-parent=<pasta-mãe, vazio na raiz> e o link
 //     <a href=".../content/<id>" class="fable-title …">nome</a>. 50 por página.
 //   • pasta: POST /content (multipart) com _token (o csrf-token da página),
-//     title, parent (vazio = raiz do My Content) e type=1.
+//     title, parent (vazio = raiz do My Content) e type=1 — pasta privada.
+//     Na pasta da equipe (createInTeam), o formulário que o botão "New
+//     Folder" da tela dela abrir (a tela também tem POST /organization-folders).
+//     Nada é apagado nem alterado: só GET e os POST de criar.
 //   • quiz: o formulário #laravel-h5p-form de /content/create?parent=<pasta>,
 //     com as opções padrão da tela, e o que o editor do H5P põe ao salvar
 //     (content-form/editor-parent.js do H5P.com): title, library
@@ -114,6 +117,83 @@ globalThis.H5P_FOLDER = (() => {
     // Confere na lista: a pasta nova é a que tem esse nome e não existia antes.
     const old = new Set(before.folders.map(f => f.id));
     const after = await list(fetchFn, parent);
+    const made = after.folders.find(f => norm(f.title) === norm(title) && !old.has(f.id));
+    return made ? { status: 'created', folder: made, title } : { status: 'unconfirmed', title };
+  }
+
+  // ── Pasta na pasta da equipe (produção) ──────────────────────────────
+  // PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM. Lá nada pode ser
+  // apagado, então nada é enviado sem antes conferir: (1) a página aberta é
+  // mesmo essa pasta (título); (2) a lista dela foi lida; (3) qual formulário
+  // o botão "New Folder" da própria tela abre (pasta comum, POST /content, ou
+  // pasta da organização, POST /organization-folders) e que ele aponta para
+  // ela. O formulário vai como a tela o tem, só com o nome preenchido.
+  const TEAM = { id: '1293047322003249328', title: 'UDA - UNIDADE DIGITAL DE APRENDIZAGEM', label: 'PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM' };
+
+  const pageTitleOf = html => decode(html.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/\s+-\s+H5P\.com\s*$/i, '').replace(/\s+/g, ' ').trim();
+
+  // O formulário que o botão "New Folder" da tela abre: { formId, action } ou { error }.
+  function newFolderFormOf(html) {
+    const targets = new Set();
+    for (const m of html.matchAll(/<(a|button)\b([^>]*)>([\s\S]*?)<\/\1>/gi)) {
+      const target = m[2].match(/\bdata-target=["']#([\w-]+)["']/i)?.[1];
+      const text = decode(m[3].replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+      if (target && /^new (organization )?folder$/i.test(text)) targets.add(target);
+    }
+    if (targets.size !== 1) {
+      return { error: targets.size ? `a tela tem ${targets.size} botões de pasta nova (${[...targets].join(', ')})` : 'não achei o botão "New Folder" na tela' };
+    }
+    const modal = [...targets][0];
+    for (const f of html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/gi)) {
+      if (!new RegExp(`\\bid=["']${modal}["']`).test(f[2])) continue;
+      const formId = f[1].match(/\bid=["']([^"']+)["']/i)?.[1];
+      const action = decode(f[1].match(/\baction=["']([^"']+)["']/i)?.[1] || '');
+      return formId ? { formId, action } : { error: 'o formulário da pasta nova não tem id' };
+    }
+    return { error: `não achei o formulário de "${modal}"` };
+  }
+
+  // { status: 'created' | 'exists' | 'unconfirmed', folder?, title }
+  async function createInTeam(fetchFn, parseForm, { title }) {
+    title = cleanTitle(title);
+    if (!title) throw fail('title', 'Nome da pasta vazio.');
+    const nothing = 'Nada foi criado.';
+
+    const html = await getPage(fetchFn, listUrl(TEAM.id));
+    const found = pageTitleOf(html);
+    if (norm(found) !== norm(TEAM.title)) {
+      throw fail('dest', `A pasta da equipe abriu como "${found || 'sem título'}", e não "${TEAM.title}". ${nothing}`);
+    }
+    const before = await list(fetchFn, TEAM.id);
+    if (!before.items.length) throw fail('dest', `Não consegui ler o que há na pasta da equipe. ${nothing}`);
+    const same = before.folders.find(f => norm(f.title) === norm(title));
+    if (same) return { status: 'exists', folder: same, title };
+
+    const form = newFolderFormOf(html);
+    if (form.error) throw fail('dest', `Não sei criar pasta na pasta da equipe: ${form.error}. ${nothing}`);
+    let action = null;
+    try { action = new URL(form.action, ORIGIN); } catch { /* fica null */ }
+    if (!action || action.origin !== ORIGIN || !['/content', '/organization-folders'].includes(action.pathname)) {
+      throw fail('dest', `O formulário de pasta nova da pasta da equipe vai para um endereço inesperado (${form.action || 'vazio'}). ${nothing}`);
+    }
+    const entries = await parseForm(html, form.formId);
+    if (!Array.isArray(entries) || !entries.some(([k]) => k === '_token')) throw fail('form', `Não consegui ler o formulário de pasta nova do H5P.com. ${nothing}`);
+    const parents = entries.filter(([k]) => k === 'parent').map(([, v]) => String(v));
+    if (parents.length !== 1 || parents[0] !== TEAM.id) throw fail('dest', `O formulário de pasta nova não aponta para a pasta da equipe. ${nothing}`);
+    if (!entries.some(([k]) => k === 'title')) throw fail('form', `O formulário de pasta nova não tem o campo do nome. ${nothing}`);
+
+    const body = new FormData();
+    let named = false;
+    for (const [k, v] of entries) {
+      if (k !== 'title') body.append(k, v);
+      else if (!named) { body.append('title', title); named = true; }
+    }
+    const res = await request(fetchFn, action.href, { method: 'POST', body });
+    if (res.status === 419) throw fail('expired', 'A sessão do H5P.com expirou. Recarregue o H5P.com e tente de novo.');
+    if (!res.ok) throw fail('http', `O H5P.com respondeu ${res.status} ao criar a pasta.`);
+
+    const old = new Set(before.folders.map(f => f.id));
+    const after = await list(fetchFn, TEAM.id);
     const made = after.folders.find(f => norm(f.title) === norm(title) && !old.has(f.id));
     return made ? { status: 'created', folder: made, title } : { status: 'unconfirmed', title };
   }
@@ -227,5 +307,5 @@ globalThis.H5P_FOLDER = (() => {
     return { status: 'created', item: { id, title, parent: String(parent), folder: false, url: `${ORIGIN}/content/${id}` }, title };
   }
 
-  return { ORIGIN, QUIZ_LIBRARY, create, createQuiz, list, itemsOf, foldersOf, csrfOf, lastPageOf, norm, quizParams, quizFields, formErrorOf };
+  return { ORIGIN, QUIZ_LIBRARY, TEAM, create, createInTeam, createQuiz, list, itemsOf, foldersOf, csrfOf, lastPageOf, norm, quizParams, quizFields, formErrorOf, pageTitleOf, newFolderFormOf };
 })();

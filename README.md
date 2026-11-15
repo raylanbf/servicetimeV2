@@ -186,7 +186,9 @@ A página não é gravada se o nome for ambíguo, se um vídeo não estiver na c
 
 ### Pasta H5P
 
-O botão **📁 Pasta H5P**, na página de Módulos ao lado do **+ Módulo**, prepara a UDA no H5P.com (por enquanto em *My Content*), em até três passos escolhidos na confirmação. Ele só aparece com a chave **Botão "📁 Pasta H5P"** ligada nas configurações (`h5pFolderEnabled`, padrão desligado; vale na hora, sem recarregar).
+O botão **📁 Pasta H5P**, na página de Módulos ao lado do **+ Módulo**, prepara a UDA no H5P.com, em até três passos escolhidos na confirmação. Ele só aparece com a chave **Botão "📁 Pasta H5P"** ligada nas configurações (`h5pFolderEnabled`, padrão desligado; vale na hora, sem recarregar).
+
+O destino é a chave **Salvar na pasta da equipe (produção)** (`h5pFolderTeam`, padrão desligado, lida a cada clique). Desligada (teste): raiz do *My Content*, pasta privada (POST `/content`, `type=1`). Ligada: dentro de *PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM* (`H5P_FOLDER.TEAM`, `/content/1293047322003249328`), onde nada pode ser apagado — `createInTeam` confere o título da página e a lista dela, e envia o formulário que o botão **New Folder** da própria tela abre (pasta comum ou `/organization-folders`), com `parent` igual à pasta da equipe; se algo não bater, nada é enviado. Em nenhum modo a extensão apaga ou altera o que já existe no H5P.com: só lê e cria.
 
 1. **Pasta** com o nome da disciplina (editável).
 2. **1 quiz por tópico** — um Multiple Choice para cada página "Tópico N", com o título exato da página e "Toolbar Below Content" desmarcado. Um por vez, com pausa entre eles. A questão vem dos `.h5p` escolhidos na confirmação (gerados pelo Extrator de Questões a partir do Word: um por questão, o `.zip` com todos ou um Question Set), ligados pelo "Tópico N" do título ou do nome do arquivo, com as configurações do arquivo; sem arquivo, vai provisória. Só Múltipla escolha 1.16 sem mídia; o conteúdo (`content.json`) vai pelo mesmo formulário de criação (`h5p-package.js`). Quiz que já existe não muda.

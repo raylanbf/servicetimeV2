@@ -8,9 +8,11 @@
 //   3. põe cada quiz na sua página, na caixa depois da faixa "Atividade de
 //      Fixação" (h5p-insert.js), com prévia, número do curso redigitado e
 //      conferência de cada página depois de gravar.
-// Por enquanto (teste) a pasta vai na raiz do My Content (pasta-mãe vazia);
-// depois, a pasta da equipe (PRODUÇÕES › UDA - UNIDADE DIGITAL DE
-// APRENDIZAGEM) entra em PARENT.
+// Onde: pela chave "Salvar na pasta da equipe" das configurações
+// (h5pFolderTeam, lida a cada clique). Desligada (padrão, para testes): na
+// raiz do My Content de quem está logado, como pasta privada. Ligada
+// (produção): dentro da pasta da equipe, PRODUÇÕES › UDA - UNIDADE DIGITAL
+// DE APRENDIZAGEM (h5p-folder.js › createInTeam), onde nada pode ser apagado.
 //
 // O H5P.com é acessado pelo background.js (h5p-folder.js), com a sessão aberta
 // neste Chrome; as páginas, pela API do Canvas, com a sessão desta aba. Nada é
@@ -31,7 +33,12 @@
   const MODAL_ID   = '__svc-h5p-folder-modal__';
   const TOAST_ID   = '__svc-h5p-folder-toast__';
   const PARENT     = '';   // '' = raiz do My Content
-  const WHERE      = 'My Content';
+  const MINE       = { team: false, label: 'My Content' };
+  const TEAM       = { team: true, label: 'PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM' };
+  async function destination() {
+    try { return (await chrome.storage.local.get({ h5pFolderTeam: false })).h5pFolderTeam === true ? TEAM : MINE; }
+    catch { return MINE; }
+  }
   const H5P_HOME   = 'https://pucminasvirtual.h5p.com/content';
   const PAUSE_MS   = 1500; // entre um quiz e outro
   const RECENT_MIN = 30;   // página editada há menos que isso: avisa na prévia
@@ -231,10 +238,17 @@
   // Confirmação: nome editável e o que fazer com os tópicos; opcionalmente,
   // os .h5p com as questões (h5p-package.js), ligados pelo "Tópico N".
   // Resolve { title, quizzes: bool, insert: bool, files: Map | null } ou null.
-  function ask(name, topics) {
+  function ask(name, topics, dest) {
     return modal(ui => {
       ui.line('📁 Criar pasta no H5P.com?', { fontSize: '14px', fontWeight: 'bold', color: '#e2e8f0' });
-      ui.line(`Onde: ${WHERE} (pucminasvirtual.h5p.com). Nome da pasta:`);
+      if (dest.team) {
+        const w = ui.line(`⚠ Pasta da equipe (${dest.label}): o que for criado lá não pode ser apagado. Para testar, desligue "Salvar na pasta da equipe" nas configurações.`, { color: '#fbbf24' });
+        w.setAttribute('data-dest', 'team');
+      } else {
+        ui.line('Destino de teste: My Content, em pasta privada (só você vê). Para a produção, ligue "Salvar na pasta da equipe" nas configurações.', { fontSize: '11px', color: '#94a3b8' })
+          .setAttribute('data-dest', 'mine');
+      }
+      ui.line(`Onde: ${dest.label} (pucminasvirtual.h5p.com). Nome da pasta:`);
       const input = ui.input(name, 'Nome da pasta');
       let quizzes = null, insert = null, files = null, reading = false;
       const { yes, enable } = ui.buttons('Cancelar', 'Criar');
@@ -506,14 +520,14 @@
     const setBtn = (text, disabled) => { const b = document.getElementById(BTN_ID); if (b) { b.textContent = text; b.disabled = disabled; } };
     try {
       setBtn('📁 Lendo…', true);
-      const [name, topics] = await Promise.all([courseName(), topicPages().catch(() => [])]);
+      const [name, topics, dest] = await Promise.all([courseName(), topicPages().catch(() => []), destination()]);
       setBtn(label, false);
-      const choice = await ask(name, topics);
+      const choice = await ask(name, topics, dest);
       if (!choice) return;
 
       setBtn('📁 Criando…', true);
-      toast(`Criando a pasta "${choice.title}"…`, 'busy');
-      const r = await send({ action: 'h5p-create-folder', title: choice.title, parent: PARENT });
+      toast(`Criando a pasta "${choice.title}"${dest.team ? ' na pasta da equipe' : ''}…`, 'busy');
+      const r = await send({ action: 'h5p-create-folder', title: choice.title, parent: PARENT, ...(dest.team ? { team: true } : {}) });
       if (r?.status === 'unconfirmed') {
         return toast(`O H5P.com recebeu o pedido, mas a pasta "${choice.title}" não apareceu na lista. Confira lá antes de tentar de novo.`, 'warn', { href: H5P_HOME, label: 'Abrir H5P.com' });
       }
@@ -521,8 +535,8 @@
 
       const open = { href: r.folder.url, label: 'Abrir pasta' };
       let line = r.status === 'created'
-        ? `✓ Pasta "${r.folder.title}" criada no H5P.com (${WHERE}).`
-        : `Pasta "${r.folder.title}" já existia no H5P.com (${WHERE}).`;
+        ? `✓ Pasta "${r.folder.title}" criada no H5P.com (${dest.label}).`
+        : `Pasta "${r.folder.title}" já existia no H5P.com (${dest.label}).`;
 
       let note = '';
       if (choice.quizzes) {
@@ -559,7 +573,7 @@
     btn.id = BTN_ID;
     btn.className = 'btn';
     btn.textContent = '📁 Pasta H5P';
-    btn.title = `Service Timer — cria no H5P.com (${WHERE}) uma pasta com o nome desta disciplina e um quiz por tópico, e insere cada quiz na sua página`;
+    btn.title = 'Service Timer — cria no H5P.com uma pasta com o nome desta disciplina e um quiz por tópico, e insere cada quiz na sua página';
     btn.style.marginInlineEnd = '6px';
     btn.addEventListener('click', onClick);
     add.before(btn);

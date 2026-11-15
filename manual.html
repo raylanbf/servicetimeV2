@@ -493,7 +493,12 @@ PROVA FINAL</pre>
     <h3 id="canvas-h5p-pasta">📁 Pasta H5P</h3>
     <p>Botão na página de <strong>Módulos</strong> do curso, ao lado do <strong>+ Módulo</strong>. Ele só aparece com a chave <strong>Botão "📁 Pasta H5P"</strong> ligada em <strong>⚙ Configurações → Canvas LMS</strong> (vem desligada). Prepara a UDA no H5P.com em até três passos, escolhidos na confirmação:</p>
     <ol>
-      <li><strong>Pasta:</strong> cria no H5P.com (por enquanto em <em>My Content</em>) uma pasta com o nome da disciplina. O nome vem do Canvas e pode ser editado antes de criar.</li>
+      <li><strong>Pasta:</strong> cria no H5P.com uma pasta com o nome da disciplina. O nome vem do Canvas e pode ser editado antes de criar. O destino depende da chave <strong>Salvar na pasta da equipe (produção)</strong> nas configurações:
+        <ul>
+          <li><strong>Desligada (padrão, para testes):</strong> no seu <em>My Content</em>, como pasta privada — só você vê.</li>
+          <li><strong>Ligada (produção):</strong> dentro de <em>PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM</em>, onde nada pode ser apagado. A confirmação avisa em amarelo. Antes de criar, a extensão confere que a página aberta é mesmo essa pasta, que conseguiu ler o que há nela e qual formulário o botão <strong>New Folder</strong> de lá usa; se algo não bater, não cria nada e diz o motivo.</li>
+        </ul>
+      </li>
       <li><strong>1 quiz por tópico:</strong> dentro da pasta, um <em>Multiple Choice</em> para cada página "Tópico N" dos módulos, com o título exato da página — o mesmo que o botão H5P do editor procura. "Toolbar Below Content" vem desmarcado, e os quizzes são criados um por vez.
         <ul>
           <li><strong>Com os arquivos do Extrator de Questões:</strong> em <strong>📎 Escolher arquivos .h5p</strong>, escolha os <code>.h5p</code> que o Extrator gerou do Word: um por questão (<code>TÓPICO 1.h5p</code>…), o <code>.zip</code> com todos ou o Question Set. Cada questão vai para a página "Tópico N" de mesmo número, com o enunciado, as alternativas, as justificativas e as configurações (Tentar novamente, Mostrar solução, pontuação) <strong>como vieram no arquivo</strong>. A lista mostra o arquivo de cada tópico, e o que ficou de fora aparece com o motivo.</li>
@@ -1000,6 +1005,7 @@ PROVA FINAL</pre>
         <tr><td>Atalho do editor de equação</td><td>Liga o <strong>Ctrl+Shift+Q</strong>, que abre o editor de equação do Canvas (padrão: desligado)</td></tr>
         <tr><td>Colar a fórmula copiada</td><td>Com o atalho ligado, também cola o LaTeX copiado no editor de equação (padrão: desligado)</td></tr>
         <tr><td>Botão "📁 Pasta H5P"</td><td>Mostra o botão <a href="#canvas-h5p-pasta">📁 Pasta H5P</a> na página de Módulos (padrão: desligado)</td></tr>
+        <tr><td>Salvar na pasta da equipe (produção)</td><td>Com o botão ligado: desligado, a pasta vai para o seu My Content como pasta privada (teste); ligado, para PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM, onde nada pode ser apagado (padrão: desligado)</td></tr>
       </tbody>
     </table>
 

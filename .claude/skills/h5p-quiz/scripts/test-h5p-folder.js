@@ -97,6 +97,45 @@ const parseForm = async (html, formId) => {
 const BIG = '1293060630437481148';   // 19 dígitos: não pode virar número
 const FOLDER = '1293060648414498908';
 
+// ── Pasta da equipe: a tela de uma pasta como a do H5P.com (gravação de
+// 13/11/2026: botão "New Folder" com data-target do modal, e os dois
+// formulários — pasta comum e pasta da organização — no fim da página).
+const TEAM_ID = '1293047322003249328';
+function fakeTeam({ pageTitle = 'UDA - UNIDADE DIGITAL DE APRENDIZAGEM', buttons = ['create-organization-folder-action-modal'], items = null,
+  formParent = TEAM_ID, orgAction = `${ORIGIN}/organization-folders`, hideCreated = false } = {}) {
+  const calls = [];
+  let next = 1293070000000000000n;
+  const rows = items ?? [{ id: '1293050000000000001', title: 'Engenharia de Software', parent: TEAM_ID }, { id: '1293050000000000002', title: 'Direito Digital', parent: TEAM_ID }];
+  const page = (url, html, status = 200) => ({ url, ok: status >= 200 && status < 300, status, text: async () => html });
+  const html = () => `<html><head><title>${pageTitle} - H5P.com</title><meta name="csrf-token" content="CSRF123"></head><body>
+    <ul class="content-links"><li><a href="${ORIGIN}/content/create?parent=${TEAM_ID}" class="btn create-content">Add Content</a></li>
+    ${buttons.map(t => `<li><a class="btn single-action create-folder-action-button" data-target="#${t}" href="#"><span class="btn-text">${/organization/.test(t) ? 'New Organization Folder' : 'New Folder'}</span></a></li>`).join('')}</ul>
+    <table>${rows.filter(i => !(hideCreated && i.created)).map(ROW).join('')}</table>
+    <form method="POST" action="${ORIGIN}/content" id="create-folder-form"><input type="hidden" name="_token" value="CSRF123">
+      <div data-action="create-folder" id="create-folder-action-modal"><input type="text" name="title" value="">
+      <input type="hidden" name="parent" value="${formParent}"><input type="hidden" name="type" value="1"></div></form>
+    <form method="POST" action="${orgAction}" id="create-organization-folder-form"><input type="hidden" name="_token" value="CSRF123">
+      <div data-action="create-organization-folder" id="create-organization-folder-action-modal"><input type="text" name="title" value="">
+      <input type="hidden" name="parent" value="${formParent}"></div></form></body></html>`;
+  async function fetchFn(url, opts = {}) {
+    const method = opts.method || 'GET';
+    const fields = opts.body instanceof FormData ? [...opts.body.entries()] : null;
+    calls.push({ method, url, fields });
+    if (method === 'POST') {
+      const f = Object.fromEntries(fields);
+      rows.push({ id: String(next++), title: f.title, parent: f.parent, created: true });
+      return page(`${ORIGIN}/content/${TEAM_ID}`, html());
+    }
+    return page(url, html());
+  }
+  return { fetchFn, calls };
+}
+// Campos de um formulário como o navegador enviaria (versão simples do formEntries do offscreen).
+const parseFormSimple = async (html, id) => {
+  const form = html.match(new RegExp(`<form\\b[^>]*id="${id}"[^>]*>([\\s\\S]*?)</form>`))?.[1];
+  return form == null ? null : [...form.matchAll(/<input\b[^>]*name="([^"]+)"[^>]*value="([^"]*)"/g)].map(m => [m[1], m[2]]);
+};
+
 // ── .h5p como o Extrator de Questões (Machine-Learning, src/h5p.ts) gera ──
 const zlib = require('zlib');
 // ZIP mínimo: deflate (8), como o fflate do Extrator, ou sem compressão (0), como o .zip de vários .h5p.
@@ -204,6 +243,60 @@ const toAB = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
     const h = fakeH5p();
     await assert.rejects(F.create(h.fetchFn, { title: '   ' }), e => e.code === 'title');
     assert.strictEqual(h.calls.length, 0);
+  });
+
+  await ok('equipe — confere a pasta (título e lista), manda o formulário que o "New Folder" da tela abre, só com o nome, e confirma na lista', async () => {
+    const h = fakeTeam();
+    const r = await F.createInTeam(h.fetchFn, parseFormSimple, { title: '  Ambiente   teste - Raylan ' });
+    assert.strictEqual(r.status, 'created');
+    assert.strictEqual(r.folder.title, 'Ambiente teste - Raylan');
+    assert.strictEqual(r.folder.parent, TEAM_ID);
+    const posts = h.calls.filter(c => c.method === 'POST');
+    assert.strictEqual(posts.length, 1);
+    assert.strictEqual(posts[0].url, `${ORIGIN}/organization-folders`);
+    same(posts[0].fields, [['_token', 'CSRF123'], ['title', 'Ambiente teste - Raylan'], ['parent', TEAM_ID]]);
+    assert.ok(h.calls.every(c => c.method === 'POST' || c.url.startsWith(`${ORIGIN}/content/${TEAM_ID}`)), 'só lê a pasta da equipe');
+    same([F.TEAM.id, F.TEAM.title], [TEAM_ID, 'UDA - UNIDADE DIGITAL DE APRENDIZAGEM']);
+  });
+
+  await ok('equipe — se o "New Folder" da tela abre o formulário de pasta comum, é ele que vai (POST /content com type=1)', async () => {
+    const h = fakeTeam({ buttons: ['create-folder-action-modal'] });
+    assert.strictEqual((await F.createInTeam(h.fetchFn, parseFormSimple, { title: 'Nova UDA' })).status, 'created');
+    const post = h.calls.find(c => c.method === 'POST');
+    assert.strictEqual(post.url, `${ORIGIN}/content`);
+    same(post.fields, [['_token', 'CSRF123'], ['title', 'Nova UDA'], ['parent', TEAM_ID], ['type', '1']]);
+  });
+
+  await ok('equipe — pasta com o mesmo nome já existe lá: não cria', async () => {
+    const h = fakeTeam();
+    const r = await F.createInTeam(h.fetchFn, parseFormSimple, { title: 'direito  digital' });
+    same([r.status, r.folder.id], ['exists', '1293050000000000002']);
+    assert.ok(!h.calls.some(c => c.method === 'POST'));
+  });
+
+  await ok('equipe — nada é enviado se: a página não é a pasta da UDA, a lista vem vazia, falta o botão ou há dois, o formulário aponta para outra pasta ou outro site', async () => {
+    const cases = [
+      [{ pageTitle: 'PRODUÇÕES' }, /abriu como "PRODUÇÕES"/],
+      [{ items: [] }, /Não consegui ler o que há na pasta da equipe/],
+      [{ buttons: [] }, /não achei o botão "New Folder"/],
+      [{ buttons: ['create-folder-action-modal', 'create-organization-folder-action-modal'] }, /2 botões de pasta nova/],
+      [{ formParent: FOLDER }, /não aponta para a pasta da equipe/],
+      [{ orgAction: 'https://outro.exemplo/organization-folders' }, /endereço inesperado/],
+    ];
+    for (const [opts, re] of cases) {
+      const h = fakeTeam(opts);
+      await assert.rejects(F.createInTeam(h.fetchFn, parseFormSimple, { title: 'Nova UDA' }), e => e.code === 'dest' && re.test(e.message) && /Nada foi criado\./.test(e.message));
+      assert.ok(!h.calls.some(c => c.method === 'POST'), `sem POST: ${JSON.stringify(opts)}`);
+    }
+    const h = fakeTeam();
+    await assert.rejects(F.createInTeam(h.fetchFn, async () => null, { title: 'Nova UDA' }), e => e.code === 'form');
+    assert.ok(!h.calls.some(c => c.method === 'POST'));
+  });
+
+  await ok('equipe — pedido aceito sem a pasta aparecer na lista: "unconfirmed" (não tenta de novo)', async () => {
+    const h = fakeTeam({ hideCreated: true });
+    assert.strictEqual((await F.createInTeam(h.fetchFn, parseFormSimple, { title: 'Nova UDA' })).status, 'unconfirmed');
+    assert.strictEqual(h.calls.filter(c => c.method === 'POST').length, 1);
   });
 
   const T1 = 'Tópico 1 – Níveis de Maturidade em Compliance e Integridade: Diagnóstico e Realidade Organizacional';
@@ -711,6 +804,26 @@ async function canvasTests(browser) {
     await page.click(CREATE);
     await waitToast(/Nada foi criado/);
     same((await sent()).map(m => m.action), ['h5p-create-folder']);
+  });
+
+  await ok('canvas — destino: desligado, avisa que é o My Content (teste); ligado "Salvar na pasta da equipe", avisa que lá nada pode ser apagado e o pedido vai para a pasta da equipe', async () => {
+    await reset();
+    await setup('created');
+    await page.click(BTN);
+    assert.strictEqual(await page.getAttribute(`${MODAL} [data-dest]`, 'data-dest'), 'mine');
+    assert.match(await page.textContent(MODAL), /Onde: My Content/);
+    await page.click(`${MODAL} button:text-is("Cancelar")`);
+    await page.evaluate(() => window.__setCfg('h5pFolderTeam', true));
+    await page.click(BTN);
+    assert.strictEqual(await page.getAttribute(`${MODAL} [data-dest]`, 'data-dest'), 'team');
+    assert.match(await page.textContent(MODAL), /⚠ Pasta da equipe \(PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM\): o que for criado lá não pode ser apagado\./);
+    await page.uncheck(`${MODAL} input[data-quizzes]`);
+    await page.uncheck(`${MODAL} input[data-insert]`);
+    await page.click(CREATE);
+    await waitToast(/criada no H5P/);
+    same(await sent(), [{ action: 'h5p-create-folder', title: 'Ambiente teste - Raylan', parent: '', team: true }]);
+    assert.match(await toastText(), /criada no H5P\.com \(PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM\)\./);
+    await page.evaluate(() => window.__setCfg('h5pFolderTeam', false));
   });
 
   await ok('canvas — erro no meio (sessão caiu no 2º quiz): para ali, diz onde parou e não mexe nas páginas', async () => {
