@@ -196,7 +196,7 @@ O destino é a chave **Salvar na pasta da equipe (produção)** (`h5pFolderTeam`
 
 Nada é duplicado nem apagado. O H5P.com não tem API: o `background.js` usa a sessão aberta no Chrome e os mesmos formulários da tela (`h5p-folder.js`; o formulário de criação de quiz é lido no documento offscreen, `offscreen.js`). A regra da caixa é a do botão H5P do editor (`h5p-width.js`), e a inserção em `h5p-insert.js`. Regressão: `.claude/skills/h5p-quiz/scripts/test-h5p-folder.js`.
 
-> Para descobrir como um site faz uma ação (sem API), use o **Gravador de Ações** em `ferramentas/gravador-acoes/` — extensão separada, veja o README da pasta.
+> Para descobrir como um site faz uma ação (sem API), use o **Gravador de Ações** em `C:\Users\Casa\ferramentas\gravador-acoes\` — extensão separada, fora desta pasta para não ir junto com o Service Timer; veja o README de lá.
 
 ---
 
