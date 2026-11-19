@@ -1,0 +1,12 @@
+{
+  "name": "extensao-chrome-canvas-testes",
+  "private": true,
+  "scripts": {
+    "testar-api": "node testar-canvas-api.js",
+    "testar-confirmar": "node testar-confirmar-curso.js",
+    "test": "node testar-canvas-api.js && node testar-confirmar-curso.js"
+  },
+  "devDependencies": {
+    "playwright-core": "1.47.2"
+  }
+}
