@@ -615,7 +615,7 @@ function h5pResizeMain() {
 // ficam como estão. A regra fica no video-size.js; o acesso ao editor
 // (HTML ou visual), no editor-access.js, o mesmo do Redimensionar H5P.
 async function resizeVideos(tabId) {
-  const { video_width: w, video_height: h } = await chrome.storage.local.get({ video_width: 700, video_height: 422 });
+  const { video_width: w, video_height: h } = await chrome.storage.local.get({ video_width: 700, video_height: 442 });
   await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['editor-access.js', 'video-size.js'] });
   await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: videoResizeMain, args: [w, h] });
 }
@@ -650,15 +650,17 @@ function videoResizeMain(w, h) {
   }
 }
 
-// O padrão dos vídeos passou de 620×398 para 700×422 (v3.15). Salvar as
-// Configurações grava as dimensões mesmo sem mexer nelas, então quem tem o
-// padrão antigo gravado passa para o novo — uma vez só: quem escolher 620×398
-// de novo depois disso fica com 620×398.
+// O padrão dos vídeos passou de 620×398 para 700×422 (v3.15) e depois para
+// 700×442, o tamanho em que o Studio insere os vídeos. Salvar as
+// Configurações grava as dimensões mesmo sem mexer nelas, então quem tem um
+// padrão antigo gravado passa para o novo — uma vez só por troca: quem
+// escolher o tamanho antigo de novo depois disso fica com ele.
 async function migrateVideoDefault() {
-  const s = await chrome.storage.local.get(['video_width', 'video_height', 'videoDefault700']);
-  if (s.videoDefault700) return;
-  const patch = { videoDefault700: true };
-  if (s.video_width === 620 && s.video_height === 398) Object.assign(patch, { video_width: 700, video_height: 422 });
+  const s = await chrome.storage.local.get(['video_width', 'video_height', 'videoDefault700', 'videoDefault442']);
+  if (s.videoDefault442) return;
+  const patch = { videoDefault700: true, videoDefault442: true };
+  const is = (w, h) => s.video_width === w && s.video_height === h;
+  if (is(700, 422) || (!s.videoDefault700 && is(620, 398))) Object.assign(patch, { video_width: 700, video_height: 442 });
   await chrome.storage.local.set(patch);
 }
 

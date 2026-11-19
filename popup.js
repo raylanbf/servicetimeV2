@@ -924,7 +924,7 @@ function buildSettings() {
     const name = $('settings-name').value.trim();
     if (!name) return;
     const w          = parseInt($('settings-video-w').value, 10) || 700;
-    const h          = parseInt($('settings-video-h').value, 10) || 422;
+    const h          = parseInt($('settings-video-h').value, 10) || 442;
     const key        = $('settings-openrouter').value.trim();
     const toLines = el => $(el).value.split('\n').map(s => s.trim()).filter(Boolean);
     const flowTemplates = toLines('settings-flow-templates');
@@ -6262,7 +6262,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     registros:     saved.registros     || [],
     suspended:     saved.suspended     || [],
     video_width:    saved.video_width    || 700,
-    video_height:   saved.video_height   || 422,
+    video_height:   saved.video_height   || 442,
     openrouter_key: saved.openrouter_key || '',
     uploading:      saved.uploading      || false,
     uploadResult:  saved.uploadResult  || null,
