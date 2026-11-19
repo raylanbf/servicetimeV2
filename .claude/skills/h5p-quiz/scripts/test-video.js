@@ -61,6 +61,12 @@ const CASES = [
   ['Formulário do Google — não é vídeo',
     '<iframe src="https://docs.google.com/forms/d/e/x/viewform?embedded=true" width="640" height="800" frameborder="0"></iframe>',
     null],
+  ['Áudio do Canvas (data-media-type="audio", altura em px) — não é vídeo',
+    '<iframe style="width: 320px; height: 50px; display: inline-block;" title="Áudio" data-media-type="audio" src="/media_attachments_iframe/9?type=audio&amp;embedded=true" allowfullscreen="allowfullscreen" data-media-id="9"></iframe>',
+    null],
+  ['Áudio do Canvas só com type=audio no src — não é vídeo',
+    '<iframe style="width: 300px; height: 50px;" src="/media_objects_iframe/m-abc?embedded=true&amp;type=audio" allowfullscreen="allowfullscreen"></iframe>',
+    null],
 ];
 const VIDEOS = CASES.filter(c => c[2]).length;   // 6 vídeos que mudam
 

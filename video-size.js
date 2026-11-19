@@ -60,6 +60,10 @@ window.__svcVideoSize = (() => {
   // fixo; senão { out: tag nova (igual se já está em w×h), label, size }.
   function patchTag(tag, w, h) {
     const attrs = parseAttrs(tag);
+    // Áudio enviado ao Canvas usa o mesmo player da mídia (media_..._iframe),
+    // marcado por data-media-type="audio" ou type=audio no src: fica como está.
+    if (/^audio$/i.test(attrs['data-media-type']?.value || '') ||
+        /\/media_(?:attachments|objects)_iframe\b[^"']*[?&](?:amp;)?type=audio\b/i.test(attrs.src?.value || '')) return null;
     const video = 'data-studio-resizable' in attrs || /^video$/i.test(attrs['data-media-type']?.value || '') ||
       VIDEO_SRC.test(attrs.src?.value || '');
     if (!video) return null;
