@@ -1444,15 +1444,18 @@ async function parseFormOffscreen(html, formId) {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const fetchFn = fetch.bind(globalThis);
   let job;
+  // team: a pasta da equipe (produção) do tipo da disciplina — kind 'uda'
+  // (padrão) ou 'micro' (Microfundamento: PRODUÇÕES › GRADUAÇÃO EAD).
   if (msg?.action === 'h5p-create-folder') {
     job = msg.team === true
-      ? H5P_FOLDER.createInTeam(fetchFn, parseFormOffscreen, { title: msg.title })   // pasta da equipe (produção)
+      ? H5P_FOLDER.createInTeam(fetchFn, parseFormOffscreen, { title: msg.title, kind: msg.kind ?? 'uda' })   // pasta da equipe (produção)
       : H5P_FOLDER.create(fetchFn, { title: msg.title, parent: msg.parent || '' });  // My Content, pasta privada
   }
   else if (msg?.action === 'h5p-create-quiz') job = H5P_FOLDER.createQuiz(fetchFn, parseFormOffscreen, { title: msg.title, parent: msg.parent, params: msg.params ?? null });
   else if (msg?.action === 'h5p-list') {
-    const parent = msg.team === true ? H5P_FOLDER.TEAM.id : (msg.parent || '');   // team: a pasta da equipe
-    job = H5P_FOLDER.list(fetchFn, parent).then(({ items }) => ({ status: 'ok', items }));
+    job = Promise.resolve()
+      .then(() => H5P_FOLDER.list(fetchFn, msg.team === true ? H5P_FOLDER.teamOf(msg.kind ?? 'uda').id : (msg.parent || '')))
+      .then(({ items }) => ({ status: 'ok', items }));
   }
   else return;
   job.then(sendResponse, e => sendResponse({ status: 'error', code: e.code || 'error', message: e.message || String(e) }));

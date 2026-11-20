@@ -297,6 +297,36 @@ const toAB = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
     assert.ok(!h.calls.some(c => c.method === 'POST'));
   });
 
+  // GRADUAÇÃO EAD (Microfundamento), como na gravação de 20/11/2026: o mesmo
+  // "New Folder" da pasta comum, com as pastas "Microfundamento: …" dentro.
+  const GRAD_ID = '1293047321834512708';
+  const GRAD_ROWS = [{ id: '1293050000000000011', title: 'Microfundamento: Estatística de Dados Gerenciais', parent: GRAD_ID },
+    { id: '1293050000000000012', title: 'Microfundamento: Inovação na Concepção de Negócios', parent: GRAD_ID }];
+
+  await ok('equipe Microfundamento — kind "micro": confere e cria dentro de PRODUÇÕES › GRADUAÇÃO EAD; nome igual usa a que existe', async () => {
+    same([F.teamOf('micro').id, F.teamOf('micro').title, F.teamOf().id], [GRAD_ID, 'GRADUAÇÃO EAD', TEAM_ID]);
+    const h = fakeTeam({ pageTitle: 'GRADUAÇÃO EAD', formParent: GRAD_ID, items: GRAD_ROWS });
+    const r = await F.createInTeam(h.fetchFn, parseFormSimple, { title: 'Microfundamento: Gestão de Projetos', kind: 'micro' });
+    same([r.status, r.folder.parent], ['created', GRAD_ID]);
+    same(h.calls.find(c => c.method === 'POST').fields, [['_token', 'CSRF123'], ['title', 'Microfundamento: Gestão de Projetos'], ['parent', GRAD_ID], ['type', '1']]);
+    assert.ok(h.calls.every(c => c.method === 'POST' || c.url.startsWith(`${ORIGIN}/content/${GRAD_ID}`)), 'só lê a GRADUAÇÃO EAD');
+    const h2 = fakeTeam({ pageTitle: 'GRADUAÇÃO EAD', formParent: GRAD_ID, items: GRAD_ROWS });
+    const r2 = await F.createInTeam(h2.fetchFn, parseFormSimple, { title: 'microfundamento:  inovação na concepção de negócios', kind: 'micro' });
+    same([r2.status, r2.folder.id], ['exists', '1293050000000000012']);
+    assert.ok(!h2.calls.some(c => c.method === 'POST'));
+  });
+
+  await ok('equipe Microfundamento — nada é enviado se a tela for a da UDA, se o formulário apontar para a pasta da UDA ou se o tipo for desconhecido', async () => {
+    const wrongPage = fakeTeam({ items: GRAD_ROWS });   // título "UDA - UNIDADE DIGITAL…"
+    await assert.rejects(F.createInTeam(wrongPage.fetchFn, parseFormSimple, { title: 'X', kind: 'micro' }), e => e.code === 'dest' && /abriu como "UDA - UNIDADE DIGITAL DE APRENDIZAGEM", e não "GRADUAÇÃO EAD"/.test(e.message));
+    const wrongForm = fakeTeam({ pageTitle: 'GRADUAÇÃO EAD', items: GRAD_ROWS });   // parent = pasta da UDA
+    await assert.rejects(F.createInTeam(wrongForm.fetchFn, parseFormSimple, { title: 'X', kind: 'micro' }), e => e.code === 'dest' && /não aponta para a pasta da equipe/.test(e.message));
+    const h = fakeTeam();
+    await assert.rejects(F.createInTeam(h.fetchFn, parseFormSimple, { title: 'X', kind: 'constructor' }), e => e.code === 'dest' && /Tipo de disciplina desconhecido/.test(e.message));
+    for (const x of [wrongPage, wrongForm, h]) assert.ok(!x.calls.some(c => c.method === 'POST'));
+    assert.strictEqual(h.calls.length, 0, 'tipo desconhecido nem lê');
+  });
+
   await ok('equipe — pedido aceito sem a pasta aparecer na lista: "unconfirmed" (não tenta de novo)', async () => {
     const h = fakeTeam({ hideCreated: true });
     assert.strictEqual((await F.createInTeam(h.fetchFn, parseFormSimple, { title: 'Nova UDA' })).status, 'unconfirmed');
@@ -451,6 +481,7 @@ const toAB = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
       await offscreenTests(browser);
       await insertRuleTests(browser);
       await canvasTests(browser);
+      await microCanvasTests(browser);
     } finally { await browser.close(); }
   }
   console.log(`\n${n} verificações OK`);
@@ -573,6 +604,62 @@ async function insertRuleTests(browser) {
     const two = await plan(TOPIC(MARKER_BOX) + BAND + BOX_OPEN + '</div>');
     assert.strictEqual(two.status, 'error');
     assert.match(two.error, /2 faixas/);
+  });
+
+  // ── Microfundamento (modelo antigo): página real, curso 111810 ──
+  // Sem a faixa: a referência é a imagem banner-atividades-fixacao, e o quiz
+  // fica no parágrafo logo depois do bloco dela.
+  const MF = fs.readFileSync(path.join(__dirname, 'fixtures', 'microfundamento-tema.html'), 'utf8');
+  const MF_OLD = '1293064802061305358';
+  const MF_SLOT = MF.match(/<p style="text-align: center;"><iframe class="lti-embed" style="width: 100%; height: 600px;" title=""[^>]*1293064802061305358[^>]*><\/iframe><\/p>/)[0];
+  const MF_BANNER = MF.match(/<div style="margin-top: 0px; text-align: center;"><img id="5964569"[^>]*><\/div>/)[0];
+  const MF_NEW = `<p style="text-align: center;">${embed}</p>`;
+  const MF_NOSLOT = MF.replace(MF_SLOT + '\n', '');
+
+  await ok('Microfundamento — página real: troca o H5P logo abaixo do banner; o resto (vídeo do Studio, menu, imagens) fica byte a byte igual', async () => {
+    const r = await plan(MF);
+    assert.strictEqual(r.status, 'replace');
+    assert.strictEqual(r.layout, 'micro');
+    same(r.oldIds, [MF_OLD]);
+    assert.strictEqual(r.body, MF.replace(MF_SLOT, MF_NEW));
+    assert.strictEqual((await plan(r.body)).status, 'same', 'de novo: nada a fazer');
+    assert.strictEqual((await plan(MF, MF_OLD)).status, 'same', 'já com este quiz: nada muda');
+  });
+
+  await ok('Microfundamento — sem o quiz (logo abaixo vem o "Voltar ao topo"): parágrafo novo logo depois do banner', async () => {
+    const r = await plan(MF_NOSLOT);
+    assert.strictEqual(r.status, 'insert');
+    assert.strictEqual(r.body, MF_NOSLOT.replace(MF_BANNER, MF_BANNER + MF_NEW));
+    assert.strictEqual((await plan(r.body)).status, 'same', 'de novo: nada a fazer');
+  });
+
+  await ok('Microfundamento — parágrafo vazio ou com o marcador logo abaixo do banner: o quiz entra nele', async () => {
+    assert.strictEqual((await plan(MF.replace(MF_SLOT, '<p>&nbsp;</p>'))).body, MF.replace(MF_SLOT, `<p>${embed}</p>`));
+    const marker = '<p style="text-align: center;">[iframe - Atividade de Fixa&ccedil;&atilde;o H5P]</p>';
+    assert.strictEqual((await plan(MF.replace(MF_SLOT, marker))).body, MF.replace(MF_SLOT, MF_NEW));
+  });
+
+  await ok('Microfundamento — casos duvidosos ficam de fora: H5P com texto, H5P mais abaixo, dois banners, banner com texto', async () => {
+    const cases = [
+      [MF.replace(MF_SLOT, MF_SLOT.replace('</iframe>', '</iframe> Responda')), /outro conteúdo além do H5P/],
+      [MF.replace(MF_SLOT, '<p>Responda:</p>' + MF_SLOT), /não logo abaixo/],
+      [MF.replace(MF_SLOT, '<p>&nbsp;</p>' + MF_SLOT), /não logo abaixo/],
+      [MF.replace(MF_BANNER, MF_BANNER + MF_BANNER), /2 banners/],
+      [MF.replace(MF_BANNER, MF_BANNER.replace('<img', 'Atividades <img')), /bloco só dele/],
+    ];
+    for (const [html, re] of cases) {
+      const r = await plan(html);
+      assert.strictEqual(r.status, 'error', String(re));
+      assert.match(r.error, re);
+      assert.strictEqual(r.body, undefined);
+    }
+  });
+
+  await ok('UDA com a faixa e também uma imagem "banner-atividades-fixacao": vale a faixa (a regra da UDA não muda)', async () => {
+    const withImg = html => html.replace(BAND, '<div><img src="/b.png" alt="banner-atividades-fixacao.jpg"></div>\n' + BAND);
+    const r = await plan(withImg(TOPIC(MARKER_BOX)));
+    assert.strictEqual(r.layout, 'uda');
+    assert.strictEqual(r.body, withImg(TOPIC(`\n    <p style="text-align: center;">${embed}</p>\n`)));
   });
   await page.close();
 }
@@ -825,7 +912,7 @@ async function canvasTests(browser) {
     await page.uncheck(`${MODAL} input[data-insert]`);
     await page.click(CREATE);
     await waitToast(/criada no H5P/);
-    same(await sent(), [{ action: 'h5p-list', team: true }, { action: 'h5p-create-folder', title: 'Ambiente teste - Raylan', parent: '', team: true }]);
+    same(await sent(), [{ action: 'h5p-list', team: true, kind: 'uda' }, { action: 'h5p-create-folder', title: 'Ambiente teste - Raylan', parent: '', team: true, kind: 'uda' }]);
     assert.match(await toastText(), /criada no H5P\.com \(PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM\)\./);
     await page.evaluate(() => window.__setCfg('h5pFolderTeam', false));
   });
@@ -985,5 +1072,217 @@ async function canvasTests(browser) {
     assert.strictEqual(await page.$$eval(BTN, b => b.length), 1);
   });
 
+  await page.close();
+}
+
+// Microfundamento: módulos como os do curso 111810 (UNIDADE N - Tema N - …,
+// mais de 6 páginas, Síntese e Atividade avaliativa de fora) e páginas no
+// modelo antigo, com o banner de Atividades de Fixação.
+async function microCanvasTests(browser) {
+  const C = 111810;
+  const U1 = ['Inovação: conceito', 'Tipologias de Inovação: Radical x Incremental', 'Inovação: concorrência e competitividade',
+    'Inovação: Diferenciação e Posicionamento', 'Ecossistema de Inovação', 'Difusão da Inovação'];
+  const U2 = ['Introdução a Negócios Inovadores', 'Spin-offs, Spin-Ins e Spin-Outs', 'Oportunidades de Mercado', 'Transformação Digital', 'Tecnologias Emergentes'];
+  const TEMA = [1, 1, 2, 2, 3, 3, 1, 1, 2, 3, 3];
+  const TOPICS = [...U1.map(t => ['UNIDADE 1', t]), ...U2.map(t => ['UNIDADE 2', t])].map(([u, t], i) => `${u} - Tema ${TEMA[i]} - ${t}`);
+  const URLS = TOPICS.map((_, i) => `pagina-${i + 1}`);
+  const item = i => ({ title: TOPICS[i], type: 'Page', page_url: URLS[i] });
+  const MODULES = [
+    { id: 1, name: 'UNIDADE 1 - INOVAÇÃO', items: [...[0, 1, 2, 3, 4, 5].map(item), { title: 'UNIDADE 1 - Síntese e referências', type: 'Page', page_url: 'sintese-1' }] },
+    { id: 2, name: 'UNIDADE 1 - ATIVIDADE AVALIATIVA', items: [{ title: 'ATIVIDADE OBJETIVA - M54a - Inovação', type: 'Quiz' }] },
+    { id: 3, name: 'UNIDADE 2 - NEGÓCIOS INOVADORES', items: [...[6, 7, 8, 9, 10].map(item), { title: 'UNIDADE 2 - Síntese e referências', type: 'Page', page_url: 'sintese-2' }] },
+  ];
+  const MF = fs.readFileSync(path.join(__dirname, 'fixtures', 'microfundamento-tema.html'), 'utf8');
+  const MF_SLOT = MF.match(/<p style="text-align: center;"><iframe class="lti-embed" style="width: 100%; height: 600px;" title=""[^>]*1293064802061305358[^>]*><\/iframe><\/p>/)[0];
+  const MF_BANNER = MF.match(/<div style="margin-top: 0px; text-align: center;"><img id="5964569"[^>]*><\/div>/)[0];
+  const pages = {};
+  URLS.forEach((u, i) => { pages[u] = { body: i === 0 ? MF : MF.replace(MF_SLOT + '\n', ''), updated_at: '2026-01-01T00:00:00Z' }; });
+  // A última página ficou no modelo comum (com a faixa): insere, mas a prévia avisa.
+  pages[URLS[10]].body = TOPIC(MARKER_BOX);
+  const puts = [];
+  // O que o Canvas falso mostra: nome do curso, módulos da API e títulos na página.
+  const course = { name: 'Microfundamento: Inovação na Concepção de Negócios (MODELO)', modules: MODULES, dom: [] };
+
+  const page = await browser.newPage();
+  await page.route(`${CANVAS}/**`, async route => {
+    const req = route.request();
+    const u = new URL(req.url());
+    const json = body => route.fulfill({ status: 200, contentType: 'application/json', body: 'while(1);' + JSON.stringify(body) });
+    if (u.pathname === `/api/v1/courses/${C}`) return json({ id: C, name: course.name });
+    if (u.pathname === `/api/v1/courses/${C}/modules`) return json(course.modules);
+    const pm = u.pathname.match(new RegExp(`^/api/v1/courses/${C}/pages/([^/]+)$`));
+    if (pm) {
+      const url = decodeURIComponent(pm[1]);
+      if (req.method() === 'PUT') {
+        const body = JSON.parse(req.postData()).wiki_page.body;
+        puts.push({ url, body });
+        pages[url] = { ...pages[url], body };
+      }
+      return json({ url, ...pages[url] });
+    }
+    return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <div id="content"><div class="header-bar"><button class="btn btn-primary add_module_link">Módulo</button></div>
+      <div id="context_modules">${course.dom.map(t => `<li class="context_module_item"><span class="item_name"><a class="ig-title title item_link">${t}</a></span></li>`).join('')}</div></div></body></html>` });
+  });
+  const QUIZ = i => String(1293070000000000000n + BigInt(i));
+  // window.__team liga "Salvar na pasta da equipe"; a GRADUAÇÃO EAD tem as
+  // pastas da gravação de 20/11/2026.
+  await page.addInitScript(([titles, ids]) => {
+    document.cookie = '_csrf_token=abc; path=/';
+    window.__sent = [];
+    const items = titles.map((title, i) => ({ id: ids[i], title, folder: false, url: 'x' }));
+    const grad = [{ id: '1293050000000000011', title: 'Microfundamento: Estatística de Dados Gerenciais', folder: true, url: 'x' },
+      { id: '1293050000000000012', title: 'Microfundamento: Inovação na Concepção de Negócios', folder: true, url: 'x' }];
+    Object.defineProperty(window, 'chrome', { configurable: true, value: {
+      runtime: { sendMessage: async m => {
+        window.__sent.push(m);
+        if (m.action === 'h5p-create-folder') return { status: 'exists', title: m.title, folder: { id: '77', title: m.title, url: 'https://pucminasvirtual.h5p.com/content/77' } };
+        if (m.action === 'h5p-list') return { status: 'ok', items: m.team ? grad : items };
+        if (m.action === 'h5p-create-quiz') return { status: 'created', item: { id: String(9000 + window.__sent.length), title: m.title, parent: m.parent, folder: false, url: 'x' }, title: m.title };
+      } },
+      storage: { local: { get: async d => ({ ...d, h5pFolderEnabled: true, ...(window.__team ? { h5pFolderTeam: true } : {}) }) }, onChanged: { addListener: () => {} } },
+    } });
+  }, [TOPICS, TOPICS.map((_, i) => QUIZ(i))]);
+  const BTN = '#__svc-h5p-folder__', MODAL = '#__svc-h5p-folder-modal__', CREATE = `${MODAL} button[data-create]`;
+  // Abre a página de módulos de novo, com o Canvas falso como estiver em `course`.
+  const open = async () => {
+    await page.goto(`${CANVAS}/courses/${C}/modules`);
+    for (const f of ['h5p-width.js', 'h5p-insert.js', 'h5p-package.js', 'canvas-h5p-folder.js']) await page.addScriptTag({ content: fs.readFileSync(path.join(ROOT, f), 'utf8') });
+    await page.waitForSelector(BTN);
+  };
+  const button = () => page.$eval(BTN, b => [b.textContent, b.getAttribute('data-kind')]);
+  await open();
+
+  await ok('Microfundamento — o botão vira "📁 Pasta H5P MF"; confirmação: as 11 páginas "UNIDADE N - Tema N" em ordem (Síntese e Atividade avaliativa de fora), .h5p do Extrator pela "Questão N", inserção abaixo do banner', async () => {
+    same(await button(), ['📁 Pasta H5P MF', 'micro']);
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    const text = await page.textContent(MODAL);
+    assert.match(text, /^📁 Criar pasta no H5P\.com\? — Microfundamento/);
+    same(await page.$$eval(`${MODAL} li`, lis => lis.map(l => l.textContent)), TOPICS);
+    assert.match(text, /1 quiz por tópico \(11\)/);
+    assert.match(text, /Inserir cada quiz na sua página \(logo abaixo do banner de Atividades de Fixação\)/);
+    assert.ok(await page.$(`${MODAL} input[data-h5p-files]`), 'escolhe .h5p também no Microfundamento');
+    assert.match(await page.textContent(`${MODAL} [data-micro-files]`), /a "Questão N" vai para a N-ª página da lista acima/);
+    assert.strictEqual(await page.$(`${MODAL} [data-others]`), null);
+  });
+
+  await ok('Microfundamento — inserção: troca o quiz que havia, as sem quiz ganham o parágrafo depois do banner, a página no modelo comum vai na faixa com aviso na prévia; o resto fica igual', async () => {
+    await page.uncheck(`${MODAL} input[data-quizzes]`);
+    await page.click(CREATE);
+    await page.waitForSelector(`${MODAL} input[data-course]`, { timeout: 15000 });
+    const text = await page.textContent(MODAL);
+    assert.match(text, /11 página\(s\) para gravar/);
+    assert.match(text, /vai TROCAR o H5P que está no lugar do quiz pelo da pasta/);
+    assert.match(text, /Difusão da Inovação.*Tecnologias Emergentes.*Esta página tem a faixa "Atividade de Fixação" \(modelo comum\): o quiz vai na caixa da faixa\./s);
+    assert.strictEqual((text.match(/modelo comum/g) || []).length, 1, 'aviso só na página do outro modelo');
+    await page.fill(`${MODAL} input[data-course]`, String(C));
+    await page.click(CREATE);
+    await page.waitForFunction(() => /Quiz inserido em/.test(document.getElementById('__svc-h5p-folder-toast__')?.textContent || ''), null, { timeout: 30000 });
+    assert.match(await page.textContent('#__svc-h5p-folder-toast__'), /✓ Quiz inserido em 11 página\(s\)\./);
+    assert.strictEqual(puts.length, 11);
+    const embed = i => page.evaluate(([c, id, t]) => window.__svcH5pInsert.embedHtml({ origin: location.origin, courseId: c, contentId: id, title: t }), [C, QUIZ(i), TOPICS[i]]);
+    assert.strictEqual(pages[URLS[0]].body, MF.replace(MF_SLOT, `<p style="text-align: center;">${await embed(0)}</p>`));
+    const noSlot = MF.replace(MF_SLOT + '\n', '');
+    assert.strictEqual(pages[URLS[5]].body, noSlot.replace(MF_BANNER, MF_BANNER + `<p style="text-align: center;">${await embed(5)}</p>`));
+    assert.strictEqual(pages[URLS[10]].body, TOPIC(`\n    <p style="text-align: center;">${await embed(10)}</p>\n`));
+    same(await button(), ['📁 Pasta H5P MF', 'micro']);
+  });
+
+  // O zip que o Extrator gera do relatório da FIC: "Questão N.h5p", título "Questão N".
+  await ok('Microfundamento — .h5p do Extrator ("Questão N"): vai para a N-ª página da lista, com o começo da pergunta para conferir; "Tópico N", 2 para a mesma página e número além das páginas ficam de fora', async () => {
+    await page.evaluate(() => { window.__sent = []; });
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    const extrator = zip({
+      'Questão 1.h5p': MC_FILE('Questão 1'), 'Questão 3.h5p': MC_FILE('Questão 3'), 'Questão 11.h5p': MC_FILE('Questão 11'),
+      'Questão 12.h5p': MC_FILE('Questão 12'), 'TÓPICO 2.h5p': MC_FILE('TÓPICO 2'),
+    }, 0);
+    await page.setInputFiles(`${MODAL} input[data-h5p-files]`, [
+      { name: 'Microfundamento_Inovação - questões H5P.zip', mimeType: 'application/zip', buffer: extrator },
+      { name: 'questao_05.h5p', mimeType: 'application/octet-stream', buffer: MC_FILE('outro título') },
+      { name: 'Questão 5 (cópia).h5p', mimeType: 'application/octet-stream', buffer: MC_FILE('Questão 5') },
+    ]);
+    await page.waitForFunction(() => /tópico\(s\) com a questão do arquivo|Não consegui ler/.test(document.getElementById('__svc-h5p-folder-modal__')?.textContent || ''));
+    const pairs = await page.$$eval(`${MODAL} li`, lis => lis.map(l => [l.querySelector('[data-file]')?.getAttribute('data-file'), l.querySelector('[data-preview]')?.textContent || '']));
+    same(pairs.map(p => p[0]), ['Questão 1.h5p', '', 'Questão 3.h5p', '', '', '', '', '', '', '', 'Questão 11.h5p']);
+    assert.match(pairs[2][1], /^“Enunciado de Questão 3: qual alternativa está correta\?”$/);
+    assert.match(await page.textContent(MODAL), /3 de 11 tópico\(s\) com a questão do arquivo/);
+    const fora = await page.textContent(`${MODAL} [data-h5p-problems]`);
+    assert.match(fora, /Questão 12\.h5p: não há a 12ª página "UNIDADE N - Tema N" nos módulos \(são 11\)\./);
+    assert.match(fora, /TÓPICO 2\.h5p: sem "Questão N" no título nem no nome do arquivo\./);
+    assert.match(fora, /Questão 5: 2 questões \(questao_05\.h5p; Questão 5 \(cópia\)\.h5p\) — deixe só uma\./);
+    await page.uncheck(`${MODAL} input[data-insert]`);
+    await page.click(CREATE);
+    // 11 quizzes com 1,5 s entre um e outro (PAUSE_MS)
+    await page.waitForFunction(() => /quiz\(zes\) criado/.test(document.getElementById('__svc-h5p-folder-toast__')?.textContent || ''), null, { timeout: 40000 })
+      .catch(async () => { throw new Error('aviso: ' + await page.evaluate(() => document.getElementById('__svc-h5p-folder-toast__')?.textContent)); });
+    assert.match(await page.textContent('#__svc-h5p-folder-toast__'), /11 quiz\(zes\) criado\(s\) \(3 com a questão do \.h5p\)/);
+    const quizzes = await page.evaluate(() => window.__sent.filter(m => m.action === 'h5p-create-quiz'));
+    same(quizzes.map(m => [m.title, !!m.params]), TOPICS.map((t, i) => [t, i === 0 || i === 2 || i === 10]));
+    same(quizzes[2].params, MC_PARAMS('Questão 3'));
+  });
+
+  await ok('tipo — nome sem "Microfundamento", mas a página de módulos só com "UNIDADE N - Tema N": "📁 Pasta H5P MF" pelos títulos da página', async () => {
+    Object.assign(course, { name: 'Inovação na Concepção de Negócios', dom: TOPICS.slice(0, 3) });
+    await open();
+    same(await button(), ['📁 Pasta H5P MF', 'micro']);
+  });
+
+  await ok('tipo — página de módulos sem títulos (ainda carregando): vale o nome — "MF - …" é MF, outro nome é comum; no clique, a lista da API decide', async () => {
+    Object.assign(course, { name: 'MF - Inovação na Concepção de Negócios', dom: [] });
+    await open();
+    same(await button(), ['📁 Pasta H5P MF', 'micro']);
+    Object.assign(course, { name: 'Inovação na Concepção de Negócios' });
+    await open();
+    same(await button(), ['📁 Pasta H5P', 'uda']);
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    same(await button(), ['📁 Pasta H5P MF', 'micro']);   // a API só tem "UNIDADE N - Tema N"
+    assert.match(await page.textContent(MODAL), /— Microfundamento/);
+    await page.keyboard.press('Escape');
+  });
+
+  await ok('tipo — curso com os dois tipos de página: o nome decide e as do outro tipo ficam de fora, com aviso', async () => {
+    const mixed = [{ id: 9, name: 'Extra', items: [{ title: 'Tópico 1 – Página comum', type: 'Page', page_url: 'topico-1' }] }, ...MODULES];
+    Object.assign(course, { name: 'Microfundamento: Inovação na Concepção de Negócios', modules: mixed, dom: [] });
+    await open();
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    same(await page.$$eval(`${MODAL} li`, lis => lis.map(l => l.textContent)), TOPICS);
+    assert.match(await page.textContent(`${MODAL} [data-others]`), /Há também 1 página\(s\) "Tópico N" nos módulos: ficam de fora \(pelo nome do curso, a disciplina é Microfundamento\)/);
+    await page.keyboard.press('Escape');
+    Object.assign(course, { name: 'Ambiente teste' });
+    await open();
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    same(await page.$$eval(`${MODAL} li`, lis => lis.map(l => l.textContent)), ['Tópico 1 – Página comum']);
+    assert.match(await page.textContent(`${MODAL} [data-others]`), /Há também 11 página\(s\) "UNIDADE N - Tema N".*a disciplina é comum/);
+    same(await button(), ['📁 Pasta H5P', 'uda']);
+    assert.ok(await page.$(`${MODAL} input[data-h5p-files]`), 'comum: escolhe .h5p');
+    await page.keyboard.press('Escape');
+  });
+
+  await ok('Microfundamento — produção ligada: a pasta vai para PRODUÇÕES › GRADUAÇÃO EAD (kind "micro"); o nome igual ao de lá usa a existente; sem o "Microfundamento:" avisa e segura', async () => {
+    Object.assign(course, { name: 'Microfundamento: Inovação na Concepção de Negócios', modules: MODULES, dom: [] });
+    await open();
+    await page.evaluate(() => { window.__team = true; window.__sent = []; });
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    assert.match(await page.textContent(MODAL), /⚠ Pasta da equipe \(PRODUÇÕES › GRADUAÇÃO EAD\): o que for criado lá não pode ser apagado\./);
+    const NOTE = `${MODAL} [data-name-note]`, NAME = `${MODAL} input[type=text]`;
+    assert.match(await page.textContent(NOTE), /Já existe "Microfundamento: Inovação na Concepção de Negócios" na pasta da equipe: ela será usada/);
+    await page.fill(NAME, 'Inovação na Concepção de Negócios');
+    assert.match(await page.textContent(NOTE), /com outro prefixo:"Microfundamento: Inovação na Concepção de Negócios"Usar esta/);
+    assert.ok(await page.$eval(CREATE, b => b.disabled), '"Criar" segura');
+    await page.click(`${MODAL} button[data-use-folder]`);
+    await page.uncheck(`${MODAL} input[data-quizzes]`);
+    await page.uncheck(`${MODAL} input[data-insert]`);
+    await page.click(CREATE);
+    await page.waitForFunction(() => /já existia no H5P/.test(document.getElementById('__svc-h5p-folder-toast__')?.textContent || ''), null, { timeout: 15000 });
+    assert.match(await page.textContent('#__svc-h5p-folder-toast__'), /\(PRODUÇÕES › GRADUAÇÃO EAD\)/);
+    same(await page.evaluate(() => window.__sent), [{ action: 'h5p-list', team: true, kind: 'micro' },
+      { action: 'h5p-create-folder', title: 'Microfundamento: Inovação na Concepção de Negócios', parent: '', team: true, kind: 'micro' }]);
+  });
   await page.close();
 }

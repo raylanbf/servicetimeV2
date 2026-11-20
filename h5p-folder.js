@@ -12,8 +12,9 @@
 //     <a href=".../content/<id>" class="fable-title …">nome</a>. 50 por página.
 //   • pasta: POST /content (multipart) com _token (o csrf-token da página),
 //     title, parent (vazio = raiz do My Content) e type=1 — pasta privada.
-//     Na pasta da equipe (createInTeam), o formulário que o botão "New
-//     Folder" da tela dela abrir (a tela também tem POST /organization-folders).
+//     Na pasta da equipe (createInTeam: a da UDA ou, no Microfundamento, a
+//     GRADUAÇÃO EAD), o formulário que o botão "New Folder" da tela dela
+//     abrir (a tela também tem POST /organization-folders).
 //     Nada é apagado nem alterado: só GET e os POST de criar.
 //   • quiz: o formulário #laravel-h5p-form de /content/create?parent=<pasta>,
 //     com as opções padrão da tela, e o que o editor do H5P põe ao salvar
@@ -122,17 +123,30 @@ globalThis.H5P_FOLDER = (() => {
   }
 
   // ── Pasta na pasta da equipe (produção) ──────────────────────────────
-  // PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM. Lá nada pode ser
-  // apagado, então nada é enviado sem antes conferir: (1) a página aberta é
-  // mesmo essa pasta (título); (2) a lista dela foi lida; (3) qual formulário
-  // o botão "New Folder" da própria tela abre (pasta comum, POST /content, ou
-  // pasta da organização, POST /organization-folders) e que ele aponta para
-  // ela. O formulário vai como a tela o tem, só com o nome preenchido.
-  // Na tela real (gravação de 15/11/2026, perfil "author"), o "New Folder"
-  // de lá abre o da pasta comum: POST /content com parent = pasta da equipe e
-  // type=1 — as pastas das UDAs lá dentro são "Private folder" com
-  // colaboradores. O ensaio sobre esse HTML montou exatamente esse pedido.
-  const TEAM = { id: '1293047322003249328', title: 'UDA - UNIDADE DIGITAL DE APRENDIZAGEM', label: 'PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM' };
+  // Uma por tipo de disciplina, dentro de PRODUÇÕES:
+  //   uda   — "UDA - UNIDADE DIGITAL DE APRENDIZAGEM" (gravação de 15/11/2026);
+  //   micro — "GRADUAÇÃO EAD", dos Microfundamentos (gravação de 20/11/2026;
+  //           as pastas lá dentro se chamam "Microfundamento: <disciplina>").
+  // Lá nada pode ser apagado, então nada é enviado sem antes conferir: (1) a
+  // página aberta é mesmo essa pasta (título); (2) a lista dela foi lida;
+  // (3) qual formulário o botão "New Folder" da própria tela abre (pasta
+  // comum, POST /content, ou pasta da organização, POST
+  // /organization-folders) e que ele aponta para ela. O formulário vai como
+  // a tela o tem, só com o nome preenchido.
+  // Nas duas telas reais (perfil "author"), o "New Folder" abre o da pasta
+  // comum: POST /content com parent = a pasta da equipe e type=1 — as pastas
+  // lá dentro são "Private folder" com colaboradores. O ensaio sobre o HTML
+  // gravado de cada uma montou exatamente esse pedido.
+  const TEAMS = {
+    uda:   { id: '1293047322003249328', title: 'UDA - UNIDADE DIGITAL DE APRENDIZAGEM', label: 'PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM' },
+    micro: { id: '1293047321834512708', title: 'GRADUAÇÃO EAD', label: 'PRODUÇÕES › GRADUAÇÃO EAD' },
+  };
+  const TEAM = TEAMS.uda;
+  // A pasta da equipe do tipo (sem tipo: a da UDA). Tipo desconhecido: erro, nada vai.
+  function teamOf(kind = 'uda') {
+    if (!Object.prototype.hasOwnProperty.call(TEAMS, kind)) throw fail('dest', `Tipo de disciplina desconhecido (${kind}). Nada foi criado.`);
+    return TEAMS[kind];
+  }
 
   const pageTitleOf = html => decode(html.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/\s+-\s+H5P\.com\s*$/i, '').replace(/\s+/g, ' ').trim();
 
@@ -157,8 +171,10 @@ globalThis.H5P_FOLDER = (() => {
     return { error: `não achei o formulário de "${modal}"` };
   }
 
+  // kind: 'uda' (padrão) ou 'micro' — qual pasta da equipe (TEAMS).
   // { status: 'created' | 'exists' | 'unconfirmed', folder?, title }
-  async function createInTeam(fetchFn, parseForm, { title }) {
+  async function createInTeam(fetchFn, parseForm, { title, kind = 'uda' }) {
+    const TEAM = teamOf(kind);
     title = cleanTitle(title);
     if (!title) throw fail('title', 'Nome da pasta vazio.');
     const nothing = 'Nada foi criado.';
@@ -311,5 +327,5 @@ globalThis.H5P_FOLDER = (() => {
     return { status: 'created', item: { id, title, parent: String(parent), folder: false, url: `${ORIGIN}/content/${id}` }, title };
   }
 
-  return { ORIGIN, QUIZ_LIBRARY, TEAM, create, createInTeam, createQuiz, list, itemsOf, foldersOf, csrfOf, lastPageOf, norm, quizParams, quizFields, formErrorOf, pageTitleOf, newFolderFormOf };
+  return { ORIGIN, QUIZ_LIBRARY, TEAM, TEAMS, teamOf, create, createInTeam, createQuiz, list, itemsOf, foldersOf, csrfOf, lastPageOf, norm, quizParams, quizFields, formErrorOf, pageTitleOf, newFolderFormOf };
 })();

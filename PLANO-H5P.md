@@ -9,6 +9,10 @@
 - [x] Pré-requisitos — conta de autor ok; curso de teste "Ambiente teste - Raylan" (282082) com o Tópico 5; quiz de teste criado (27/10/2026)
 - [x] Fase 1 — investigação da tela do H5P.com, pelo botão provisório "🔬 Diagnóstico H5P" (27/10/2026). Ver seção 2.1. O teste 4.6 (iframe montado à mão) fica para a Fase 3.
 - [x] Fase 2 — botão página por página (redesenhada em 27/10/2026, ver seção 5). Implementada em 27/10/2026 (`canvas-h5p.js`, `canvas-h5p-bridge.js`, `h5p-search.js`, `h5p-width.js`), aprovada na simulação (`test-quiz.js`, `test-h5p.js`) e **no Canvas real** (curso 282082, Tópico 5). Ajuste do teste real: a busca vai pelo endereço com `content_scope=mine` (seção 2.1). Diagnóstico provisório removido.
+- [x] Correção (20/11/2026) — de 3.15 a 3.19 o botão parava em "reading 'quizBox'": o Chrome injeta cada arquivo uma vez só por página, e o `h5p-width.js` estava também na entrada isolada da Pasta H5P, valendo para as mesmas páginas. O manifest separa as duas entradas por página (`/pages/*` x resto); regressão em `test-manifest.js`, que carrega a extensão de verdade.
+- [x] Microfundamento (20/11/2026) — modelo antigo, sem a faixa: a referência é a imagem `banner-atividades-fixacao` num bloco só dela, e o quiz fica no parágrafo logo depois desse bloco; sem esse parágrafo, entra um novo logo depois do banner. Vale para o botão, o Redimensionar H5P e a inserção da Pasta H5P (`quizBox` em `h5p-width.js`; a faixa continua tendo prioridade). Páginas "UNIDADE N - Tema N - …" contam como tópicos na Pasta H5P, e a busca no popup tira os prefixos "Tópico N", "UNIDADE N" e "Tema N". Simulação com a página real do curso 111810 (`fixtures/microfundamento-tema.html`); falta o teste no Canvas real. Na Pasta H5P, o tipo da disciplina dá o nome do botão ("📁 Pasta H5P" ou "📁 Pasta H5P MF") e quais páginas entram: decide pelas páginas dos módulos e, se elas não decidirem, pelo nome do curso.
+- [x] Busca em "All Content" (20/11/2026, a pedido do usuário) — o botão só procurava no "My Content" e não achava os quizzes das pastas da equipe (Microfundamento "UNIDADE 1 - Tema 1 - Inovação: conceito"). Agora `content_scope=all`; com 0 ou 2+ de mesmo nome (inclusive de outra pessoa), continua não escolhendo sozinho. Simulação em `test-quiz.js` (casos A2 e D); falta o teste no H5P.com real.
+- [x] `.h5p` no Microfundamento (20/11/2026) — o Extrator gera do relatório da FIC "Questão N.h5p", numeradas pela página da sessão; o Pasta H5P MF liga a "Questão N" à N-ª página "UNIDADE N - Tema N" dos módulos e mostra o começo da pergunta ao lado de cada página. Conferido com o zip real do "Inovação na Concepção de Negócios" (11 de 11 nas páginas certas). Simulação em `test-h5p-folder.js`; falta o teste no H5P.com real.
 - [ ] Fase 3 — em lote (opcional)
 
 ---
@@ -165,10 +169,10 @@ Ao terminar, atualizar a seção 2 deste plano com o que foi visto.
 6. **Pedido:** `postMessage` → ponte → `h5pPending`.
 7. **Abrir o app:** `apps-temp` (`/\bapps?\b|aplicativ/i`; se não estiver na barra, abrir "Mais...") → item `/interactive content|h5p/i`. Base: `tryOpenStudio`/`findStudioMenuItem`.
 8. **No popup** (content script do h5p.com):
-   - **busca só em "My Content", pelo endereço:** `location.assign(<action do formulário>?search=<texto>&content_scope=mine)`. **Não** enviar o formulário, que força `content_scope=all` (seção 2.1). O resultado só vale se `location.search` tiver `content_scope=mine` e o `search` certo; até 2 tentativas, depois avisa. O texto buscado é a parte do título **depois do traço** ("Razões, proporções…"); sem traço, o título inteiro;
+   - **busca em "All Content", pelo endereço:** `location.assign(<action do formulário>?search=<texto>&content_scope=all)` (até 20/11/2026 era `mine`, só "My Content"; ver seção 11). Pelo endereço, e não pelo formulário, para não depender da seção que o popup lembrou. O resultado só vale se `location.search` tiver `content_scope=all` e o `search` certo; até 2 tentativas, depois avisa. O texto buscado é a parte do título **depois do traço** ("Razões, proporções…"); sem traço, o título inteiro;
    - página de resultados → comparar o título completo de cada linha (`aria-label` do `input.fable-toggle-row`) com o título da página, os dois normalizados (NFD sem acentos, minúsculas, ‐ ‑ ‒ – — ― → `-`, espaços colapsados, sem espaço nas pontas);
    - **exatamente 1 idêntico** → clicar no `Insert` da linha;
-   - **0 ou 2+** → não clicar: destacar os candidatos na lista, avisar no Canvas ("nenhum quiz seu com o nome …" / "N quizzes seus com o nome …") e deixar o popup aberto;
+   - **0 ou 2+** → não clicar: destacar os candidatos na lista, avisar no Canvas ("nenhum quiz no H5P.com (All Content) com o nome …" / "N quizzes com o nome … (podem ser de outras pessoas)") e deixar o popup aberto;
    - limpar o `h5pPending` em qualquer caso (não buscar de novo ao reabrir o H5P à mão).
 9. **Depois do Insert** (MutationObserver no editor, timeout ~3 min = popup cancelado): quando entrar um H5P que não estava no conjunto do passo 5,
    - se ele caiu fora da caixa, movê-lo para dentro;
@@ -233,7 +237,7 @@ Modelo: "Vídeos nas páginas" da AVA.
 - **O lugar é a caixa logo depois da faixa "Atividade de Fixação Não Pontuada"** (decisão de 27/10/2026, no lugar do marcador). Sem faixa ou sem caixa, parar em vez de inserir em lugar arbitrário.
 - **Já tem H5P na caixa → substitui** (decisão de 27/10/2026). Só sai o que é H5P; outro conteúdo na caixa faz o botão parar.
 - **O texto da busca é o título da página** (campo "Título da página"), exatamente como está.
-- **Só os quizzes de quem está usando ("My Content")** (decisão de 27/10/2026). Os compartilhados por outras pessoas não entram, mesmo que a busca em "All Content" os encontre.
+- **Busca em todo o H5P.com ("All Content")** (decisão do usuário em 20/11/2026, no lugar da de 27/10/2026, que era só "My Content"). Motivo: os quizzes das pastas da equipe (ex.: PRODUÇÕES › GRADUAÇÃO EAD, dos Microfundamentos) não estão no "My Content" de quem insere, e o botão não os achava. A trava continua: só insere sozinho com **exatamente 1** quiz de nome idêntico; um de outra pessoa com o mesmo nome faz 2 e a pessoa escolhe.
 - **Botão na barra do editor, ao lado do Justificar** (decisão de 27/10/2026), e não no painel.
 - **Confirmação antes de importar** ("Quer importar o H5P para a página?" Sim/Não), porque o botão pode ser apertado sem querer (decisão de 27/10/2026).
 - **Largura 100%, altura intacta;** só o iframe do H5P muda.

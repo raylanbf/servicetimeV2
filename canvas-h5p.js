@@ -1,13 +1,15 @@
 'use strict';
 
 // Botão "Importar quiz H5P" na barra do editor do Canvas, ao lado do
-// Justificar. Na edição de uma página de tópico, depois da confirmação: acha a
-// caixa logo abaixo da faixa "Atividade de Fixação Não Pontuada", põe o cursor
-// nela, abre o "Interactive Content – H5P" e deixa o pedido para o
-// h5p-search.js buscar o título da página e clicar em Insert (a ponte é o
-// canvas-h5p-bridge.js). Quando o quiz entra no editor, ele vai para a caixa no
-// lugar do H5P que havia, com 100% de largura (h5p-width.js). A página não é
-// salva sozinha. Ver PLANO-H5P.md, seções 2.1 e 5.
+// Justificar. Na edição de uma página de tópico, depois da confirmação: acha o
+// lugar do quiz (quizBox, do h5p-width.js) — a caixa logo abaixo da faixa
+// "Atividade de Fixação Não Pontuada" ou, no Microfundamento, o parágrafo
+// logo abaixo do banner de Atividades de Fixação —, põe o cursor ali, abre o
+// "Interactive Content – H5P" e deixa o pedido para o h5p-search.js buscar o
+// título da página e clicar em Insert (a ponte é o canvas-h5p-bridge.js).
+// Quando o quiz entra no editor, ele vai para esse lugar no do H5P que havia,
+// com 100% de largura. A página não é salva sozinha. Ver PLANO-H5P.md,
+// seções 2.1 e 5.
 (() => {
   if (window.__svcH5pBtnInstalled) return;
   window.__svcH5pBtnInstalled = true;
@@ -63,30 +65,45 @@
   }
   const h5pIn = root => [...root.querySelectorAll('span.mce-preview-object, iframe')].filter(isH5p);
 
-  // A caixa do quiz: a div logo depois da faixa — a mesma do "Redimensionar
-  // H5P" (h5p-width.js). Ela só pode ter H5P, o marcador da AVA e parágrafos
-  // vazios — outra coisa faz o botão parar.
+  // O lugar do quiz — o mesmo do "Redimensionar H5P" (quizBox, do
+  // h5p-width.js): a caixa depois da faixa ou, no Microfundamento, o
+  // parágrafo depois do banner (box null: ainda não existe e entra um novo,
+  // logo depois do banner, em `after`). Ele só pode ter H5P, o marcador da
+  // AVA e parágrafos vazios — outra coisa faz o botão parar.
   function findBox(body) {
     const where = window.__svcH5pWidth.quizBox(body);
     if (where.error) return where;
+    if (!where.box) return { ...where, old: [] };
     const box   = where.box;
     const probe = box.cloneNode(true);
     h5pIn(probe).forEach(n => n.remove());
     const extra = probe.querySelector('img, iframe, video, audio, object, embed, table, a, span.mce-preview-object');
     if (norm(probe.textContent).replace(MARKER, '').trim() || extra) {
-      return { error: 'A caixa abaixo da faixa tem outro conteúdo além do H5P — confira. Nada foi alterado.' };
+      return { error: `${where.layout === 'micro' ? 'O bloco abaixo do banner' : 'A caixa abaixo da faixa'} tem outro conteúdo além do H5P — confira. Nada foi alterado.` };
     }
-    return { box, old: h5pIn(box) };
+    return { ...where, old: h5pIn(box) };
   }
 
-  // Leva o quiz recém-inserido para a caixa, tira o que havia nela e põe o
+  // Parágrafo do quiz: o próprio lugar, se for um parágrafo; o primeiro
+  // parágrafo da caixa; ou um novo, centralizado (na caixa ou depois do banner).
+  function quizParagraph(ed, found) {
+    const { box, after } = found;
+    if (box?.tagName === 'P') return box;
+    let p = box && [...box.children].find(c => c.tagName === 'P');
+    if (!p) {
+      p = ed.dom.create('p', { style: 'text-align: center;' });
+      if (box) box.appendChild(p); else after.after(p);
+    }
+    return p;
+  }
+
+  // Leva o quiz recém-inserido para o lugar dele, tira o que havia ali e põe o
   // nome do quiz e os 100% de largura — num passo só de Ctrl+Z.
-  function place(ed, box, old, node, label, blocksBefore) {
-    const body = ed.getBody();
+  function place(ed, found, node, label, blocksBefore) {
+    const body = ed.getBody(), old = found.old;
     ed.undoManager.transact(() => {
-      let p = [...box.children].find(c => c.tagName === 'P');
-      if (!p) { p = ed.dom.create('p', { style: 'text-align: center;' }); box.appendChild(p); }
-      if (!box.contains(node)) {
+      const p = quizParagraph(ed, found);
+      if (!p.contains(node)) {
         const from = node.parentElement;
         p.appendChild(node);
         // Parágrafo que o Canvas criou só para o quiz fica vazio: sai também.
@@ -118,7 +135,7 @@
 
   // ── Confirmação ──────────────────────────────────────────────────────
   // Botão apertado sem querer não muda nada: só segue com "Sim".
-  function confirmImport(title, replacing) {
+  function confirmImport(title, replacing, layout) {
     return new Promise(resolve => {
       document.getElementById('__svc-h5p-confirm__')?.remove();
       const overlay = document.createElement('div');
@@ -140,8 +157,11 @@
       };
       line('🧩 Quer importar o H5P para a página?', { fontSize: '14px', fontWeight: 'bold', color: '#e2e8f0' });
       line(`Quiz: "${title}"`);
-      if (replacing) line('O H5P que já está na caixa da Atividade de Fixação será substituído.', { color: '#fbbf24' });
-      line('Busca só nos seus conteúdos (My Content) do H5P.com. A página não é salva sozinha.', { fontSize: '11px', color: '#94a3b8' });
+      if (layout === 'micro') line('Microfundamento: o quiz vai logo abaixo do banner de Atividades de Fixação.');
+      if (replacing) {
+        line(`O H5P que já está ${layout === 'micro' ? 'logo abaixo do banner' : 'na caixa da Atividade de Fixação'} será substituído.`, { color: '#fbbf24' });
+      }
+      line('Busca em todo o H5P.com (All Content): os seus quizzes, os compartilhados e os das pastas da equipe. A página não é salva sozinha.', { fontSize: '11px', color: '#94a3b8' });
 
       const row = document.createElement('div');
       Object.assign(row.style, { display: 'flex', gap: '8px', marginTop: '14px' });
@@ -223,7 +243,7 @@
     const first = findBox(ed.getBody());
     if (first.error) { toast('⚠ ' + first.error, ERR, 7000); return; }
 
-    if (!(await confirmImport(title, first.old.length > 0))) return;
+    if (!(await confirmImport(title, first.old.length > 0, first.layout))) return;
     if (current) current.stop();   // clique de novo recomeça
 
     // A página pode ter mudado enquanto a confirmação estava aberta.
@@ -236,11 +256,14 @@
     const blocksBefore = new Set(body.querySelectorAll('p'));
     let quizTitle = null, settled = false, seenPopup = false, closedAt = 0;
 
-    // Cursor no parágrafo da caixa (ou na própria caixa), depois do que houver.
+    // Cursor no parágrafo da caixa (ou na própria caixa, ou no fim do bloco
+    // do banner), depois do que houver. Se o Canvas inserir em outro lugar,
+    // o place() leva o quiz para o lugar certo do mesmo jeito.
     try {
       ed.focus();
       const rng = ed.dom.createRng();
-      rng.selectNodeContents([...found.box.children].find(c => c.tagName === 'P') || found.box);
+      const box = found.box;
+      rng.selectNodeContents(box ? ([...box.children].find(c => c.tagName === 'P') || box) : found.after);
       rng.collapse(false);
       ed.selection.setRng(rng);
     } catch (_) {}
@@ -251,9 +274,9 @@
       if (d.status === 'insert') { quizTitle = d.title; toast('⏳ Quiz encontrado — inserindo...', INFO); }
       else if (d.status === 'none') {
         const near = d.near?.length ? ` Achei: ${d.near.map(t => `"${t}"`).join(', ')}.` : '';
-        toast(`⚠ Nenhum quiz seu (My Content) com o nome "${title}".${near} Escolha no popup ou feche-o.`, ERR, 10000);
+        toast(`⚠ Nenhum quiz no H5P.com (All Content) com o nome "${title}".${near} Escolha no popup ou feche-o.`, ERR, 10000);
       }
-      else if (d.status === 'many')   toast(`⚠ ${d.count} quizzes seus com o nome "${title}" — marquei em laranja no popup. Escolha um.`, ERR, 10000);
+      else if (d.status === 'many')   toast(`⚠ ${d.count} quizzes com o nome "${title}" no H5P.com (podem ser de outras pessoas) — marquei em laranja no popup. Escolha um.`, ERR, 10000);
       else if (d.status === 'reload') toast('⚠ A extensão foi atualizada. Recarregue a página (F5) e tente de novo.', ERR, 10000);
       else if (d.status === 'error')  toast('⚠ ' + (d.detail || 'Erro na busca do H5P.'), ERR, 10000);
     };
@@ -279,7 +302,7 @@
       setTimeout(() => {   // deixa o TinyMCE terminar de montar a prévia
         stop();
         try {
-          place(ed, found.box, found.old, fresh[0], quizTitle || title, blocksBefore);
+          place(ed, found, fresh[0], quizTitle || title, blocksBefore);
           toast(`✓ Quiz "${quizTitle || title}" inserido${found.old.length ? ' (substituí o H5P que estava)' : ''}. Confira e salve a página.`, OK, 7000);
         } catch (err) {
           toast('⚠ O quiz entrou, mas não consegui arrumá-lo na caixa: ' + err.message, ERR, 10000);

@@ -49,6 +49,11 @@ const join   = parts => parts.map(p => `<p style="text-align: center;">${p}</p>`
 const pageOf = (box, { band = BAND, body = BODY_H5P } = {}) =>
   '<div id="conteudo" class="content-box"><h4>Conteúdo</h4>\n' + join(body) + '\n</div>\n' + band +
   '\n<div id="questao-fixacao-atividade" style="background-color: #ffffff; padding: 1.5% 2.5%;">\n' + join(box) + '\n</div>';
+// Microfundamento (modelo antigo, sem a faixa): o quiz fica no parágrafo
+// logo depois do bloco da imagem banner-atividades-fixacao.
+const microOf = box => '<div id="geral"><h1>Inova&ccedil;&atilde;o</h1>\n' + join(BODY_H5P) +
+  '\n<div style="margin-top: 0px; text-align: center;"><img id="5964569" src="https://pucminas.instructure.com/courses/111810/files/5964569/preview" alt="banner-atividades-fixacao.jpg"></div>\n' +
+  join(box) + '\n<p style="text-align: right;"><em><a href="#topo">&uarr; Voltar ao topo</a></em></p></div>';
 const BEFORE = pageOf(CASES.map(c => c[1]));
 const AFTER  = pageOf(CASES.map(c => c[2] ?? c[1]));
 const REST   = ' Os outros 2 H5P da página ficaram como estavam.';
@@ -111,7 +116,11 @@ const toast = page => page.evaluate(() => document.getElementById('__svc-toast__
     ['o caso real: 1 quiz na caixa, carrossel e imagem no corpo', pageOf([QUIZ]), pageOf([QUIZ_OK]),
       '✓ H5P da Atividade de Fixação ajustado para 100% de largura.' + REST],
     ['sem a faixa: nenhum H5P muda', pageOf([QUIZ], { band: '' }), null,
-      '⚠ Não achei a faixa "Atividade de Fixação Não Pontuada" nesta página. Nada foi alterado.'],
+      '⚠ Não achei a faixa "Atividade de Fixação Não Pontuada" nem o banner de Atividades de Fixação (Microfundamento) nesta página. Nada foi alterado.'],
+    ['Microfundamento: só o quiz logo abaixo do banner muda', microOf([QUIZ]), microOf([QUIZ_OK]),
+      '✓ H5P da Atividade de Fixação ajustado para 100% de largura.' + REST],
+    ['Microfundamento sem o quiz: os do corpo não mudam', microOf([]), null,
+      '⚠ Nenhum H5P na caixa da Atividade de Fixação.' + REST],
     ['duas faixas: nenhum H5P muda', pageOf([QUIZ], { band: BAND + '\n<div><p>x</p></div>\n' + BAND }), null,
       '⚠ Achei 2 faixas "Atividade de Fixação" nesta página — deve haver só uma. Nada foi alterado.'],
     ['caixa sem H5P: os do corpo não mudam', pageOf(['&nbsp;']), null,

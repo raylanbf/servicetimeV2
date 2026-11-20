@@ -1,31 +1,78 @@
 'use strict';
 
 // Regra da largura do H5P (100%), compartilhada pelo menu "Redimensionar H5P"
-// (o background.js injeta este arquivo antes do h5pResizeMain) e pelo botão do
-// quiz (canvas-h5p.js, que o carrega como content script). Roda no mundo MAIN
-// da página e fica em window.__svcH5pWidth. Só muda o quiz da caixa logo
-// depois da faixa "Atividade de Fixação Não Pontuada"; os outros H5P da página
-// (imagens, carrosséis no corpo do tópico) ficam como estão. Só os atributos
-// width e style desse iframe são reescritos; o resto do texto fica byte a byte
+// (o background.js injeta este arquivo antes do h5pResizeMain), pelo botão do
+// quiz (canvas-h5p.js, mundo MAIN) e pela inserção do "📁 Pasta H5P"
+// (h5p-insert.js, mundo isolado). Fica em window.__svcH5pWidth. Só muda o
+// quiz da Atividade de Fixação (quizBox); os outros H5P da página (imagens,
+// carrosséis no corpo do tópico) ficam como estão. Só os atributos width e
+// style desse iframe são reescritos; o resto do texto fica byte a byte
 // igual. Regressão: .claude/skills/h5p-quiz/scripts/test-h5p.js
 window.__svcH5pWidth = (() => {
   const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[‐-―]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
+  const MARKER = /\[\s*iframe\s*-\s*atividade\s+de\s+fixacao\s+h5p\s*\]/;
+  const BANNER = /atividades?[\s_-]*(?:de[\s_-]*)?fixacao/;
 
-  // A caixa do quiz: a div logo depois da faixa — a div mais interna cujo
-  // texto começa com "Atividade de Fixação". Tem que haver uma faixa só.
-  // Serve tanto para o body do TinyMCE quanto para o HTML lido no DOMParser.
+  // H5P no HTML ou no editor visual (o TinyMCE embrulha o iframe num span de prévia).
+  const isH5p = el => (el.matches('span.mce-preview-object')
+    ? /h5p/i.test(el.getAttribute('data-mce-p-src') || el.querySelector('iframe')?.getAttribute('src') || '')
+    : el.tagName === 'IFRAME' && /h5p/i.test(el.getAttribute('src') || '') && !el.closest('span.mce-preview-object'));
+  const h5pIn = el => [...el.querySelectorAll('span.mce-preview-object, iframe')].filter(isH5p);
+  // Sem nada além de H5P, o marcador da AVA e espaços.
+  function onlyH5p(el) {
+    const probe = el.cloneNode(true);
+    h5pIn(probe).forEach(n => n.remove());
+    return !norm(probe.textContent.replace(/ /g, ' ')).replace(MARKER, '').trim()
+      && !probe.querySelector('img, iframe, video, audio, object, embed, table, a, span.mce-preview-object');
+  }
+
+  // Onde fica o quiz da Atividade de Fixação. Serve tanto para o body do
+  // TinyMCE quanto para o HTML lido no DOMParser. Dois modelos de página:
+  //  • UDA/AVA: a div logo depois da faixa — a div mais interna cujo texto
+  //    começa com "Atividade de Fixação". Tem que haver uma faixa só.
+  //    → { layout: 'uda', box }
+  //  • Microfundamento (modelo antigo, sem a faixa): a imagem
+  //    "banner-atividades-fixacao" num bloco só dela; o quiz fica no
+  //    parágrafo logo depois desse bloco. Se o que vem depois não é o lugar
+  //    do quiz (ex.: "Voltar ao topo"), ele ainda não existe e o quiz entra
+  //    num parágrafo novo logo depois do banner.
+  //    → { layout: 'micro', box } ou { layout: 'micro', box: null, after: <bloco do banner> }
+  // A faixa vem primeiro: página da AVA nunca muda de regra.
   function quizBox(root) {
     const isBand = d => norm(d.textContent).startsWith('atividade de fixacao');
     const bands  = [...root.querySelectorAll('div')].filter(d => isBand(d) && ![...d.querySelectorAll('div')].some(isBand));
-    if (bands.length !== 1) {
-      return { error: bands.length
-        ? `Achei ${bands.length} faixas "Atividade de Fixação" nesta página — deve haver só uma.`
-        : 'Não achei a faixa "Atividade de Fixação Não Pontuada" nesta página.' };
+    if (bands.length > 1) return { error: `Achei ${bands.length} faixas "Atividade de Fixação" nesta página — deve haver só uma.` };
+    if (bands.length === 1) {
+      const box = bands[0].nextElementSibling;
+      if (!box || box.tagName !== 'DIV') return { error: 'Não achei a caixa logo abaixo da faixa "Atividade de Fixação".' };
+      return { layout: 'uda', box };
     }
-    const box = bands[0].nextElementSibling;
-    if (!box || box.tagName !== 'DIV') return { error: 'Não achei a caixa logo abaixo da faixa "Atividade de Fixação".' };
-    return { box };
+    return bannerSlot(root);
+  }
+
+  function bannerSlot(root) {
+    const imgs = [...root.querySelectorAll('img')].filter(i => BANNER.test(norm(`${i.getAttribute('alt') || ''} ${i.getAttribute('title') || ''} ${i.getAttribute('src') || ''}`)));
+    if (!imgs.length) return { error: 'Não achei a faixa "Atividade de Fixação Não Pontuada" nem o banner de Atividades de Fixação (Microfundamento) nesta página.' };
+    if (imgs.length > 1) return { error: `Achei ${imgs.length} banners de Atividades de Fixação nesta página — deve haver só um.` };
+    // O bloco do banner: a div ou o parágrafo que só tem a imagem.
+    let block = imgs[0];
+    while (block.parentElement && block.parentElement !== root && /^(SPAN|A|STRONG|EM|B|I|U)$/.test(block.parentElement.tagName)) block = block.parentElement;
+    block = block.parentElement;
+    if (!block || block === root || !/^(DIV|P)$/.test(block.tagName) || norm(block.textContent.replace(/ /g, ' ')) ||
+        block.querySelectorAll('img, iframe, video, audio, object, embed, table').length !== 1) {
+      return { error: 'O banner de Atividades de Fixação não está num bloco só dele — confira a página.' };
+    }
+    const next = block.nextElementSibling;
+    if (next && h5pIn(next).length && !onlyH5p(next)) return { error: 'O bloco logo abaixo do banner de Atividades de Fixação tem outro conteúdo além do H5P — confira.' };
+    const slot = next && /^(DIV|P)$/.test(next.tagName) && onlyH5p(next) ? next : null;
+    // Lugar vazio ou nenhum: só vale se não houver H5P mais abaixo (senão ficariam dois).
+    if (!slot || !h5pIn(slot).length) {
+      for (let s = slot ? slot.nextElementSibling : next; s; s = s.nextElementSibling) {
+        if (h5pIn(s).length || isH5p(s)) return { error: 'Há um H5P abaixo do banner de Atividades de Fixação, mas não logo abaixo dele — confira.' };
+      }
+    }
+    return slot ? { layout: 'micro', box: slot } : { layout: 'micro', box: null, after: block };
   }
 
   // Põe width: 100% no style, no lugar da largura que houver (max-width e
@@ -95,7 +142,7 @@ window.__svcH5pWidth = (() => {
       if (tags.length !== frames.length || frames[i].getAttribute('src') !== srcOf(m[0])) {
         return { found: 0, others: 0, edits: [], error: 'Não consegui localizar os iframes da página com segurança.' };
       }
-      if (where.error || !where.box.contains(frames[i])) { res.others++; continue; }
+      if (where.error || !where.box?.contains(frames[i])) { res.others++; continue; }
       res.found++;
       if (out !== m[0]) res.edits.push({ from: m.index, to: m.index + m[0].length, insert: out });
     }

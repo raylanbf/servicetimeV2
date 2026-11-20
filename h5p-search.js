@@ -2,13 +2,14 @@
 
 // Dentro do popup "Interactive Content – H5P" (pucminasvirtual.h5p.com): se o
 // botão do quiz (canvas-h5p.js) deixou um pedido no storage, busca o título da
-// página só nos conteúdos de quem está usando ("My Content") e clica no Insert
-// do quiz de nome idêntico. A busca vai direto pelo endereço
-// (?search=…&content_scope=mine): o formulário da tela leva um content_scope
-// escondido que volta sempre para "All Content". A página recarrega, então o
-// andamento fica no próprio pedido e este script retoma de onde parou. Com 0
-// ou 2+ quizzes de mesmo nome não clica em nada: avisa e deixa o popup aberto
-// para a pessoa escolher. Ver PLANO-H5P.md, seções 2.1 e 5.
+// página em todo o H5P.com ("All Content": os do usuário, os compartilhados e
+// os das pastas da equipe — desde 20/11/2026; antes era só "My Content") e
+// clica no Insert do quiz de nome idêntico. A busca vai direto pelo endereço
+// (?search=…&content_scope=all), sem depender da seção que o popup lembrou. A
+// página recarrega, então o andamento fica no próprio pedido e este script
+// retoma de onde parou. Com 0 ou 2+ quizzes de mesmo nome (inclusive de
+// outra pessoa) não clica em nada: avisa e deixa o popup aberto para a pessoa
+// escolher. Ver PLANO-H5P.md, seções 2.1 e 5.
 (async () => {
   // Só o frame do popup, filho direto da página do Canvas. Os quizzes já
   // inseridos na página também são do h5p.com, mas ficam dentro do editor.
@@ -18,9 +19,16 @@
   const sleep  = ms => new Promise(r => setTimeout(r, ms));
   const norm   = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[‐-―]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
-  // A busca do H5P diferencia hífen de travessão: busca só o que vem depois do
-  // traço ("Tópico 5 – Razões…" → "Razões…"); o título inteiro é comparado aqui.
-  const queryOf = title => (title.match(/\s[-‐-―]\s+(.+)$/)?.[1] || title).trim();
+  // A busca do H5P diferencia hífen de travessão: busca só o que vem depois
+  // dos prefixos com traço ("Tópico 5 – Razões…" → "Razões…"; no
+  // Microfundamento, "UNIDADE 1 - Tema 1 - Inovação: conceito" → "Inovação:
+  // conceito"); o título inteiro é comparado aqui. Sem prefixo conhecido,
+  // o que vem depois do primeiro traço.
+  const PREFIX  = /^(?:\s*(?:t[óo]pico|unidade|tema)\s*\d+\s*[-‐-―]\s*)+/i;
+  const queryOf = title => {
+    const rest = title.replace(PREFIX, '').trim();
+    return (rest && rest !== title.trim() ? rest : title.match(/\s[-‐-―]\s+(.+)$/)?.[1] || title).trim();
+  };
 
   const getPending = async () => {
     const { h5pPending: p } = await chrome.storage.local.get('h5pPending');
@@ -40,15 +48,15 @@
     const input = document.querySelector('input[name="search"]');
     if (!input) return false;
 
-    // 1) Busca em "My Content", pelo endereço. O resultado só vale se o
+    // 1) Busca em "All Content", pelo endereço. O resultado só vale se o
     // endereço confirmar os dois: o escopo e o texto buscado.
     const query  = queryOf(p.title);
     const params = new URLSearchParams(location.search);
-    if (params.get('content_scope') !== 'mine' || norm(params.get('search')) !== norm(query) || !resultsShown()) {
-      if ((p.tries || 0) >= 2) { await finish(p, { status: 'error', detail: 'a busca em "My Content" do H5P não abriu.' }); return false; }
+    if (params.get('content_scope') !== 'all' || norm(params.get('search')) !== norm(query) || !resultsShown()) {
+      if ((p.tries || 0) >= 2) { await finish(p, { status: 'error', detail: 'a busca em "All Content" do H5P não abriu.' }); return false; }
       await chrome.storage.local.set({ h5pPending: { ...p, tries: (p.tries || 0) + 1 } });
       const url = new URL(input.form?.getAttribute('action') || location.pathname, location.href);
-      url.search = new URLSearchParams({ search: query, content_scope: 'mine' }).toString();
+      url.search = new URLSearchParams({ search: query, content_scope: 'all' }).toString();
       location.assign(url.href);
       return true;
     }

@@ -173,8 +173,9 @@ const check = (cond, msg) => { console.log((cond ? '  ✔ ' : '  ✘ ') + msg); 
     { id: '444', title: 'Tópico 1 – Conjuntos numéricos', mine: true },
   ];
   const OTHER = { id: '333', title: `Tópico 5 – ${T}`, mine: false };   // de outra pessoa, nome idêntico
+  const TEAM  = { id: '777', title: 'Tópico 7 – Frações e porcentagem', mine: false };   // pasta da equipe: não está no My Content
 
-  async function setup({ title, html, quizzes = [...MINE, OTHER], section = 'all', elsewhere = false }) {
+  async function setup({ title, html, quizzes = [...MINE, TEAM], section = 'all', elsewhere = false }) {
     Object.assign(h5p, { section, quizzes, searches: [] });
     for (const k of Object.keys(store)) delete store[k];
     await page.evaluate(([html, title, elsewhere]) => {
@@ -218,7 +219,7 @@ const check = (cond, msg) => { console.log((cond ? '  ✔ ' : '  ✘ ') + msg); 
     return !!b && !!j && b.parentElement === j.parentElement && j.nextElementSibling === b;
   }), 'botão H5P logo depois do Justificar, no mesmo grupo');
 
-  // ── A: troca, My Content, hífen x travessão ─────────────────────────
+  // ── A: troca, All Content, hífen x travessão ────────────────────────
   console.log('A · caixa com H5P antigo, popup em All Content, quiz com hífen, carrossel H5P no corpo');
   {
     // O carrossel do corpo do tópico também é H5P: não pode ir para 100%.
@@ -240,8 +241,8 @@ const check = (cond, msg) => { console.log((cond ? '  ✔ ' : '  ✘ ') + msg); 
     check(b.frames[0]?.sw === '100%' && b.frames[0]?.width === '100%' && b.frames[0]?.sh === '600px', '100% de largura, altura mantida');
     check(b.frames[0]?.title === `Tópico 5 - ${T}`, 'title do iframe = nome do quiz');
     check(b.frames[0]?.inP === 'P' && /text-align: center/.test(b.html), 'dentro do parágrafo centralizado');
-    check(h5p.section === 'my', 'popup passou para My Content');
-    check(h5p.searches.length === 1 && h5p.searches[0].q === T && h5p.searches[0].section === 'my', 'buscou só o texto depois do traço, em My Content — ' + JSON.stringify(h5p.searches));
+    check(h5p.section === 'all', 'popup em All Content');
+    check(h5p.searches.length === 1 && h5p.searches[0].q === T && h5p.searches[0].section === 'all', 'buscou só o texto depois do traço, em All Content — ' + JSON.stringify(h5p.searches));
     check(!store.h5pPending, 'pedido consumido');
     check(await page.evaluate(() => [...document.querySelectorAll('iframe')].length) >= 1 && !(await page.$('[role="dialog"]')), 'popup fechado');
     const after = await page.evaluate(() => tinymce.activeEditor.getContent());
@@ -254,6 +255,19 @@ const check = (cond, msg) => { console.log((cond ? '  ✔ ' : '  ✘ ') + msg); 
     check(await page.evaluate(() => tinymce.activeEditor.isDirty()), 'página marcada como alterada (não salva sozinha)');
     await page.evaluate(() => { tinymce.activeEditor.undoManager.undo(); tinymce.activeEditor.undoManager.undo(); });
     check(await page.evaluate(() => tinymce.activeEditor.getContent()) === original, 'dois Ctrl+Z voltam ao original (a troca e a inserção do Canvas)');
+  }
+
+  // ── A2: quiz que não é seu (pasta da equipe) ─────────────────────────
+  console.log('A2 · quiz de outra pessoa / pasta da equipe, com o popup lembrando "My Content"');
+  {
+    await setup({ title: 'Tópico 7 – Frações e porcentagem', html: pageHtml({ box: OLD_BOX }), section: 'my' });
+    await page.click('.__svc-h5p-btn__');
+    check(/Busca em todo o H5P\.com \(All Content\)/.test(await confirmText() || ''), 'a confirmação diz que busca em todo o H5P.com');
+    await answer(true);
+    const t = await waitToast(/✓ Quiz|⚠/);
+    const b = await boxInfo();
+    check(/✓ Quiz "Tópico 7/.test(t) && b.frames.length === 1 && b.frames[0].id === '777', `achou e inseriu o quiz que não está no My Content — ${t}`);
+    check(h5p.section === 'all' && h5p.searches.every(s => s.section === 'all'), 'trocou o popup de My Content para All Content — ' + JSON.stringify(h5p.searches));
   }
 
   // ── B: Não ───────────────────────────────────────────────────────────
@@ -281,7 +295,8 @@ const check = (cond, msg) => { console.log((cond ? '  ✔ ' : '  ✘ ') + msg); 
     const original = await setup({ title: 'Tópico 9 – Assunto que não existe', html: pageHtml({ box: OLD_BOX }), section: 'my' });
     await page.click('.__svc-h5p-btn__'); await answer(true);
     const t = await waitToast(/⚠ Nenhum/);
-    check(/Nenhum quiz seu \(My Content\) com o nome "Tópico 9/.test(t), 'aviso: ' + t);
+    check(/Nenhum quiz no H5P\.com \(All Content\) com o nome "Tópico 9/.test(t), 'aviso: ' + t);
+    check(h5p.searches.length >= 1 && h5p.searches.every(s => s.section === 'all'), 'buscou em All Content — ' + JSON.stringify(h5p.searches));
     check(!store.h5pPending, 'pedido encerrado');
     check(!!(await page.$('[role="dialog"]')), 'popup continua aberto para escolher à mão');
     await page.click('#close-dialog');
@@ -291,22 +306,22 @@ const check = (cond, msg) => { console.log((cond ? '  ✔ ' : '  ✘ ') + msg); 
   }
 
   // ── D: dois quizzes com o mesmo nome ─────────────────────────────────
-  console.log('D · dois quizzes seus com o mesmo nome');
+  // Em All Content, o quiz de outra pessoa com o mesmo nome também aparece: não escolhe sozinho.
+  console.log('D · dois quizzes com o mesmo nome (um seu, um de outra pessoa)');
   {
-    const twins = [...MINE, { id: '555', title: `Tópico 5 – ${T}`, mine: true }];
-    const original = await setup({ title: `Tópico 5 – ${T}`, html: pageHtml({ box: OLD_BOX }), quizzes: twins, section: 'my' });
+    const original = await setup({ title: `Tópico 5 – ${T}`, html: pageHtml({ box: OLD_BOX }), quizzes: [...MINE, OTHER], section: 'my' });
     await page.click('.__svc-h5p-btn__'); await answer(true);
     const t = await waitToast(/⚠ \d+ quizzes/);
-    check(/⚠ 2 quizzes seus/.test(t), 'aviso: ' + t);
+    check(/⚠ 2 quizzes com o nome .*\(podem ser de outras pessoas\)/.test(t), 'aviso: ' + t);
     const popup = page.frames().find(f => f.url().includes('/lti/ctx1/'));
     const marked = await popup.evaluate(() => [...document.querySelectorAll('tr.content-item')].filter(tr => tr.style.outline).length);
     check(marked === 2, `os 2 marcados em laranja no popup (${marked})`);
     check(await page.evaluate(() => tinymce.activeEditor.getContent()) === original, 'nada inserido sozinho');
     // A pessoa escolhe um à mão: o botão ainda arruma o quiz na caixa.
-    await popup.click('button[data-insert="555"]');
+    await popup.click('button[data-insert="333"]');
     const t2 = await waitToast(/✓ Quiz/);
     const b = await boxInfo();
-    check(b.frames.length === 1 && b.frames[0].id === '555' && b.frames[0].sw === '100%', 'escolha manual vai para a caixa, no lugar do antigo — ' + t2);
+    check(b.frames.length === 1 && b.frames[0].id === '333' && b.frames[0].sw === '100%', 'escolha manual vai para a caixa, no lugar do antigo — ' + t2);
   }
 
   // ── E/F: caixa com outro conteúdo / sem faixa ────────────────────────
@@ -347,6 +362,59 @@ const check = (cond, msg) => { console.log((cond ? '  ✔ ' : '  ✘ ') + msg); 
     const t = await waitToast(/✓ Quiz|⚠/);
     const b = await boxInfo();
     check(b.frames.length === 1 && b.frames[0].id === '111' && !/iframe -/.test(b.text), 'marcador trocado pelo quiz — ' + t);
+  }
+
+  // ── Microfundamento: página real (curso 111810), sem a faixa ─────────
+  // O quiz fica no parágrafo logo depois do bloco do banner de Atividades
+  // de Fixação (imagem); a página tem também um vídeo do Studio no corpo.
+  const MF = fs.readFileSync(path.join(__dirname, 'fixtures', 'microfundamento-tema.html'), 'utf8');
+  const MF_SLOT = MF.match(/<p style="text-align: center;"><iframe class="lti-embed" style="width: 100%; height: 600px;" title=""[^>]*><\/iframe><\/p>/)[0];
+  const MF_TITLE = 'UNIDADE 1 - Tema 1 - Inovação: conceito';
+  const MF_QUIZZES = [...MINE, { id: '666', title: MF_TITLE, mine: true }, { id: '667', title: 'UNIDADE 1 - Tema 2 - Inovação: conceito', mine: true }];
+  const mfInfo = () => page.evaluate(() => {
+    const doc = new DOMParser().parseFromString(tinymce.activeEditor.getContent(), 'text/html');
+    const slot = doc.querySelector('img[alt="banner-atividades-fixacao.jpg"]')?.parentElement.nextElementSibling;
+    return {
+      tag: slot?.tagName, style: slot?.getAttribute('style'), next: slot?.nextElementSibling?.textContent.trim(),
+      frames: [...(slot?.querySelectorAll('iframe') || [])].map(f => ({ id: decodeURIComponent(f.getAttribute('src')).split('/').pop(), width: f.getAttribute('width'), sw: f.style.width, title: f.getAttribute('title') })),
+      total: doc.querySelectorAll('iframe').length,
+    };
+  });
+  const outsideSlot = html => html.replace(/(banner-atividades-fixacao\.jpg[^>]*><\/div>)[\s\S]*?(<p style="text-align: right;")/, '$1…$2');
+
+  console.log('I · Microfundamento: H5P antigo logo abaixo do banner');
+  {
+    const original = await setup({ title: MF_TITLE, html: MF, quizzes: MF_QUIZZES, section: 'my' });
+    await page.click('.__svc-h5p-btn__');
+    const c = await confirmText() || '';
+    check(/Microfundamento: o quiz vai logo abaixo do banner/.test(c) && /logo abaixo do banner será substituído/.test(c), 'confirmação fala do banner e da troca');
+    await answer(true);
+    const t = await waitToast(/✓ Quiz|⚠/);
+    check(/✓ Quiz "UNIDADE 1 - Tema 1 - Inovação: conceito" inserido \(substituí/.test(t), 'aviso: ' + t);
+    const m = await mfInfo();
+    check(m.tag === 'P' && m.frames.length === 1 && m.frames[0].id === '666', 'parágrafo depois do banner só com o quiz 666 — ' + JSON.stringify(m.frames));
+    check(m.frames[0]?.sw === '100%' && m.frames[0]?.width === '100%' && m.frames[0]?.title === MF_TITLE, '100% de largura e title do quiz');
+    check(m.total === 2, 'só o vídeo do Studio e o quiz na página (o antigo saiu)');
+    check(h5p.searches.length === 1 && h5p.searches[0].q === 'Inovação: conceito', 'buscou sem "UNIDADE 1 - Tema 1 - " — ' + JSON.stringify(h5p.searches));
+    const after = await page.evaluate(() => tinymce.activeEditor.getContent());
+    check(outsideSlot(after) === outsideSlot(original), 'fora do lugar do quiz, nada mudou');
+  }
+
+  console.log('J · Microfundamento sem o quiz (abaixo do banner vem o "Voltar ao topo")');
+  {
+    const original = await setup({ title: MF_TITLE, html: MF.replace(MF_SLOT, ''), quizzes: MF_QUIZZES, section: 'my' });
+    await page.click('.__svc-h5p-btn__');
+    check(!/substituído/.test(await confirmText() || ''), 'sem aviso de troca');
+    await answer(true);
+    const t = await waitToast(/✓ Quiz|⚠/);
+    const m = await mfInfo();
+    check(m.tag === 'P' && /text-align: center/.test(m.style || '') && m.frames.length === 1 && m.frames[0].id === '666' && m.frames[0].sw === '100%',
+      'parágrafo novo, centralizado, logo depois do banner, com o quiz a 100% — ' + t);
+    check(/Voltar ao topo/.test(m.next || '') && m.total === 2, 'o "Voltar ao topo" vem logo depois; nenhum quiz em outro lugar');
+    const after = await page.evaluate(() => tinymce.activeEditor.getContent());
+    check(outsideSlot(after) === outsideSlot(original), 'fora do lugar do quiz, nada mudou');
+    await page.evaluate(() => { tinymce.activeEditor.undoManager.undo(); tinymce.activeEditor.undoManager.undo(); });
+    check(await page.evaluate(() => tinymce.activeEditor.getContent()) === original, 'dois Ctrl+Z voltam ao original');
   }
 
   await browser.close();
