@@ -1,6 +1,7 @@
 'use strict';
 
 importScripts('h5p-folder.js');   // H5P_FOLDER — botão "📁 Pasta H5P" da página de módulos
+importScripts('find-text.js');    // FIND_TEXT — "🔎 Procurar texto em outra aba ou arquivo (Word/HTML)"
 
 const HEARTBEAT_PERIOD_MIN = 0.5;       // 30s — prova de vida do timer em andamento
 const STALE_GAP_MS         = 150 * 1000; // >150s sem prova de vida = navegador fechado / PC desligado ou dormindo
@@ -729,6 +730,14 @@ chrome.runtime.onInstalled.addListener(() => {
     title: '📏 Justificar texto (Canvas)',
     contexts: ['editable'],
   });
+  // Só aparece com a chave "Procurar texto em outra aba ou arquivo" ligada
+  // nas configurações (findTextEnabled, padrão desligado).
+  chrome.contextMenus.create({
+    id: FIND_TEXT.MENU_ID,
+    title: '🔎 Procurar texto em outra aba ou arquivo (Word/HTML)',
+    contexts: ['selection', 'page', 'frame'],
+    visible: false,
+  }, () => { void chrome.runtime.lastError; FIND_TEXT.syncMenu(); });
 });
 chrome.commands.onCommand.addListener(async (command) => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -852,6 +861,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
   if (info.menuItemId === 'justify-text') {
     justifyText(tab.id);
+  }
+  if (info.menuItemId === FIND_TEXT.MENU_ID) {
+    FIND_TEXT.open(info, tab).catch(console.error);
   }
   if (info.menuItemId === 'download-round') {
     openRoundCropper(info, tab).catch(console.error);

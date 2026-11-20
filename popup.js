@@ -920,6 +920,11 @@ function buildSettings() {
   };
   $('settings-h5p-folder-team').onchange = () => persist({ h5pFolderTeam: $('settings-h5p-folder-team').checked });
 
+  // "🔎 Procurar texto" no menu do botão direito: o service worker (find-text.js)
+  // mostra ou esconde o item na hora, ao ver a chave mudar.
+  $('settings-find-text').checked = !!S.findTextEnabled;
+  $('settings-find-text').onchange = () => persist({ findTextEnabled: $('settings-find-text').checked });
+
   $('btn-save-settings').onclick = async () => {
     const name = $('settings-name').value.trim();
     if (!name) return;
@@ -6277,6 +6282,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     equationPasteEnabled:    saved.equationPasteEnabled    || false,
     h5pFolderEnabled:        saved.h5pFolderEnabled        || false,
     h5pFolderTeam:           saved.h5pFolderTeam           || false,
+    findTextEnabled:         saved.findTextEnabled         || false,
   };
 
   // Bindings estáticos
