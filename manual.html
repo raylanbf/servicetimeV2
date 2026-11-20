@@ -165,6 +165,8 @@
     }
     .callout.blue  { border-color: #3b82f6; background: #0f1f3a; color: #93c5fd; }
     .callout.yellow{ border-color: #fbbf24; background: #2a1f00; color: #fcd34d; }
+    /* links no meio do texto (o menu lateral usa .nav-item) */
+    p a, td a, li a, .callout a { color: #4ade80; text-underline-offset: 2px; }
 
     /* ── Steps ── */
     .steps { counter-reset: step; list-style: none; padding: 0; }
@@ -250,6 +252,7 @@
   <a class="nav-item" href="#canvas-videos-lote">↳ Vídeos em lote</a>
   <a class="nav-item" href="#canvas-studio-videos">↳ Vídeos do Studio</a>
   <a class="nav-item" href="#canvas-h5p-pasta">↳ Pasta H5P</a>
+  <a class="nav-item" href="#canvas-h5p-botao">↳ Botão H5P do editor</a>
   <a class="nav-item" href="#canvas-checklist">↳ Checklist de publicação</a>
   <a class="nav-item" href="#canvas-editor">↳ Edição de página</a>
   <a class="nav-item" href="#canvas-editor-dup">　· Duplicar bloco</a>
@@ -261,6 +264,7 @@
   <a class="nav-item" href="#contexto">Menu de contexto</a>
   <a class="nav-item" href="#marca-texto">Marca-texto</a>
   <a class="nav-item" href="#copia-inteligente">Copia Inteligente</a>
+  <a class="nav-item" href="#procurar-texto">Procurar texto</a>
   <a class="nav-item" href="#clipboard-test">Teste de Clipboard</a>
 
   <div class="nav-section">Configuração</div>
@@ -491,26 +495,62 @@ PROVA FINAL</pre>
     <p>Na hora de gravar, cada página é lida de novo: se o número de espaços mudou depois da prévia, ela não é gravada. Só o parágrafo do espaço e o texto do título mudam; o resto do HTML fica igual. Rodar a mesma planilha de novo não duplica vídeos: os espaços já preenchidos somem da página. Cada página pode voltar à versão anterior pelo histórico de revisões do Canvas.</p>
 
     <h3 id="canvas-h5p-pasta">📁 Pasta H5P</h3>
-    <p>Botão na página de <strong>Módulos</strong> do curso, ao lado do <strong>+ Módulo</strong>. Ele só aparece com a chave <strong>Botão "📁 Pasta H5P"</strong> ligada em <strong>⚙ Configurações → Canvas LMS</strong> (vem desligada). Prepara a UDA no H5P.com em até três passos, escolhidos na confirmação:</p>
+    <p>Botão na página de <strong>Módulos</strong> do curso, ao lado do <strong>+ Módulo</strong>. Ele só aparece com a chave <strong>Botão "📁 Pasta H5P"</strong> ligada em <strong>⚙ Configurações → Canvas LMS</strong> (vem desligada). Prepara a disciplina no H5P.com em até três passos, escolhidos na confirmação. Vale para a disciplina comum (UDA) e para o Microfundamento.</p>
+
+    <p><strong>Disciplina comum ou Microfundamento.</strong> O tipo vem das páginas dos módulos: só páginas "UNIDADE N - Tema N - …" é Microfundamento; só "Tópico N – …" é comum. Se as páginas não decidirem (nenhuma, ou dos dois tipos), vale o nome do curso: começando por "Microfundamento", "MF -" ou "(MF)", é Microfundamento. O que muda:</p>
+    <table>
+      <thead><tr><th></th><th>Comum (UDA)</th><th>Microfundamento</th></tr></thead>
+      <tbody>
+        <tr><td>Nome do botão</td><td>📁 Pasta H5P</td><td>📁 Pasta H5P MF</td></tr>
+        <tr><td>Páginas que ganham quiz</td><td>"Tópico N – …"</td><td>"UNIDADE N - Tema N - …" (podem passar de 6); a "Síntese e referências" fica de fora</td></tr>
+        <tr><td>Lugar do quiz na página</td><td>A caixa logo abaixo da faixa "Atividade de Fixação Não Pontuada"</td><td>O parágrafo logo abaixo do banner de Atividades de Fixação (imagem <code>banner-atividades-fixacao</code>); sem ele, entra um parágrafo novo logo depois do banner</td></tr>
+        <tr><td>Arquivos do Extrator</td><td><code>TÓPICO N.h5p</code> → a página "Tópico N"</td><td><code>Questão N.h5p</code> (do relatório da FIC) → a N-ª página da lista, na ordem dos módulos</td></tr>
+        <tr><td>Pasta da equipe (produção)</td><td>PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM</td><td>PRODUÇÕES › GRADUAÇÃO EAD (pastas "Microfundamento: &lt;disciplina&gt;")</td></tr>
+      </tbody>
+    </table>
+    <p>A confirmação mostra o tipo no título ("📁 Criar pasta no H5P.com? — Microfundamento") e a lista das páginas que vão entrar. Se o curso tiver páginas dos dois tipos, as do outro tipo ficam de fora, com aviso. O nome do botão é só um sinal: confira o tipo e a lista na confirmação.</p>
+
     <ol>
       <li><strong>Pasta:</strong> cria no H5P.com uma pasta com o nome da disciplina. O nome vem do Canvas e pode ser editado antes de criar. O destino depende da chave <strong>Salvar na pasta da equipe (produção)</strong> nas configurações:
         <ul>
           <li><strong>Desligada (padrão, para testes):</strong> no seu <em>My Content</em>, como pasta privada — só você vê.</li>
-          <li><strong>Ligada (produção):</strong> dentro de <em>PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM</em>, onde nada pode ser apagado. A confirmação avisa em amarelo. Antes de criar, a extensão confere que a página aberta é mesmo essa pasta, que conseguiu ler o que há nela e qual formulário o botão <strong>New Folder</strong> de lá usa; se algo não bater, não cria nada e diz o motivo. O nome não ganha prefixo sozinho (há UDA, MF e outras siglas), mas a confirmação avisa: se já existe uma pasta com o mesmo nome, ela é usada; se existe uma com o mesmo nome e outro prefixo (por exemplo "UDA - …"), o <strong>Criar</strong> só libera depois de escolher <strong>Usar esta</strong> ou <strong>Criar outra pasta mesmo assim</strong>.</li>
+          <li><strong>Ligada (produção):</strong> na pasta da equipe do tipo da disciplina (tabela acima), onde nada pode ser apagado. A confirmação avisa em amarelo. Antes de criar, a extensão confere que a página aberta é mesmo essa pasta, que conseguiu ler o que há nela e qual formulário o botão <strong>New Folder</strong> de lá usa; se algo não bater, não cria nada e diz o motivo. O nome não ganha prefixo sozinho (há UDA, MF e outras siglas), mas a confirmação avisa: se já existe uma pasta com o mesmo nome, ela é usada; se existe uma com o mesmo nome e outro prefixo (por exemplo "UDA - …" ou "Microfundamento: …"), o <strong>Criar</strong> só libera depois de escolher <strong>Usar esta</strong> ou <strong>Criar outra pasta mesmo assim</strong>.</li>
         </ul>
       </li>
-      <li><strong>1 quiz por tópico:</strong> dentro da pasta, um <em>Multiple Choice</em> para cada página "Tópico N" dos módulos, com o título exato da página — o mesmo que o botão H5P do editor procura. "Toolbar Below Content" vem desmarcado, e os quizzes são criados um por vez.
+      <li><strong>1 quiz por tópico:</strong> dentro da pasta, um <em>Multiple Choice</em> para cada página da lista, com o título exato da página — o mesmo que o botão H5P do editor procura. "Toolbar Below Content" vem desmarcado, e os quizzes são criados um por vez.
         <ul>
-          <li><strong>Com os arquivos do Extrator de Questões:</strong> em <strong>📎 Escolher arquivos .h5p</strong>, escolha os <code>.h5p</code> que o Extrator gerou do Word: um por questão (<code>TÓPICO 1.h5p</code>…), o <code>.zip</code> com todos ou o Question Set. Cada questão vai para a página "Tópico N" de mesmo número, com o enunciado, as alternativas, as justificativas e as configurações (Tentar novamente, Mostrar solução, pontuação) <strong>como vieram no arquivo</strong>. A lista mostra o arquivo de cada tópico, e o que ficou de fora aparece com o motivo.</li>
+          <li><strong>Com os arquivos do Extrator de Questões:</strong> em <strong>📎 Escolher arquivos .h5p</strong>, escolha os <code>.h5p</code> que o Extrator gerou: um por questão, o <code>.zip</code> com todos ou o Question Set. Cada questão vai com o enunciado, as alternativas, as justificativas e as configurações (Tentar novamente, Mostrar solução, pontuação) <strong>como vieram no arquivo</strong>. A lista mostra, embaixo de cada página, o arquivo que ela recebe e o começo da pergunta; o que ficou de fora aparece com o motivo.
+            <ul>
+              <li><strong>Comum:</strong> do Word, o Extrator gera <code>TÓPICO 1.h5p</code>, <code>TÓPICO 2.h5p</code>…, e cada um vai para a página "Tópico N" de mesmo número.</li>
+              <li><strong>Microfundamento:</strong> do relatório da FIC, o Extrator gera <code>Questão 1.h5p</code>, <code>Questão 2.h5p</code>…, numeradas pela página da sessão (a sessão retirada não conta). A "Questão N" vai para a N-ª página "UNIDADE N - Tema N" da lista, na ordem dos módulos. <strong>Confira os pares pelo começo da pergunta antes de criar.</strong></li>
+            </ul>
+          </li>
           <li><strong>Sem arquivo:</strong> pergunta e alternativas vão provisórias ("Pergunta", "Alternativa A–D"), para a equipe trocar no editor do H5P.com.</li>
-          <li>Ficam de fora: questão com imagem, áudio ou vídeo (suba pelo H5P.com), outro tipo que não Múltipla escolha, outra versão que não a 1.16, sem alternativa correta, sem "Tópico N" no título nem no nome do arquivo, e duas questões para o mesmo tópico. Quiz que já existe na pasta não é trocado pelo arquivo — o aviso final diz quais.</li>
+          <li>Ficam de fora: questão com imagem, áudio ou vídeo (suba pelo H5P.com), outro tipo que não Múltipla escolha, outra versão que não a 1.16, sem alternativa correta, sem "Tópico N" (no Microfundamento, "Questão N") no título nem no nome do arquivo, número além das páginas da lista e duas questões para a mesma página. Quiz que já existe na pasta não é trocado pelo arquivo — o aviso final diz quais.</li>
         </ul>
       </li>
-      <li><strong>Inserir nas páginas:</strong> põe cada quiz na sua página, na caixa logo abaixo da faixa "Atividade de Fixação Não Pontuada" (no lugar do marcador <code>[iframe - Atividade de Fixação H5P]</code> ou de outro H5P que esteja lá). Antes de gravar, mostra uma prévia por página — dá para desmarcar páginas e testar numa só — e pede o número do curso. Página com outro conteúdo na caixa, sem a faixa ou sem quiz de mesmo título na pasta fica de fora, com o motivo.</li>
+      <li><strong>Inserir nas páginas:</strong> põe cada quiz no lugar do quiz da sua página (tabela acima), no lugar do marcador <code>[iframe - Atividade de Fixação H5P]</code> ou do H5P que estiver lá. O lugar vem da própria página: se ela tiver a faixa, vale a faixa; se for do outro modelo, o quiz entra no lugar dela e a prévia avisa. Antes de gravar, mostra uma prévia por página — dá para desmarcar páginas e testar numa só — e pede o número do curso. Fica de fora, com o motivo: página com outro conteúdo no lugar do quiz, H5P abaixo do banner mas não logo abaixo dele, página sem a faixa e sem o banner, e página sem quiz de mesmo título na pasta.</li>
     </ol>
-    <p>Nada é duplicado nem apagado: pasta, quiz ou página que já estão certos ficam como estão, então dá para clicar de novo para completar o que faltou. O H5P.com é acessado com a sessão aberta no Chrome (sem abrir aba); se não houver sessão, o aviso pede para entrar. Só a caixa do quiz muda em cada página; o resto do HTML fica igual, e cada página pode voltar à versão anterior pelo histórico de revisões do Canvas.</p>
+    <p>Nada é duplicado nem apagado: pasta, quiz ou página que já estão certos ficam como estão, então dá para clicar de novo para completar o que faltou. O H5P.com é acessado com a sessão aberta no Chrome (sem abrir aba); se não houver sessão, o aviso pede para entrar. Só o lugar do quiz muda em cada página; o resto do HTML fica igual, e cada página pode voltar à versão anterior pelo histórico de revisões do Canvas.</p>
     <div class="callout yellow">
       Depois de inserir, abra uma página em <strong>Ver como aluno</strong> e confira se o quiz carrega. Como o quiz é ligado à página pelo id, o que a equipe mudar nele no H5P.com aparece na página sem mexer no Canvas.
+    </div>
+    <div class="callout blue">
+      <strong>Testando numa cópia da disciplina</strong> (ex.: importada para o seu ambiente de teste): as páginas copiadas apontam para os <strong>mesmos quizzes</strong> da original, pelo número. Editar um desses quizzes no H5P.com muda nas duas disciplinas. Para testar sem risco, deixe a produção <strong>desligada</strong>. A Pasta H5P cria quizzes novos no seu My Content, e a inserção troca o quiz só nas páginas da disciplina de teste; a original continua com os dela. Para refazer o teste com os <code>.h5p</code>, apague antes no My Content os quizzes provisórios da vez anterior, porque quiz que já existe na pasta não é trocado.
+    </div>
+
+    <h3 id="canvas-h5p-botao">🧩 Botão H5P do editor</h3>
+    <p>Botão <strong>H5P</strong> na barra do editor do Canvas, logo depois do Justificar. Com a página de um tópico aberta em edição, põe o quiz do tópico no lugar certo, sem procurar à mão no popup. Vale para a disciplina comum e para o Microfundamento.</p>
+    <ol class="steps">
+      <li><span>Lê o título da página e acha o lugar do quiz: a caixa logo abaixo da faixa "Atividade de Fixação Não Pontuada" ou, no Microfundamento, o parágrafo logo abaixo do banner de Atividades de Fixação.</span></li>
+      <li><span>Pergunta antes: <strong>"Quer importar o H5P para a página?"</strong>, com o nome do quiz e o aviso, se for o caso, de que o H5P que já está ali vai ser trocado. <strong>Esc</strong> ou <strong>Enter</strong> cancelam (o foco começa no "Não").</span></li>
+      <li><span>Abre o <strong>Interactive Content – H5P</strong> e busca o quiz em <strong>todo o H5P.com</strong> (<em>All Content</em>): os seus, os compartilhados e os das pastas da equipe, mesmo que o popup tenha ficado em "My Content". A busca usa o título sem os prefixos "Tópico N –", "UNIDADE N -" e "Tema N -", e o resultado é conferido com o título inteiro.</span></li>
+      <li><span>Com <strong>exatamente um</strong> quiz de nome idêntico ao da página, clica em <strong>Insert</strong>. O quiz vai para o lugar certo, no lugar do H5P que havia, com 100% de largura.</span></li>
+    </ol>
+    <p>Com nenhum quiz com esse nome, ou com dois ou mais (por exemplo, um seu e outro de outra pessoa), não escolhe sozinho: marca os candidatos em laranja no popup e avisa, para você escolher ou fechar. Mesmo escolhendo à mão, o quiz vai para o lugar certo. Fechar o popup sem escolher não muda nada.</p>
+    <p>A página <strong>não é salva sozinha</strong>: confira e clique em Salvar. Dois <strong>Ctrl+Z</strong> desfazem (a troca e a inserção do Canvas). O botão para antes de perguntar quando: o editor está no modo HTML; a página não tem a faixa nem o banner; o lugar do quiz tem outro conteúdo além do H5P; ou há um H5P abaixo do banner, mas não logo abaixo dele.</p>
+    <div class="callout blue">
+      O nome do quiz no H5P.com tem que ser igual ao título da página. Hífen e travessão, acentos e maiúsculas não contam. É esse o nome que a <a href="#canvas-h5p-pasta">📁 Pasta H5P</a> dá aos quizzes que cria. Na página, o quiz fica ligado pelo número: abrir ou atualizar a página mostra sempre esse quiz, sem procurar de novo pelo nome.
     </div>
   </section>
 
@@ -807,6 +847,7 @@ PROVA FINAL</pre>
         <tr><td>✨ Copia Inteligente</td><td>Cópia avançada para editores rich text — veja seção dedicada abaixo</td></tr>
         <tr><td>🖼 Criar capa de vídeo com o texto</td><td>Abre o editor de capa (1920×1080) com o texto selecionado dentro da moldura do template. Dá para editar o texto (Enter quebra a linha), trocar o template (azul, geométrico, Acessível em Libras) e baixar o PNG ou copiar a imagem. A letra diminui sozinha para o texto caber. O editor também abre pelo painel, em 🎓 Canvas LMS → 🖼 Criar capa de vídeo</td></tr>
         <tr><td>🔤 Adicionar ponto final nas frases</td><td>Fecha com ponto as linhas selecionadas que terminam sem pontuação. Funciona no editor do Canvas, em campos de texto e em áreas editáveis; linhas que já terminam em <code>. ! ? ; : …</code> ficam intactas</td></tr>
+        <tr><td>🔎 Procurar texto em outra aba ou arquivo (Word/HTML)</td><td>Procura o trecho selecionado (também dentro do H5P) em outra aba aberta ou num arquivo <code>.docx</code> ou <code>.html</code> e diz se está igual, parecido ou não está, em que questão e quais palavras diferem — veja a <a href="#procurar-texto">seção dedicada abaixo</a>. Também aparece sem seleção, para colar o texto. Só aparece com a chave ligada em <strong>⚙ Configurações → Canvas LMS</strong> (vem desligada)</td></tr>
       </tbody>
     </table>
 
@@ -824,7 +865,7 @@ PROVA FINAL</pre>
       <thead><tr><th>Opção</th><th>Descrição</th></tr></thead>
       <tbody>
         <tr><td>📐 Redimensionar vídeos</td><td>Ajusta os vídeos da página às dimensões configuradas (padrão 700×442): YouTube, Vimeo e outros players colados, vídeos do Canvas Studio e mídia enviada ao Canvas. Funciona no editor visual e no editor HTML; um Ctrl+Z desfaz. Outros conteúdos incorporados (Genially, H5P, apresentações, formulários) e vídeos responsivos (largura em %) ficam como estão</td></tr>
-        <tr><td>📐 Redimensionar H5P (largura 100%)</td><td>Põe em 100% de largura só o quiz H5P da caixa logo abaixo da faixa "Atividade de Fixação Não Pontuada". Os outros H5P da página (imagens, carrosséis no corpo do tópico) ficam como estão; sem a faixa, nada muda</td></tr>
+        <tr><td>📐 Redimensionar H5P (largura 100%)</td><td>Põe em 100% de largura só o quiz H5P da caixa logo abaixo da faixa "Atividade de Fixação Não Pontuada" ou, no Microfundamento, o logo abaixo do banner de Atividades de Fixação. Os outros H5P da página (imagens, carrosséis no corpo do tópico) ficam como estão; sem a faixa e sem o banner, nada muda</td></tr>
         <tr><td>🔍 Localizar e substituir</td><td>Abre painel flutuante para busca e substituição em campos de texto da página</td></tr>
         <tr><td>🖊 Remover destaques da página</td><td>Remove todos os trechos marcados pelo marca-texto de uma só vez</td></tr>
       </tbody>
@@ -957,6 +998,52 @@ PROVA FINAL</pre>
     </ol>
   </section>
 
+  <!-- ── Procurar texto ── -->
+  <section id="procurar-texto">
+    <h2><span class="icon">🔎</span>Procurar texto em outra aba ou arquivo</h2>
+    <p>Confere se um texto bate com o de outro lugar, e com que confiabilidade. Por exemplo: se a questão de um quiz H5P no Canvas está igual à do Word ou à do relatório da FIC que a equipe recebeu. Diz onde o trecho está e mostra as diferenças palavra a palavra. Só lê: nada muda na aba lida nem no arquivo.</p>
+    <div class="callout blue">
+      Vem desligado. Para o item aparecer no menu do botão direito, ligue <strong>Procurar texto em outra aba ou arquivo</strong> em <strong>⚙ Configurações → Canvas LMS</strong>. Vale na hora, e desligar tira o item do menu.
+    </div>
+
+    <h3>Como usar</h3>
+    <ol class="steps">
+      <li><span>Selecione o trecho na página (também dá dentro do quiz H5P), ou abra sem seleção e cole o texto no painel</span></li>
+      <li><span>Clique com o botão direito e escolha <strong>🔎 Procurar texto em outra aba ou arquivo (Word/HTML)</strong></span></li>
+      <li><span>Em <strong>Procurar em</strong>, escolha um arquivo (<strong>📄 Escolher arquivo…</strong>, <code>.docx</code> ou <code>.html</code>) ou uma das abas abertas, de qualquer janela</span></li>
+      <li><span>O resultado aparece no painel, no canto da página (dá para arrastar pelo título). <strong>Procurar ▶</strong> ou <strong>Ctrl+Enter</strong> procura de novo depois de editar o texto; <strong>Esc</strong> fecha</span></li>
+    </ol>
+    <p>A escolha fica guardada: da próxima vez, é só selecionar e clicar no menu que o resultado já aparece. Sem escolha guardada, vem marcada a aba aberta na outra janela (o outro monitor). O arquivo também fica guardado até você escolher outro.</p>
+
+    <h3>O resultado</h3>
+    <table>
+      <thead><tr><th>Resultado</th><th>Quando</th></tr></thead>
+      <tbody>
+        <tr><td>✔ IGUAL</td><td>O trecho está lá, sem diferença</td></tr>
+        <tr><td>≈ PARCIAL</td><td>Achou um trecho a partir de 85% parecido: a diferença é pequena (uma palavra, um número, uma vírgula)</td></tr>
+        <tr><td>✘ DIFERENTE</td><td>Achou o trecho mais parecido, mas abaixo de 85%</td></tr>
+        <tr><td>✘ NÃO ENCONTRADO</td><td>Nada parecido o bastante (abaixo de 45%)</td></tr>
+      </tbody>
+    </table>
+    <p>Embaixo vem <strong>onde está</strong> (<code>📄 arquivo.docx › Questão 11</code>, <code>📄 relatório.html › Questão 2 (nome da sessão)</code>, <code>🗂 aba › H5P</code>) e as diferenças: <span style="background:#7f1d1d;color:#fecaca;text-decoration:line-through">vermelho riscado</span> = só no trecho procurado (sobrando ou diferente); <span style="background:#14532d;color:#bbf7d0;font-weight:bold">verde</span> = está lá e falta no trecho procurado. Em <strong>Ver os textos inteiros</strong> aparecem os dois trechos e, quando achou dentro de uma questão, a questão inteira de lá. Isso ajuda quando o texto de lá tem um pedaço a mais no meio.</p>
+    <div class="callout blue">
+      Não contam como diferença: aspas curvas e retas, travessão e hífen, reticências, espaços e quebras de linha, ponto final no fim, maiúscula na primeira letra e o "Links para um site externo" que o Canvas põe nos links. A conta é a mesma do programa Comparador de Questões (Python), e os percentuais saem iguais.
+    </div>
+
+    <h3>Onde dá para procurar</h3>
+    <table>
+      <thead><tr><th>Onde</th><th>Como funciona</th></tr></thead>
+      <tbody>
+        <tr><td>📄 Word (<code>.docx</code>)</td><td>Lido pelo mesmo leitor do Extrator de Questões. As questões que ele reconhece dão o "Questão N" do resultado</td></tr>
+        <tr><td>📄 HTML (<code>.html</code>)</td><td>Qualquer página salva. No relatório da FIC salvo pelo navegador, as células "Questão de Fixação" dão o "Questão N (sessão)". O resto da página (o conteúdo das sessões) também é procurado</td></tr>
+        <tr><td>🗂 Aba aberta</td><td>Lê o texto da aba inteira, inclusive o que está dentro de iframes (como o H5P no Canvas). Títulos e linhas como "Questão N" e "Tópico N" dão a localização. <strong>👁 Mostrar na aba</strong> leva até a aba, rola até o trecho e o destaca em amarelo, sem mexer no HTML; o destaque some no próximo clique</td></tr>
+      </tbody>
+    </table>
+    <div class="callout yellow">
+      Não dá para ler páginas do Chrome, páginas de outras extensões e PDF aberto no Chrome. A página do Extrator de Questões é de outra extensão: aparece desabilitada na lista, então procure no arquivo. Um arquivo aberto numa aba (<code>file://</code>) só é lido com "Permitir acesso aos URLs de arquivo" ligado nos detalhes da extensão; pelo botão 📄 Escolher arquivo… não precisa.
+    </div>
+  </section>
+
   <!-- ── Teste de Clipboard ── -->
   <section id="clipboard-test">
     <h2><span class="icon">🧪</span>Teste de Clipboard</h2>
@@ -1005,7 +1092,8 @@ PROVA FINAL</pre>
         <tr><td>Atalho do editor de equação</td><td>Liga o <strong>Ctrl+Shift+Q</strong>, que abre o editor de equação do Canvas (padrão: desligado)</td></tr>
         <tr><td>Colar a fórmula copiada</td><td>Com o atalho ligado, também cola o LaTeX copiado no editor de equação (padrão: desligado)</td></tr>
         <tr><td>Botão "📁 Pasta H5P"</td><td>Mostra o botão <a href="#canvas-h5p-pasta">📁 Pasta H5P</a> na página de Módulos (padrão: desligado)</td></tr>
-        <tr><td>Salvar na pasta da equipe (produção)</td><td>Com o botão ligado: desligado, a pasta vai para o seu My Content como pasta privada (teste); ligado, para PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM, onde nada pode ser apagado (padrão: desligado)</td></tr>
+        <tr><td>Salvar na pasta da equipe (produção)</td><td>Com o botão ligado: desligado, a pasta vai para o seu My Content como pasta privada (teste); ligado, para a pasta da equipe, onde nada pode ser apagado — PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM na disciplina comum, PRODUÇÕES › GRADUAÇÃO EAD no Microfundamento (padrão: desligado)</td></tr>
+        <tr><td>Procurar texto em outra aba ou arquivo</td><td>Mostra no menu do botão direito o <a href="#procurar-texto">🔎 Procurar texto</a>, que confere um trecho com outra aba ou com um Word/HTML. Vale na hora (padrão: desligado)</td></tr>
       </tbody>
     </table>
 

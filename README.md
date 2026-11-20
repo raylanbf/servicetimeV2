@@ -137,8 +137,22 @@ HTML gerado ao colar e visualizar o código no editor:
 | Opção | Descrição |
 |---|---|
 | 📐 Redimensionar vídeos da página | Ajusta os vídeos (YouTube, Vimeo, Canvas Studio, mídia do Canvas) às dimensões configuradas (padrão 700×442), no editor visual ou HTML; Genially, H5P e outros embeds ficam como estão |
-| 📐 Redimensionar H5P (largura 100%) | Põe em 100% só o quiz H5P da caixa abaixo da faixa "Atividade de Fixação"; os outros H5P da página ficam como estão |
+| 📐 Redimensionar H5P (largura 100%) | Põe em 100% só o quiz H5P da caixa abaixo da faixa "Atividade de Fixação" (no Microfundamento, o logo abaixo do banner de Atividades de Fixação); os outros H5P da página ficam como estão |
 | 🔍 Localizar e substituir | Abre painel flutuante para busca e substituição em campos de texto da página |
+| 🔎 Procurar texto em outra aba ou arquivo (Word/HTML) | Procura o trecho selecionado (ou colado) em outra aba aberta ou num arquivo `.docx`/`.html` (ex.: o relatório da FIC) e diz se está igual, parecido ou não está, em que questão, e mostra as diferenças palavra a palavra |
+
+#### Procurar texto — detalhes
+
+Para conferir se o texto de um quiz (ou de qualquer página) bate com o documento de origem. Só leitura: nada muda na aba lida nem no Word. **Vem desligado:** o item só aparece no menu com a chave "Procurar texto em outra aba ou arquivo" ligada nas configurações (Canvas LMS; `findTextEnabled`, padrão `false`). O `find-text.js` mostra ou esconde o item (`contextMenus.update`, `visible`) na hora em que a chave muda, e o `open` confere a chave de novo antes de abrir o painel.
+
+- **O trecho** vem da seleção (inclusive dentro do H5P no Canvas) ou é colado no painel. Sem seleção, o menu abre o painel vazio.
+- **Onde procurar:** um arquivo (Word `.docx` ou `.html`) ou qualquer aba aberta, de todas as janelas — sem escolha guardada, vem marcada a aba aberta na outra janela (o outro monitor). A última escolha fica guardada: da próxima vez, selecionar e clicar no menu já mostra o resultado.
+- **O arquivo** é lido pelo leitor do Extrator de Questões (`extrator.js`). A busca é no texto inteiro, e as questões que ele reconhece dão o "Questão N" do resultado — no relatório da FIC (HTML salvo pelo navegador), com o nome da sessão: `📄 Microfundamento_….html › Questão 11 (Custo médio ponderado do capital)`. O texto fica guardado até escolher outro arquivo. Um HTML aberto numa aba do Chrome (`file://`) só pode ser lido com "Permitir acesso aos URLs de arquivo" ligado; pelo botão "📄 Escolher arquivo…" não precisa.
+- **Resultado:** ✔ IGUAL (100%), ≈ PARCIAL (a partir de 85%), ✘ DIFERENTE ou ✘ NÃO ENCONTRADO, com onde está (`📄 arquivo.docx › Questão 11`, `🗂 aba › H5P`) e o diff: vermelho riscado = só no trecho procurado; verde = está lá e falta nele. Aspas curvas, travessões, espaços, ponto final e maiúscula inicial não contam, nem o "Links para um site externo" que o Canvas põe nos links.
+- **👁 Mostrar na aba** ativa a aba, rola até o trecho (inclusive dentro do iframe do H5P) e o destaca em amarelo, sem mexer no HTML; o destaque some no próximo clique.
+- Páginas do Chrome e de outras extensões (ex.: a do Extrator) não podem ser lidas por extensão; aparecem desabilitadas na lista.
+
+O motor (`text-compare.js`) é a tradução do `comparator.py` do programa Comparador de Questões (Python) e dá os mesmos percentuais (o `difflib` foi traduzido junto). Única diferença: quando o texto lido é só um pouco maior que o trecho (ex.: o iframe de um H5P), o trecho achado é recortado em vez de comparado inteiro. O `extrator.js` é gerado a partir do projeto Machine-Learning: depois de mudar o Extrator, rode `node .claude/skills/h5p-quiz/scripts/build-extrator.mjs`.
 
 ---
 
@@ -194,7 +208,18 @@ O destino é a chave **Salvar na pasta da equipe (produção)** (`h5pFolderTeam`
 2. **1 quiz por tópico** — um Multiple Choice para cada página "Tópico N", com o título exato da página e "Toolbar Below Content" desmarcado. Um por vez, com pausa entre eles. A questão vem dos `.h5p` escolhidos na confirmação (gerados pelo Extrator de Questões a partir do Word: um por questão, o `.zip` com todos ou um Question Set), ligados pelo "Tópico N" do título ou do nome do arquivo, com as configurações do arquivo; sem arquivo, vai provisória. Só Múltipla escolha 1.16 sem mídia; o conteúdo (`content.json`) vai pelo mesmo formulário de criação (`h5p-package.js`). Quiz que já existe não muda.
 3. **Inserir nas páginas** — cada quiz vai para a caixa abaixo da faixa "Atividade de Fixação" da sua página. Prévia por página (dá para desmarcar e testar numa só) e número do curso redigitado antes de gravar; cada página é lida de novo e conferida depois.
 
+**Microfundamento** (modelo antigo): o botão vira **📁 Pasta H5P MF**.
+- **Tipo da disciplina:** vem das páginas dos módulos. Só "UNIDADE N - Tema N - …" é Microfundamento; só "Tópico N" é comum. Se as páginas não decidirem (nenhuma, ou dos dois tipos), vale o nome do curso: "Microfundamento: …", "MF - …" ou "(MF) …".
+- Ao abrir Módulos, o tipo sai dos títulos que a página já mostra. No clique, a lista da API confirma, e o botão muda de nome se precisar. As páginas do outro tipo ficam de fora, com aviso.
+- **Tópicos:** as páginas "UNIDADE N - Tema N - …" (podem passar de 6). A "Síntese e referências" fica de fora.
+- **Lugar do quiz:** não há a faixa; é o parágrafo logo abaixo da imagem `banner-atividades-fixacao`. Se ali não houver H5P nem parágrafo vazio (por exemplo, vem o "Voltar ao topo"), entra um parágrafo novo, centralizado, logo depois do banner.
+- **Produção:** com "Salvar na pasta da equipe" ligado, a pasta vai para *PRODUÇÕES › GRADUAÇÃO EAD* (`/content/1293047321834512708`, `TEAMS.micro` em `h5p-folder.js`), e não para a da UDA. As conferências e o formulário do "New Folder" são os mesmos (gravação de 20/11/2026). As pastas de lá se chamam "Microfundamento: <disciplina>". O aviso de nome parecido reconhece esse prefixo. Desligado, vai para o *My Content*, como na comum.
+- O lugar vem sempre da própria página: se ela tiver a faixa, vale a faixa, e a prévia avisa quando o lugar é o do outro tipo. Vale também para o botão H5P do editor e o Redimensionar H5P (`quizBox` em `h5p-width.js`).
+- **`.h5p` do Extrator:** do relatório da FIC, o Extrator gera "Questão 1.h5p", "Questão 2.h5p"… (título "Questão N"), numeradas pela página da sessão (a sessão retirada não conta). No Pasta H5P MF, a "Questão N" vai para a **N-ª página "UNIDADE N - Tema N" dos módulos, na ordem** (`h5p-package.js`, `kind 'micro'`), e a lista da confirmação mostra o par com o começo da pergunta, para conferir antes de criar. Conferido em 20/11/2026 com o zip real do "Inovação na Concepção de Negócios": as 11 questões caíram nas 11 páginas certas. Fica de fora: sem "Questão N", número além das páginas e duas para a mesma página.
+
 Nada é duplicado nem apagado. O H5P.com não tem API: o `background.js` usa a sessão aberta no Chrome e os mesmos formulários da tela (`h5p-folder.js`; o formulário de criação de quiz é lido no documento offscreen, `offscreen.js`). A regra da caixa é a do botão H5P do editor (`h5p-width.js`), e a inserção em `h5p-insert.js`. Regressão: `.claude/skills/h5p-quiz/scripts/test-h5p-folder.js`.
+
+> **Manifest:** o Chrome injeta cada arquivo uma vez só por página, mesmo que ele esteja em duas entradas de `content_scripts` (de mundos diferentes). Por isso o `h5p-width.js` vai no mundo isolado só fora de `/pages/*` (Pasta H5P) e no MAIN só em `/pages/*` (botão H5P do editor). Na v3.15–3.19 as duas entradas valiam para as mesmas páginas, e o botão parava em "reading 'quizBox'". Não repita um arquivo em duas entradas que possam valer para a mesma página. Regressão (carrega a extensão de verdade): `.claude/skills/h5p-quiz/scripts/test-manifest.js`.
 
 > Para descobrir como um site faz uma ação (sem API), use o **Gravador de Ações** em `C:\Users\Casa\ferramentas\gravador-acoes\` — extensão separada, fora desta pasta para não ir junto com o Service Timer; veja o README de lá.
 
