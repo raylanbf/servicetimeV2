@@ -156,7 +156,9 @@ console.log('Word de verdade (fixtures/questoes-nosql.docx), lido pelo extrator.
   const t0 = Date.now();
   for (const p of doc.paragrafos.filter(p => p.length > 60).slice(0, 25)) C.findBestMatch(p.replace(/a/, 'á') + ' fim', text, { sections });
   const ms = Date.now() - t0;
-  check(ms < 4000, `25 buscas aproximadas no Word inteiro em ${ms} ms`);
+  // Só para pegar uma busca que ficou muito lenta: leva uns 3 s, e com a
+  // máquina ocupada (outros testes rodando) passa de 4 s.
+  check(ms < 10000, `25 buscas aproximadas no Word inteiro em ${ms} ms`);
 }
 
 console.log('HTML (fixtures/fic-mini.html, relatório da FIC), lido pelo extrator.js:');
