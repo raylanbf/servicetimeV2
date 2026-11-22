@@ -1,11 +1,14 @@
 // Botão "📁 Pasta H5P" na página de módulos do Canvas, ao lado do "+ Módulo",
 // em até três passos, escolhidos na confirmação:
 //   1. cria no H5P.com uma pasta com o nome da disciplina;
-//   2. dentro dela, um quiz (Multiple Choice) para cada página de tópico dos
-//      módulos — "Tópico N" ou, no Microfundamento, "UNIDADE N - Tema N" —,
-//      com o título exato da página — o mesmo que o botão H5P do editor
-//      procura. A questão vem do .h5p escolhido na confirmação (Extrator de
-//      Questões; h5p-package.js) ou vai provisória;
+//   2. dentro dela, um quiz (Multiple Choice) para cada página marcada na
+//      confirmação — de início, as de tópico dos módulos: "Tópico N" ou, no
+//      Microfundamento, "UNIDADE N - Tema N"; dá para desmarcar as que não
+//      vão ter quiz e marcar outras páginas dos módulos —, com o título
+//      exato da página — o mesmo que o botão H5P do editor procura. A
+//      questão vem do .h5p escolhido na confirmação (Extrator de Questões;
+//      h5p-package.js), ligada pelo número e trocável página a página, ou
+//      vai provisória;
 //   3. põe cada quiz na sua página, na caixa depois da faixa "Atividade de
 //      Fixação" ou, no Microfundamento, logo abaixo do banner de Atividades
 //      de Fixação (h5p-insert.js), com prévia, número do curso redigitado e
@@ -104,9 +107,10 @@
       ?.textContent.trim() || '';
   }
 
-  // Páginas de tópico dos módulos, dos dois tipos, na ordem dos módulos,
-  // sem repetir: [{ title, url, kind }].
-  async function topicPages() {
+  // Páginas dos módulos, na ordem dos módulos, sem repetir: [{ title, url,
+  // kind }] — kind: 'uda' ou 'micro' nas de tópico, null nas outras (a
+  // confirmação mostra essas para marcar à mão).
+  async function modulePages() {
     const modules = await getAll(`${api()}/modules?include[]=items&per_page=50`);
     const out = [], seen = new Set();
     for (const m of modules) {
@@ -115,10 +119,24 @@
       for (const it of items) {
         const t = String(it.title || '').replace(/\s+/g, ' ').trim();
         const kind = kindOfTitle(t);
-        if (it.type !== 'Page' || !kind || seen.has(norm(t))) continue;
+        if (it.type !== 'Page' || !t || seen.has(norm(t))) continue;
         seen.add(norm(t));
         out.push({ title: t, url: it.page_url || '', kind });
       }
+    }
+    return out;
+  }
+
+  // O que há no lugar do quiz de cada página: Map(url → { quiz, marker }),
+  // para a confirmação já deixar marcadas as que têm quiz ou marcador. Usa a
+  // leitura do selo "H5P" (canvas-h5p-marks.js), se houver; senão, lê a
+  // lista das páginas com o corpo.
+  async function pageStates() {
+    const fromSelo = await window.__svcH5pMarks?.pages?.();
+    if (fromSelo) return fromSelo;
+    const out = new Map();
+    for (const p of await getAll(`${api()}/pages?include[]=body&per_page=100`)) {
+      if (p && typeof p.url === 'string' && 'body' in p) out.set(p.url, window.__svcH5pInsert.slotState(p.body || ''));
     }
     return out;
   }
@@ -278,14 +296,18 @@
   const fold = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[‐-―]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
   const coreName = s => fold(String(s || '').replace(/^\s*(?:\([A-Z]{1,6}\)|[A-Z]{1,6}\s*[-‐-―:]|[Mm]icrofundamentos?\s*[-‐-―:])\s*/, ''));
 
-  // Confirmação: nome editável e o que fazer com os tópicos; opcionalmente,
-  // os .h5p com as questões (h5p-package.js), ligados pelo "Tópico N" — só
-  // na disciplina comum. kind: o tipo da disciplina; others: páginas de
-  // tópico do outro tipo, que ficam de fora.
+  // Confirmação: nome editável, as páginas que vão ter quiz (as de tópico do
+  // tipo vêm marcadas; dá para desmarcar e marcar outras) e o que fazer com
+  // elas; opcionalmente, os .h5p com as questões (h5p-package.js), ligados
+  // pelo "Tópico N" (comum) ou pela ordem das marcadas (Microfundamento), com
+  // troca à mão página a página. pages: todas as páginas dos módulos
+  // [{ title, url, kind }]; kind: o tipo da disciplina; others: páginas de
+  // tópico do outro tipo, que ficam desmarcadas; states: o lugar do quiz de
+  // cada página (pageStates) ou null.
   // dest.folders (modo equipe): as pastas que já existem lá, para o aviso de
   // nome igual (a pasta existente é usada) ou parecido (só cria escolhendo).
-  // Resolve { title, quizzes: bool, insert: bool, files: Map | null } ou null.
-  function ask(name, topics, dest, kind, others = []) {
+  // Resolve { title, quizzes: bool, insert: bool, files: Map | null, topics } ou null.
+  function ask(name, pages, dest, kind, others = [], states = null) {
     return modal(ui => {
       ui.line(`📁 Criar pasta no H5P.com?${kind === 'micro' ? ' — Microfundamento' : ''}`, { fontSize: '14px', fontWeight: 'bold', color: '#e2e8f0' })
         .setAttribute('data-kind', kind);
@@ -302,10 +324,10 @@
       note.setAttribute('data-name-note', '');
       Object.assign(note.style, { margin: '-6px 0 12px', fontSize: '12px', lineHeight: '1.4' });
       ui.box.appendChild(note);
-      let quizzes = null, insert = null, files = null, reading = false;
+      let quizzes = null, insert = null, reading = false, dupBlocked = false;
       let blocked = false, anyway = false, lastCore = null;
       const { yes, enable } = ui.buttons('Cancelar', 'Criar');
-      const sync = () => enable(!!input.value.trim() && !reading && !blocked);
+      const sync = () => enable(!!input.value.trim() && !reading && !blocked && !(dupBlocked && quizzes?.checked));
 
       // Nome igual a uma pasta da equipe: ela é usada. Mesmo nome com outro
       // prefixo: "Criar" só libera usando a existente ou marcando "criar outra".
@@ -354,100 +376,212 @@
         note.appendChild(lab);
       }
       checkName();
-      if (topics.length) {
-        quizzes = ui.check(`Criar também 1 quiz por tópico (${topics.length}), dentro da pasta:`, true, 'data-quizzes');
+      // Páginas dos módulos. Vêm marcadas as que já têm o H5P ou o marcador
+      // da AVA no lugar do quiz (as do selo "H5P"); se nenhuma tiver (disciplina
+      // nova, ou sem conseguir ler), as de tópico do tipo. Dá para desmarcar
+      // as que não vão ter quiz e, em "Mostrar as outras páginas", marcar
+      // outras. Os quizzes, os .h5p e a inserção valem só para as marcadas,
+      // na ordem dos módulos.
+      const P = window.__svcH5pPackage;
+      const isTopic = p => p.kind === kind;
+      const stateOf = p => states?.get(p.url) || null;
+      const hasSlot = p => !!(stateOf(p)?.quiz || stateOf(p)?.marker);
+      const bySlot = pages.some(hasSlot);
+      const marked = new Map(pages.map(p => [p.title, bySlot ? hasSlot(p) : isTopic(p)]));
+      const chosen = () => pages.filter(p => marked.get(p.title));
+      const extras = pages.filter(p => !isTopic(p)).length;
+      let showAll = !pages.some(isTopic);
+      // Questões dos .h5p (h5p-package.js): pool = as que servem; assign =
+      // página marcada → índice no pool (-1 = provisória); why = por que a
+      // ligação automática deixou uma de fora. Marcar ou desmarcar uma página
+      // refaz a ligação automática (e desfaz as trocas à mão).
+      let pool = null, nFiles = 0, readProblems = [], assign = new Map(), why = new Map();
+      function remap() {
+        assign = new Map();
+        why = new Map();
+        if (!pool) return;
+        const auto = P.match(pool, chosen(), [], kind, why);
+        for (const p of chosen()) { const q = auto.get(p.title); assign.set(p.title, q ? pool.indexOf(q) : -1); }
+      }
+      const pick = p => assign.get(p.title) ?? -1;
+
+      if (pages.length) {
+        quizzes = ui.check('', true, 'data-quizzes');
+        const count = quizzes.nextSibling;   // o texto da chave, com o número de páginas marcadas
+        ui.line(bySlot
+          ? 'Vêm marcadas as páginas que já têm o H5P (ou o marcador da AVA) no lugar do quiz — as do selo H5P nos Módulos. Marque ou desmarque o que precisar.'
+          : pages.some(isTopic)
+            ? 'Desmarque as páginas que não vão ter quiz.'
+            : `Nenhuma página ${TOPIC_NAME[kind]} nos módulos: marque as que vão ter quiz, ou deixe tudo desmarcado para criar só a pasta.`,
+        { fontSize: '11px', color: '#94a3b8', margin: '0 0 4px 22px' }).setAttribute('data-default', bySlot ? 'slot' : 'topics');
         const ul = document.createElement('ul');
-        Object.assign(ul.style, { margin: '0 0 8px', padding: '0 0 0 22px', fontSize: '12px', color: '#cbd5e1', maxHeight: '220px', overflowY: 'auto', lineHeight: '1.5' });
-        const renderList = () => {
-          ul.replaceChildren(...topics.map(t => {
+        ul.setAttribute('data-topics', '');
+        Object.assign(ul.style, { margin: '0 0 6px', padding: '0 0 0 22px', listStyle: 'none', fontSize: '12px', color: '#cbd5e1', maxHeight: '260px', overflowY: 'auto', lineHeight: '1.5' });
+        ui.box.appendChild(ul);
+        if (extras && pages.some(isTopic)) {
+          const more = ui.check(`Mostrar as outras páginas dos módulos (${extras}), para marcar`, false, 'data-show-all');
+          Object.assign(more.parentElement.style, { fontSize: '11px', color: '#94a3b8', margin: '0 0 8px 22px' });
+          more.addEventListener('change', () => { showAll = more.checked; renderList(); });
+        }
+
+        // Arquivos .h5p (ou o .zip do Extrator de Questões). Na comum, cada um
+        // vai para a página "Tópico N" do seu número; no Microfundamento, a
+        // "Questão N" (numerada pela página da sessão da FIC) vai para a N-ª
+        // página marcada (h5p-package.js). Na lista, dá para trocar à mão.
+        const row = document.createElement('div');
+        Object.assign(row.style, { display: 'flex', gap: '8px', alignItems: 'center', margin: '0 0 6px', fontSize: '12px' });
+        const pickBtn = document.createElement('button');
+        pickBtn.type = 'button';
+        pickBtn.textContent = '📎 Escolher arquivos .h5p';
+        Object.assign(pickBtn.style, { padding: '5px 10px', borderRadius: '4px', border: '1px solid #475569', background: '#2a2a3e', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' });
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file'; fileInput.multiple = true; fileInput.accept = '.h5p,.zip';
+        fileInput.setAttribute('data-h5p-files', '');
+        fileInput.style.display = 'none';
+        const status = document.createElement('span');
+        status.style.color = '#94a3b8';
+        status.textContent = 'opcional — sem arquivo, a questão vai provisória';
+        row.append(pickBtn, fileInput, status);
+        ui.box.appendChild(row);
+        const problems = ui.line('', { fontSize: '11px', color: '#fbbf24', whiteSpace: 'pre-line', display: 'none' });
+        problems.setAttribute('data-h5p-problems', '');
+        const dupNote = ui.line('', { fontSize: '11px', color: '#f87171', whiteSpace: 'pre-line', display: 'none' });
+        dupNote.setAttribute('data-h5p-dups', '');
+        pickBtn.onclick = () => fileInput.click();
+        fileInput.onchange = async () => {
+          const picked = [...fileInput.files];
+          fileInput.value = '';
+          if (!picked.length) return;
+          reading = true; sync();
+          status.textContent = 'Lendo os arquivos…';
+          status.style.color = '#94a3b8';
+          try {
+            const r = await P.read(await Promise.all(picked.map(async f => ({ name: f.name, buffer: await f.arrayBuffer() }))), kind);
+            pool = r.quizzes; readProblems = r.problems; nFiles = picked.length;
+            remap();
+          } catch (e) {
+            pool = null; readProblems = []; assign = new Map();
+            status.textContent = `Não consegui ler os arquivos: ${e.message}`;
+            status.style.color = '#f87171';
+          }
+          reading = false;
+          renderList();
+        };
+        quizzes.addEventListener('change', () => { pickBtn.disabled = !quizzes.checked; row.style.opacity = quizzes.checked ? '1' : '.5'; sync(); });
+        ui.line('Cada quiz é um Multiple Choice com o título exato da página. Com o .h5p do Extrator de Questões, já vai com a questão e as configurações do arquivo; sem ele, com pergunta e alternativas provisórias para a equipe trocar. Na lista, dá para trocar a questão de cada página.', { fontSize: '11px', color: '#94a3b8' });
+        if (kind === 'micro') {
+          ui.line('Microfundamento: o Extrator numera as questões do relatório da FIC pela página da sessão, e a "Questão N" vai para a N-ª página marcada na lista acima, na ordem dos módulos — desmarcar uma página passa as questões seguintes para as próximas. Confira os pares: o começo da pergunta aparece embaixo de cada página.', { fontSize: '11px', color: '#fbbf24' })
+            .setAttribute('data-micro-files', '');
+        }
+        insert = ui.check(`Inserir cada quiz na sua página (${kind === 'micro' ? 'logo abaixo do banner de Atividades de Fixação' : 'caixa da "Atividade de Fixação"'}) — antes de gravar, mostra a prévia.`, true, 'data-insert');
+
+        const selectStyle = {
+          display: 'block', margin: '2px 0 0 19px', maxWidth: 'calc(100% - 19px)', padding: '2px 4px', borderRadius: '4px',
+          border: '1px solid #475569', background: '#0f172a', fontSize: '11px',
+        };
+        function renderList() {
+          const shown = pages.filter(p => showAll || isTopic(p) || marked.get(p.title));
+          ul.replaceChildren(...shown.map(p => {
+            const on = !!marked.get(p.title);
             const li = document.createElement('li');
-            li.textContent = t.title;
-            if (files) {
-              const q = files.get(t.title);
-              const s = document.createElement('span');
-              s.setAttribute('data-file', q ? q.source : '');
-              s.textContent = q ? ` ← ${q.source}` : ' — provisória';
-              s.style.color = q ? '#4ade80' : '#94a3b8';
+            li.setAttribute('data-title', p.title);
+            if (!on) li.setAttribute('data-off', '');
+            li.style.margin = '0 0 2px';
+            const label = document.createElement('label');
+            Object.assign(label.style, { display: 'flex', gap: '6px', alignItems: 'flex-start', cursor: 'pointer' });
+            const c = document.createElement('input');
+            c.type = 'checkbox'; c.checked = on; c.setAttribute('data-topic', p.url);
+            c.style.margin = '3px 0 0';
+            c.onchange = () => { marked.set(p.title, c.checked); remap(); renderList(); };
+            const t = document.createElement('span');
+            t.textContent = p.title;
+            t.style.color = on ? '#cbd5e1' : '#64748b';
+            label.append(c, t);
+            // O que a página já tem no lugar do quiz: selo "H5P" (como nos
+            // Módulos) ou "marcador" (o da AVA, esperando o quiz).
+            const st = stateOf(p);
+            if (st?.quiz || st?.marker) {
+              const tag = document.createElement('span');
+              tag.setAttribute('data-slot', st.quiz ? 'quiz' : 'marker');
+              tag.textContent = st.quiz ? 'H5P' : 'marcador';
+              tag.title = st.quiz
+                ? `Já tem um H5P no lugar do quiz${st.quiz.title ? `: ${st.quiz.title}` : ''}${st.quiz.id ? ` (nº ${st.quiz.id})` : ''} — a inserção troca pelo quiz da pasta, se for outro.`
+                : 'Tem o marcador [iframe - Atividade de Fixação H5P], esperando o quiz.';
+              Object.assign(tag.style, {
+                flex: 'none', alignSelf: 'center', padding: '0 6px', borderRadius: '8px', fontSize: '10px', fontWeight: '700', lineHeight: '15px',
+                ...(st.quiz ? { background: '#1d6fb8', color: '#fff' } : { background: '#334155', color: '#cbd5e1' }),
+              });
+              label.appendChild(tag);
+            }
+            li.appendChild(label);
+            if (on && pool) {
+              // A questão desta página: a da ligação automática, ou a escolhida aqui.
+              const i = pick(p);
+              const s = document.createElement('select');
+              s.setAttribute('data-file', i >= 0 ? pool[i].source : '');
+              s.setAttribute('aria-label', `Questão da página ${p.title}`);
+              Object.assign(s.style, selectStyle, { color: i >= 0 ? '#4ade80' : '#94a3b8' });
+              s.add(new Option('— questão provisória', '-1'));
+              pool.forEach((q, k) => s.add(new Option(`← ${q.source}`, String(k))));
+              s.value = String(i);
+              s.onchange = () => { assign.set(p.title, Number(s.value)); renderList(); };
               li.appendChild(s);
               // O começo da pergunta, para conferir o par antes de criar.
-              if (q?.preview) {
-                const p = document.createElement('div');
-                p.setAttribute('data-preview', '');
-                p.textContent = `“${q.preview}${q.preview.length >= 90 ? '…' : ''}”`;
-                Object.assign(p.style, { color: '#94a3b8', fontSize: '11px', fontStyle: 'italic' });
-                li.appendChild(p);
+              if (i >= 0 && pool[i].preview) {
+                const pv = document.createElement('div');
+                pv.setAttribute('data-preview', '');
+                pv.textContent = `“${pool[i].preview}${pool[i].preview.length >= 90 ? '…' : ''}”`;
+                Object.assign(pv.style, { color: '#94a3b8', fontSize: '11px', fontStyle: 'italic', marginLeft: '19px' });
+                li.appendChild(pv);
               }
             }
             return li;
           }));
-        };
-        renderList();
-        ui.box.appendChild(ul);
-
-        {
-          // Arquivos .h5p (ou o .zip do Extrator de Questões). Na comum, cada um
-          // vai para a página "Tópico N" do seu título; no Microfundamento, a
-          // "Questão N" (numerada pela página da sessão da FIC) vai para a N-ª
-          // página da lista acima (h5p-package.js).
-          const row = document.createElement('div');
-          Object.assign(row.style, { display: 'flex', gap: '8px', alignItems: 'center', margin: '0 0 6px', fontSize: '12px' });
-          const pick = document.createElement('button');
-          pick.type = 'button';
-          pick.textContent = '📎 Escolher arquivos .h5p';
-          Object.assign(pick.style, { padding: '5px 10px', borderRadius: '4px', border: '1px solid #475569', background: '#2a2a3e', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' });
-          const fileInput = document.createElement('input');
-          fileInput.type = 'file'; fileInput.multiple = true; fileInput.accept = '.h5p,.zip';
-          fileInput.setAttribute('data-h5p-files', '');
-          fileInput.style.display = 'none';
-          const status = document.createElement('span');
-          status.style.color = '#94a3b8';
-          status.textContent = 'opcional — sem arquivo, a questão vai provisória';
-          row.append(pick, fileInput, status);
-          ui.box.appendChild(row);
-          const problems = ui.line('', { fontSize: '11px', color: '#fbbf24', whiteSpace: 'pre-line', display: 'none' });
-          problems.setAttribute('data-h5p-problems', '');
-          pick.onclick = () => fileInput.click();
-          fileInput.onchange = async () => {
-            const chosen = [...fileInput.files];
-            fileInput.value = '';
-            if (!chosen.length) return;
-            reading = true; sync();
-            status.textContent = 'Lendo os arquivos…';
-            try {
-              const r = await window.__svcH5pPackage.load(await Promise.all(chosen.map(async f => ({ name: f.name, buffer: await f.arrayBuffer() }))), topics, kind);
-              files = r.byTopic;
-              status.textContent = `${chosen.length} arquivo(s) · ${files.size} de ${topics.length} tópico(s) com a questão do arquivo`;
-              status.style.color = files.size ? '#4ade80' : '#fbbf24';
-              problems.textContent = r.problems.length ? `Fora:\n• ${r.problems.join('\n• ')}` : '';
-              problems.style.display = r.problems.length ? 'block' : 'none';
-            } catch (e) {
-              files = null;
-              status.textContent = `Não consegui ler os arquivos: ${e.message}`;
-              status.style.color = '#f87171';
-            }
-            renderList();
-            reading = false; sync();
-          };
-          const syncPick = () => { pick.disabled = !quizzes.checked; row.style.opacity = quizzes.checked ? '1' : '.5'; };
-          quizzes.addEventListener('change', syncPick);
-          ui.line('Cada quiz é um Multiple Choice com o título exato da página. Com o .h5p do Extrator de Questões, já vai com a questão e as configurações do arquivo; sem ele, com pergunta e alternativas provisórias para a equipe trocar.', { fontSize: '11px', color: '#94a3b8' });
-          if (kind === 'micro') {
-            ui.line('Microfundamento: o Extrator numera as questões do relatório da FIC pela página da sessão, e a "Questão N" vai para a N-ª página da lista acima, na ordem dos módulos. Confira os pares: o começo da pergunta aparece embaixo de cada página.', { fontSize: '11px', color: '#fbbf24' })
-              .setAttribute('data-micro-files', '');
-          }
+          renderStatus();
         }
-        insert = ui.check(`Inserir cada quiz na sua página (${kind === 'micro' ? 'logo abaixo do banner de Atividades de Fixação' : 'caixa da "Atividade de Fixação"'}) — antes de gravar, mostra a prévia.`, true, 'data-insert');
+        function renderStatus() {
+          const list = chosen();
+          count.textContent = `Criar também 1 quiz por tópico (${list.length}), dentro da pasta:`;
+          dupBlocked = false;
+          if (pool) {
+            const uses = new Map();
+            for (const p of list) { const i = pick(p); if (i >= 0) uses.set(i, [...(uses.get(i) || []), p.title]); }
+            const withFile = list.filter(p => pick(p) >= 0).length;
+            status.textContent = `${nFiles} arquivo(s) · ${withFile} de ${list.length} tópico(s) com a questão do arquivo`;
+            status.style.color = withFile ? '#4ade80' : '#fbbf24';
+            // Fora: o que não deu para ler, por que a ligação automática deixou
+            // de fora e o que ficou sem página depois das trocas à mão.
+            const fora = new Set(readProblems);
+            pool.forEach((q, i) => { if (!uses.has(i)) fora.add(why.get(q) || `${q.source}: não vai para nenhuma página.`); });
+            problems.textContent = fora.size ? `Fora:\n• ${[...fora].join('\n• ')}` : '';
+            problems.style.display = fora.size ? 'block' : 'none';
+            // A mesma questão em duas páginas: "Criar" só libera deixando em uma.
+            const dups = [...uses].filter(([, titles]) => titles.length > 1);
+            dupBlocked = dups.length > 0;
+            dupNote.textContent = dups.map(([i, titles]) => `⚠ ${pool[i].source} está em ${titles.length} páginas (${titles.join('; ')}): deixe em uma só.`).join('\n');
+            dupNote.style.display = dupBlocked ? 'block' : 'none';
+          }
+          sync();
+        }
+        renderList();
       } else {
         ui.line(`Nenhuma página ${TOPIC_NAME[kind]} nos módulos: só a pasta será criada.`, { fontSize: '11px', color: '#94a3b8' });
       }
       // Disciplina com páginas dos dois tipos: o nome do curso decidiu.
       if (others.length) {
-        ui.line(`⚠ Há também ${others.length} página(s) ${TOPIC_NAME[kind === 'micro' ? 'uda' : 'micro']} nos módulos: ficam de fora (pelo nome do curso, a disciplina é ${KIND_NAME[kind]}).`, { fontSize: '11px', color: '#fbbf24' })
+        ui.line(`⚠ Há também ${others.length} página(s) ${TOPIC_NAME[kind === 'micro' ? 'uda' : 'micro']} nos módulos: ficam desmarcadas (pelo nome do curso, a disciplina é ${KIND_NAME[kind]}).`, { fontSize: '11px', color: '#fbbf24' })
           .setAttribute('data-others', String(others.length));
       }
       ui.line('O que já existir com o mesmo nome fica como está — nada é duplicado nem apagado.', { fontSize: '11px', color: '#94a3b8' });
       ui.box.appendChild(yes.parentElement);   // botões no fim
-      const result = () => ({ title: input.value.trim(), quizzes: !!quizzes?.checked, insert: !!insert?.checked, files: quizzes?.checked ? files : null });
+      // Só as páginas marcadas, na ordem dos módulos; files: página → questão do .h5p.
+      const result = () => {
+        const list = pages.filter(p => marked.get(p.title));
+        const files = pool && quizzes?.checked
+          ? new Map(list.filter(p => pick(p) >= 0).map(p => [p.title, pool[pick(p)]]))
+          : null;
+        return { title: input.value.trim(), quizzes: !!quizzes?.checked && list.length > 0, insert: !!insert?.checked && list.length > 0, files, topics: list };
+      };
       input.addEventListener('input', () => { checkName(); sync(); });
       input.addEventListener('keydown', e => { if (e.key === 'Enter' && !yes.disabled) { e.preventDefault(); ui.done(result()); } });
       yes.onclick = () => { if (!yes.disabled) ui.done(result()); };
@@ -640,6 +774,8 @@
     if (done.error.length) parts.push(`✗ Não gravado: ${done.error.join('; ')}`);
     if (note) parts.push(note);
     toast(parts.join('\n'), done.error.length || done.warn.length || note ? 'warn' : 'ok');
+    // Os selos "H5P" dos módulos (canvas-h5p-marks.js) leem as páginas de novo.
+    if (done.ok.length || done.warn.length) window.__svcH5pMarks?.refresh();
   }
 
   let busy = false;
@@ -654,11 +790,12 @@
     };
     try {
       setBtn('📁 Lendo…', true);
-      const [name, pages] = await Promise.all([courseName(), topicPages().catch(() => [])]);
+      const [name, pages] = await Promise.all([courseName(), modulePages().catch(() => [])]);
       // Tipo pela lista completa dos módulos (a da página pode vir incompleta).
       kind = kindByPages(pages.map(p => p.title)) || kindByName(name);
-      const topics = pages.filter(p => p.kind === kind);
-      const others = pages.filter(p => p.kind !== kind);
+      const others = pages.filter(p => p.kind && p.kind !== kind);
+      // Sem conseguir ler, a confirmação marca as páginas de tópico, como antes.
+      const states = pages.length ? await pageStates().catch(() => null) : null;
       // Destino: My Content ou a pasta da equipe do tipo (UDA ou GRADUAÇÃO EAD).
       let dest = await destination(kind);
       // Pasta da equipe: as pastas que já existem lá, para o aviso de nome
@@ -669,8 +806,9 @@
         dest = { ...dest, folders: (l.items || []).filter(i => i.folder) };
       }
       setBtn(LABEL[kind], false);
-      const choice = await ask(name, topics, dest, kind, others);
+      const choice = await ask(name, pages, dest, kind, others, states);
       if (!choice) return;
+      const topics = choice.topics;   // só as páginas marcadas na confirmação
 
       setBtn('📁 Criando…', true);
       toast(`Criando a pasta "${choice.title}"${dest.team ? ' na pasta da equipe' : ''}…`, 'busy');

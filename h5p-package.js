@@ -10,9 +10,11 @@
 // Cada questão vai para a página "Tópico N" de mesmo número. No
 // Microfundamento (kind 'micro'), o Extrator lê o relatório da FIC e numera as
 // questões pela página da sessão ("Questão 1.h5p", título "Questão 1"): a
-// "Questão N" vai para a N-ª página "UNIDADE N - Tema N" dos módulos, na
-// ordem (conferido em 20/11/2026: as 11 sessões do "Inovação na Concepção de
-// Negócios" são as 11 páginas do curso, na mesma ordem). Só entram
+// "Questão N" vai para a N-ª página marcada na confirmação, na ordem dos
+// módulos — de início, as "UNIDADE N - Tema N" (conferido em 20/11/2026: as
+// 11 sessões do "Inovação na Concepção de Negócios" são as 11 páginas do
+// curso, na mesma ordem). Página que não vai ter quiz é desmarcada lá, e a
+// pessoa pode trocar a questão de cada página à mão. Só entram
 // questões de Múltipla escolha na versão do H5P.com da PUC (1.16) e sem
 // imagem, áudio ou vídeo: o que vai para o H5P.com é o content.json, pelo
 // mesmo formulário de criação do quiz provisório. As configurações da
@@ -143,36 +145,46 @@ globalThis.__svcH5pPackage = (() => {
 
   // Liga cada questão à sua página; na dúvida, nenhuma.
   //   uda:   "Tópico N" → a página "Tópico N" de mesmo número;
-  //   micro: "Questão N" → a N-ª página da lista (os módulos, em ordem).
-  function match(quizzes, topics, problems, kind) {
+  //   micro: "Questão N" → a N-ª página da lista (as páginas marcadas, na
+  //          ordem dos módulos).
+  // why (opcional): Map(questão → motivo) das que ficaram sem página.
+  function match(quizzes, topics, problems, kind, why = null) {
     const group = (list, key) => list.reduce((m, x) => { const k = key(x); if (k) m.set(k, [...(m.get(k) || []), x]); return m; }, new Map());
     const pagesOf = kind === 'micro'
       ? new Map(topics.map((t, i) => [String(i + 1), [t]]))
       : group(topics, t => topicNumber(t.title));
     const byTopic = new Map();
+    const out = (qs, text) => { problems.push(text); qs.forEach(q => why?.set(q, text)); };
     for (const [n, qs] of group(quizzes, q => q.number)) {
       const pages = pagesOf.get(n) || [];
-      if (qs.length > 1) problems.push(`${kind === 'micro' ? 'Questão' : 'Tópico'} ${n}: ${qs.length} questões (${qs.map(q => q.source).join('; ')}) — deixe só uma.`);
+      if (qs.length > 1) out(qs, `${kind === 'micro' ? 'Questão' : 'Tópico'} ${n}: ${qs.length} questões (${qs.map(q => q.source).join('; ')}) — deixe só uma.`);
       else if (!pages.length) {
-        problems.push(kind === 'micro'
-          ? `${qs[0].source}: não há a ${n}ª página "UNIDADE N - Tema N" nos módulos (são ${topics.length}).`
-          : `${qs[0].source}: não há página "Tópico ${n}" nos módulos.`);
+        out(qs, kind === 'micro'
+          ? `${qs[0].source}: não há a ${n}ª página marcada nos módulos (são ${topics.length}).`
+          : `${qs[0].source}: não há página "Tópico ${n}" marcada nos módulos.`);
       }
-      else if (pages.length > 1) problems.push(`${qs[0].source}: há ${pages.length} páginas "Tópico ${n}" nos módulos.`);
+      else if (pages.length > 1) out(qs, `${qs[0].source}: há ${pages.length} páginas "Tópico ${n}" marcadas nos módulos.`);
       else byTopic.set(pages[0].title, qs[0]);
     }
     return byTopic;
   }
 
-  // files: [{ name, buffer: ArrayBuffer }]; topics: [{ title }] (na ordem dos módulos)
-  // kind: 'uda' (padrão) ou 'micro'.
-  // → { byTopic: Map(título da página → { number, params, source, preview }), problems: [texto] }
-  async function load(files, topics, kind = 'uda') {
+  // Só lê os arquivos: files: [{ name, buffer: ArrayBuffer }]; kind: 'uda'
+  // (padrão) ou 'micro' (o número vem de "Tópico N" ou de "Questão N").
+  // → { quizzes: [{ number, params, source, preview }], problems: [texto] }
+  async function read(files, kind = 'uda') {
     const out = { quizzes: [], problems: [], kind: kind === 'micro' ? 'micro' : 'uda' };
     for (const f of files) await readFile(f.name, f.buffer, out);
-    const byTopic = match(out.quizzes, topics, out.problems, out.kind);
-    return { byTopic, problems: out.problems };
+    return { quizzes: out.quizzes, problems: out.problems };
   }
 
-  return { LIBRARY, load, topicNumber, questionNumber, problemOf };
+  // Lê e liga: topics: [{ title }] (na ordem dos módulos).
+  // → { byTopic: Map(título da página → { number, params, source, preview }), problems: [texto] }
+  async function load(files, topics, kind = 'uda') {
+    const k = kind === 'micro' ? 'micro' : 'uda';
+    const { quizzes, problems } = await read(files, k);
+    return { byTopic: match(quizzes, topics, problems, k), problems };
+  }
+
+  return { LIBRARY, load, read, match, topicNumber, questionNumber, problemOf };
 })();

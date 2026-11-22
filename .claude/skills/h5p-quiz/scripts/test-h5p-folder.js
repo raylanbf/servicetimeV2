@@ -462,14 +462,14 @@ const toAB = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
       'TÓPICO 4.h5p: é H5P.TrueFalse — só entram Múltipla escolha e Question Set de múltipla escolha.',
       'set.h5p › TÓPICO 4: é H5P.TrueFalse 1.8 — só entra Múltipla escolha (H5P.MultiChoice 1.16).',
       'FIC.docx: não é um .h5p nem um .zip válido.',
-      'TÓPICO 5.h5p: não há página "Tópico 5" nos módulos.',
+      'TÓPICO 5.h5p: não há página "Tópico 5" marcada nos módulos.',
       'Tópico 10: 2 questões (a.h5p; b.h5p) — deixe só uma.',
     ]);
   });
 
   await ok('pacote — duas páginas "Tópico 1" nos módulos: a questão não vai para nenhuma', async () => {
     const r = await P.load([{ name: 'TÓPICO 1.h5p', buffer: toAB(MC_FILE('TÓPICO 1')) }], [{ title: 'Tópico 1 – A' }, { title: 'Tópico 1 – B' }]);
-    same([r.byTopic.size, [...r.problems]], [0, ['TÓPICO 1.h5p: há 2 páginas "Tópico 1" nos módulos.']]);
+    same([r.byTopic.size, [...r.problems]], [0, ['TÓPICO 1.h5p: há 2 páginas "Tópico 1" marcadas nos módulos.']]);
   });
 
   // ── 2. Chrome sem tela ────────────────────────────────────────────────
@@ -482,6 +482,7 @@ const toAB = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
       await insertRuleTests(browser);
       await canvasTests(browser);
       await microCanvasTests(browser);
+      await marksTests(browser);
     } finally { await browser.close(); }
   }
   console.log(`\n${n} verificações OK`);
@@ -864,9 +865,9 @@ async function canvasTests(browser) {
     await setup('created');
     await page.click(BTN);
     await chooseFiles([['TÓPICO 1.h5p', MC_FILE('TÓPICO 1')], ['Questões_FIXAÇÃO.h5p', QS_FILE(['TÓPICO 3'])], ['TÓPICO 9.h5p', MC_FILE('TÓPICO 9')]]);
-    same(await page.$$eval(`${MODAL} li span[data-file]`, ss => ss.map(s => s.getAttribute('data-file'))), ['TÓPICO 1.h5p', '', 'Questões_FIXAÇÃO.h5p › TÓPICO 3', '']);
+    same(await page.$$eval(`${MODAL} li [data-file]`, ss => ss.map(s => s.getAttribute('data-file'))), ['TÓPICO 1.h5p', '', 'Questões_FIXAÇÃO.h5p › TÓPICO 3', '']);
     assert.match(await page.textContent(MODAL), /3 arquivo\(s\) · 2 de 4 tópico\(s\) com a questão do arquivo/);
-    assert.match(await page.textContent(`${MODAL} [data-h5p-problems]`), /TÓPICO 9\.h5p: não há página "Tópico 9" nos módulos\./);
+    assert.match(await page.textContent(`${MODAL} [data-h5p-problems]`), /TÓPICO 9\.h5p: não há página "Tópico 9" marcada nos módulos\./);
     await page.uncheck(`${MODAL} input[data-insert]`);
     await page.click(CREATE);
     await waitToast(/quiz\(zes\) criado/);
@@ -875,6 +876,29 @@ async function canvasTests(browser) {
     same(quizzes[0].params, MC_PARAMS('TÓPICO 1'));
     same(quizzes[2].params, MC_PARAMS('TÓPICO 3'));
     assert.strictEqual(await toastText(), '✓ Pasta "Ambiente teste - Raylan" criada no H5P.com (My Content).\n4 quiz(zes) criado(s) (2 com a questão do .h5p).Abrir pasta');
+  });
+
+  await ok('canvas — desmarcar uma página tira o quiz dela (o .h5p dela vai para "Fora"); "Mostrar as outras páginas" deixa marcar outra página dos módulos, na ordem', async () => {
+    await reset();
+    await setup('created');
+    await page.click(BTN);
+    await page.uncheck(`${MODAL} input[data-topic="${URLS[1]}"]`);
+    assert.match(await page.textContent(MODAL), /1 quiz por tópico \(3\)/);
+    await chooseFiles([['TÓPICO 2.h5p', MC_FILE('TÓPICO 2')], ['TÓPICO 3.h5p', MC_FILE('TÓPICO 3')]]);
+    assert.match(await page.textContent(`${MODAL} [data-h5p-problems]`), /TÓPICO 2\.h5p: não há página "Tópico 2" marcada nos módulos\./);
+    assert.match(await page.textContent(MODAL), /2 arquivo\(s\) · 1 de 3 tópico\(s\) com a questão do arquivo/);
+    const titles = () => page.$$eval(`${MODAL} li`, lis => lis.map(l => l.getAttribute('data-title')));
+    same(await titles(), TOPICS);
+    await page.check(`${MODAL} input[data-show-all]`);
+    same(await titles(), ['Motivação – Por que devo aprender este conteúdo?', TOPICS[0], TOPICS[1], 'Aplicação Prática', TOPICS[2], TOPICS[3]]);
+    await page.check(`${MODAL} input[data-topic="aplicacao"]`);
+    assert.match(await page.textContent(MODAL), /1 quiz por tópico \(4\)/);
+    await page.uncheck(`${MODAL} input[data-insert]`);
+    await page.click(CREATE);
+    await waitToast(/quiz\(zes\) criado/);
+    const quizzes = (await sent()).filter(m => m.action === 'h5p-create-quiz');
+    same(quizzes.map(m => [m.title, !!m.params]), [[TOPICS[0], false], ['Aplicação Prática', false], [TOPICS[2], true], [TOPICS[3], false]]);
+    same(quizzes[2].params, MC_PARAMS('TÓPICO 3'));
   });
 
   await ok('canvas — arquivo para um quiz que já existia: não troca e avisa; com "1 quiz por tópico" desmarcado, os arquivos não vão', async () => {
@@ -1099,6 +1123,7 @@ async function microCanvasTests(browser) {
   URLS.forEach((u, i) => { pages[u] = { body: i === 0 ? MF : MF.replace(MF_SLOT + '\n', ''), updated_at: '2026-01-01T00:00:00Z' }; });
   // A última página ficou no modelo comum (com a faixa): insere, mas a prévia avisa.
   pages[URLS[10]].body = TOPIC(MARKER_BOX);
+  const INITIAL = JSON.parse(JSON.stringify(pages));   // os testes de inserção gravam nas páginas
   const puts = [];
   // O que o Canvas falso mostra: nome do curso, módulos da API e títulos na página.
   const course = { name: 'Microfundamento: Inovação na Concepção de Negócios (MODELO)', modules: MODULES, dom: [] };
@@ -1110,6 +1135,12 @@ async function microCanvasTests(browser) {
     const json = body => route.fulfill({ status: 200, contentType: 'application/json', body: 'while(1);' + JSON.stringify(body) });
     if (u.pathname === `/api/v1/courses/${C}`) return json({ id: C, name: course.name });
     if (u.pathname === `/api/v1/courses/${C}/modules`) return json(course.modules);
+    // Lista das páginas com o corpo: só com course.list (sem ela, a Pasta H5P
+    // não consegue ler e marca as páginas de tópico, como antes).
+    if (u.pathname === `/api/v1/courses/${C}/pages`) {
+      course.listReads = (course.listReads || 0) + 1;
+      if (course.list) return json(Object.entries(pages).map(([url, p]) => ({ url, body: p.body })));
+    }
     const pm = u.pathname.match(new RegExp(`^/api/v1/courses/${C}/pages/([^/]+)$`));
     if (pm) {
       const url = decodeURIComponent(pm[1]);
@@ -1163,7 +1194,7 @@ async function microCanvasTests(browser) {
     assert.match(text, /1 quiz por tópico \(11\)/);
     assert.match(text, /Inserir cada quiz na sua página \(logo abaixo do banner de Atividades de Fixação\)/);
     assert.ok(await page.$(`${MODAL} input[data-h5p-files]`), 'escolhe .h5p também no Microfundamento');
-    assert.match(await page.textContent(`${MODAL} [data-micro-files]`), /a "Questão N" vai para a N-ª página da lista acima/);
+    assert.match(await page.textContent(`${MODAL} [data-micro-files]`), /a "Questão N" vai para a N-ª página marcada na lista acima/);
     assert.strictEqual(await page.$(`${MODAL} [data-others]`), null);
   });
 
@@ -1209,7 +1240,7 @@ async function microCanvasTests(browser) {
     assert.match(pairs[2][1], /^“Enunciado de Questão 3: qual alternativa está correta\?”$/);
     assert.match(await page.textContent(MODAL), /3 de 11 tópico\(s\) com a questão do arquivo/);
     const fora = await page.textContent(`${MODAL} [data-h5p-problems]`);
-    assert.match(fora, /Questão 12\.h5p: não há a 12ª página "UNIDADE N - Tema N" nos módulos \(são 11\)\./);
+    assert.match(fora, /Questão 12\.h5p: não há a 12ª página marcada nos módulos \(são 11\)\./);
     assert.match(fora, /TÓPICO 2\.h5p: sem "Questão N" no título nem no nome do arquivo\./);
     assert.match(fora, /Questão 5: 2 questões \(questao_05\.h5p; Questão 5 \(cópia\)\.h5p\) — deixe só uma\./);
     await page.uncheck(`${MODAL} input[data-insert]`);
@@ -1221,6 +1252,87 @@ async function microCanvasTests(browser) {
     const quizzes = await page.evaluate(() => window.__sent.filter(m => m.action === 'h5p-create-quiz'));
     same(quizzes.map(m => [m.title, !!m.params]), TOPICS.map((t, i) => [t, i === 0 || i === 2 || i === 10]));
     same(quizzes[2].params, MC_PARAMS('Questão 3'));
+  });
+
+  await ok('Microfundamento — página que não vai ter quiz: desmarcar passa a "Questão N" para a N-ª página marcada; troca à mão página a página (a que sobra vai para "Fora"; a mesma em duas páginas segura o "Criar"); só as marcadas ganham quiz', async () => {
+    await open();
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    const extrator = zip(Object.fromEntries([1, 2, 3, 4].map(n => [`Questão ${n}.h5p`, MC_FILE(`Questão ${n}`)])), 0);
+    await page.setInputFiles(`${MODAL} input[data-h5p-files]`, [{ name: 'questoes.zip', mimeType: 'application/zip', buffer: extrator }]);
+    await page.waitForFunction(() => /tópico\(s\) com a questão do arquivo/.test(document.getElementById('__svc-h5p-folder-modal__')?.textContent || ''));
+    const pairs = () => page.$$eval(`${MODAL} li`, lis => lis.slice(0, 7).map(l => [l.getAttribute('data-title'), l.querySelector('[data-file]')?.getAttribute('data-file') ?? null]));
+    same(await pairs(), [[TOPICS[0], 'Questão 1.h5p'], [TOPICS[1], 'Questão 2.h5p'], [TOPICS[2], 'Questão 3.h5p'], [TOPICS[3], 'Questão 4.h5p'], [TOPICS[4], ''], [TOPICS[5], ''], [TOPICS[6], '']]);
+    // A 2ª página não vai ter quiz: a Questão 2 passa para a 3ª, e assim por diante.
+    await page.uncheck(`${MODAL} input[data-topic="${URLS[1]}"]`);
+    assert.ok(await page.$(`${MODAL} li[data-off][data-title="${TOPICS[1]}"]`));
+    same(await pairs(), [[TOPICS[0], 'Questão 1.h5p'], [TOPICS[1], null], [TOPICS[2], 'Questão 2.h5p'], [TOPICS[3], 'Questão 3.h5p'], [TOPICS[4], 'Questão 4.h5p'], [TOPICS[5], ''], [TOPICS[6], '']]);
+    assert.match(await page.textContent(MODAL), /1 quiz por tópico \(10\)/);
+    assert.match(await page.textContent(MODAL), /4 de 10 tópico\(s\) com a questão do arquivo/);
+    // Outra página dos módulos (a Síntese da unidade 1) entra marcada, na ordem; a unidade 2 sai.
+    assert.strictEqual(await page.$(`${MODAL} li[data-title="UNIDADE 1 - Síntese e referências"]`), null);
+    await page.check(`${MODAL} input[data-show-all]`);
+    await page.check(`${MODAL} input[data-topic="sintese-1"]`);
+    for (const u of URLS.slice(6)) await page.uncheck(`${MODAL} input[data-topic="${u}"]`);
+    assert.match(await page.textContent(MODAL), /1 quiz por tópico \(6\)/);
+    // Troca à mão: a 5ª página com a provisória → a Questão 4 fica sem página; vai para a 6ª.
+    const choose = (i, label) => page.selectOption(`${MODAL} li[data-title="${TOPICS[i]}"] select`, label === null ? '-1' : { label: `← ${label}` });
+    await choose(4, null);
+    assert.match(await page.textContent(`${MODAL} [data-h5p-problems]`), /Questão 4\.h5p: não vai para nenhuma página\./);
+    await choose(5, 'Questão 4.h5p');
+    assert.strictEqual(await page.$eval(`${MODAL} [data-h5p-problems]`, e => e.style.display), 'none');
+    // A mesma questão em duas páginas segura o "Criar" até ficar em uma só.
+    await choose(3, 'Questão 1.h5p');
+    assert.ok((await page.textContent(`${MODAL} [data-h5p-dups]`)).includes(`⚠ Questão 1.h5p está em 2 páginas (${TOPICS[0]}; ${TOPICS[3]}): deixe em uma só.`));
+    assert.ok(await page.$eval(CREATE, b => b.disabled), '"Criar" segura');
+    await choose(3, 'Questão 3.h5p');
+    assert.ok(!(await page.$eval(CREATE, b => b.disabled)), '"Criar" libera');
+    await page.uncheck(`${MODAL} input[data-insert]`);
+    await page.click(CREATE);
+    await page.waitForFunction(() => /quiz\(zes\) criado/.test(document.getElementById('__svc-h5p-folder-toast__')?.textContent || ''), null, { timeout: 30000 });
+    const quizzes = await page.evaluate(() => window.__sent.filter(m => m.action === 'h5p-create-quiz'));
+    same(quizzes.map(m => [m.title, !!m.params]), [[TOPICS[0], true], [TOPICS[2], true], [TOPICS[3], true], [TOPICS[4], false], [TOPICS[5], true], ['UNIDADE 1 - Síntese e referências', false]]);
+    same([quizzes[0].params, quizzes[1].params, quizzes[2].params, quizzes[4].params], ['Questão 1', 'Questão 2', 'Questão 3', 'Questão 4'].map(q => MC_PARAMS(q)));
+  });
+
+  await ok('Microfundamento — vêm marcadas só as páginas que já têm o H5P ou o marcador no lugar do quiz (com o selo na lista); a "Questão N" vai para a N-ª delas', async () => {
+    Object.assign(course, { list: true, listReads: 0 });
+    for (const u of Object.keys(INITIAL)) pages[u] = { ...INITIAL[u] };
+    await open();
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    // Página 1: H5P abaixo do banner; página 11: modelo comum, com o marcador; as outras, sem nada.
+    const rows = () => page.$$eval(`${MODAL} li`, lis => lis.map(l => [l.getAttribute('data-title'), !l.hasAttribute('data-off'), l.querySelector('[data-slot]')?.getAttribute('data-slot') || '']));
+    same(await rows(), TOPICS.map((t, i) => [t, i === 0 || i === 10, i === 0 ? 'quiz' : i === 10 ? 'marker' : '']));
+    assert.strictEqual(await page.getAttribute(`${MODAL} [data-default]`, 'data-default'), 'slot');
+    assert.match(await page.textContent(MODAL), /1 quiz por tópico \(2\)/);
+    assert.match(await page.getAttribute(`${MODAL} li[data-title="${TOPICS[0]}"] [data-slot]`, 'title'), /Já tem um H5P no lugar do quiz \(nº 1293064802061305358\)/);
+    assert.strictEqual(course.listReads, 1);
+    const extrator = zip({ 'Questão 1.h5p': MC_FILE('Questão 1'), 'Questão 2.h5p': MC_FILE('Questão 2') }, 0);
+    await page.setInputFiles(`${MODAL} input[data-h5p-files]`, [{ name: 'q.zip', mimeType: 'application/zip', buffer: extrator }]);
+    await page.waitForFunction(() => /tópico\(s\) com a questão do arquivo/.test(document.getElementById('__svc-h5p-folder-modal__')?.textContent || ''));
+    same(await page.$$eval(`${MODAL} li:not([data-off]) [data-file]`, ss => ss.map(s => s.getAttribute('data-file'))), ['Questão 1.h5p', 'Questão 2.h5p']);
+    await page.keyboard.press('Escape');
+  });
+
+  await ok('Microfundamento — com o selo H5P já lido na página, a Pasta H5P usa a leitura dele (sem ler as páginas de novo); sem nenhuma página com H5P ou marcador, marca as de tópico, como antes', async () => {
+    Object.assign(course, { list: true, listReads: 0 });
+    await open();
+    await page.evaluate(([a, b]) => { window.__svcH5pMarks = { pages: async () => new Map([[a, { quiz: { title: '', id: '9' }, marker: false }], [b, { quiz: null, marker: false }]]) }; }, [URLS[3], URLS[4]]);
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    same(await page.$$eval(`${MODAL} li:not([data-off])`, lis => lis.map(l => l.getAttribute('data-title'))), [TOPICS[3]]);
+    assert.strictEqual(course.listReads, 0);
+    await page.keyboard.press('Escape');
+    // Nenhuma com H5P nem marcador (disciplina nova): todas as "UNIDADE N - Tema N", sem selo.
+    await page.evaluate(() => { window.__svcH5pMarks = { pages: async () => new Map() }; });
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    same(await page.$$eval(`${MODAL} li:not([data-off])`, lis => lis.map(l => l.getAttribute('data-title'))), TOPICS);
+    assert.strictEqual(await page.getAttribute(`${MODAL} [data-default]`, 'data-default'), 'topics');
+    assert.strictEqual(await page.$(`${MODAL} [data-slot]`), null);
+    await page.keyboard.press('Escape');
+    Object.assign(course, { list: false });
   });
 
   await ok('tipo — nome sem "Microfundamento", mas a página de módulos só com "UNIDADE N - Tema N": "📁 Pasta H5P MF" pelos títulos da página', async () => {
@@ -1250,7 +1362,7 @@ async function microCanvasTests(browser) {
     await page.click(BTN);
     await page.waitForSelector(MODAL);
     same(await page.$$eval(`${MODAL} li`, lis => lis.map(l => l.textContent)), TOPICS);
-    assert.match(await page.textContent(`${MODAL} [data-others]`), /Há também 1 página\(s\) "Tópico N" nos módulos: ficam de fora \(pelo nome do curso, a disciplina é Microfundamento\)/);
+    assert.match(await page.textContent(`${MODAL} [data-others]`), /Há também 1 página\(s\) "Tópico N" nos módulos: ficam desmarcadas \(pelo nome do curso, a disciplina é Microfundamento\)/);
     await page.keyboard.press('Escape');
     Object.assign(course, { name: 'Ambiente teste' });
     await open();
@@ -1283,6 +1395,235 @@ async function microCanvasTests(browser) {
     assert.match(await page.textContent('#__svc-h5p-folder-toast__'), /\(PRODUÇÕES › GRADUAÇÃO EAD\)/);
     same(await page.evaluate(() => window.__sent), [{ action: 'h5p-list', team: true, kind: 'micro' },
       { action: 'h5p-create-folder', title: 'Microfundamento: Inovação na Concepção de Negócios', parent: '', team: true, kind: 'micro' }]);
+  });
+  await page.close();
+}
+
+// Selo "H5P" na página de módulos (canvas-h5p-marks.js): só as páginas com o
+// quiz no lugar da Atividade de Fixação, UDA e Microfundamento; só lê, um
+// pedido por vez. Os selos saem todos juntos, no fim da leitura: quando o
+// primeiro aparece, a leitura acabou.
+async function marksTests(browser) {
+  const C = 238700;
+  const MF = fs.readFileSync(path.join(__dirname, 'fixtures', 'microfundamento-tema.html'), 'utf8');
+  const MF_ID = '1293064802061305358';
+  const MF_SLOT = MF.match(new RegExp(`<p style="text-align: center;"><iframe class="lti-embed" style="width: 100%; height: 600px;" title=""[^>]*${MF_ID}[^>]*></iframe></p>`))[0];
+  const TITLED = H5P_IFRAME(QUIZ_ID).replace('title=""', 'title="Tópico 1 – Níveis de Maturidade"');
+  const pages = {};
+  const resetPages = () => Object.assign(pages, {
+    'com-quiz': TOPIC(`<p style="text-align: center;">${TITLED}</p>`),   // UDA: quiz na caixa da faixa
+    'marcador': TOPIC(MARKER_BOX),                                        // UDA: só o marcador (o corpo tem outro H5P)
+    'sintese':  '<p>S&iacute;ntese e refer&ecirc;ncias</p>',
+    'mf-quiz':  MF,                                                       // Microfundamento: quiz abaixo do banner
+    'mf-vazia': MF.replace(MF_SLOT + '\n', ''),                          // Microfundamento sem o quiz
+    'fora':     TOPIC(`<p>${TITLED}</p>`),                                // fora dos módulos
+  });
+  resetPages();
+  const MODULES = [
+    { id: 1, name: 'UNIDADE 1', items: [
+      { id: 11, title: 'Tópico 1', type: 'Page', page_url: 'com-quiz' },
+      { id: 12, title: 'Tópico 2', type: 'Page', page_url: 'marcador' },
+      { id: 13, title: 'Questionário', type: 'Quiz' },
+      { id: 14, title: 'Síntese', type: 'Page', page_url: 'sintese' },
+    ] },
+    { id: 2, name: 'Módulo grande (sem itens na lista)' },
+    { id: 3, name: 'Repetido', items: [{ id: 31, title: 'Tópico 1', type: 'Page', page_url: 'com-quiz' }] },
+  ];
+  const ITEMS_2 = [
+    { id: 21, title: 'UNIDADE 1 - Tema 1 - Inovação', type: 'Page', page_url: 'mf-quiz' },
+    { id: 22, title: 'UNIDADE 1 - Tema 2 - Difusão', type: 'Page', page_url: 'mf-vazia' },
+  ];
+  // Item como o da página de módulos clássica; sem .ig-admin = quem só vê o curso.
+  const LI = (id, title, admin = true) => `<li id="context_module_item_${id}" class="context_module_item wiki_page"><div class="ig-row">
+    <div class="ig-info"><div class="module-item-title"><span class="item_name"><a class="ig-title title item_link" href="#">${title}</a></span></div></div>
+    ${admin ? '<div class="ig-admin"><span class="publish-icon">✓</span><a class="al-trigger">⋮</a></div>' : ''}</div></li>`;
+  const MODULES_PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><div id="content"><div id="context_modules">
+    <div class="context_module"><ul class="ig-list">${LI(11, 'Tópico 1')}${LI(12, 'Tópico 2')}${LI(13, 'Questionário')}${LI(14, 'Síntese')}</ul></div>
+    <div class="context_module"><ul class="ig-list">${LI(22, 'UNIDADE 1 - Tema 2 - Difusão')}</ul></div>
+    <div class="context_module"><ul class="ig-list">${LI(31, 'Tópico 1', false)}</ul></div>
+  </div></div></body></html>`;
+
+  // Canvas falso: módulos, itens do módulo grande, lista das páginas (3 por
+  // vez, ligadas pelo Link, com o corpo se mode.withBody) e página avulsa.
+  // maxInflight: o máximo de pedidos ao mesmo tempo.
+  const mode = {};
+  const log = [];
+  let inflight = 0, maxInflight = 0;
+  const page = await browser.newPage();
+  await page.route(`${CANVAS}/**`, async route => {
+    const u = new URL(route.request().url());
+    if (!u.pathname.startsWith('/api/')) {
+      return route.fulfill({ contentType: 'text/html', body: u.pathname.endsWith('/modules') ? MODULES_PAGE : '<!doctype html><html><body><div id="content">Tarefas</div></body></html>' });
+    }
+    inflight++; maxInflight = Math.max(maxInflight, inflight);
+    log.push(decodeURIComponent(u.pathname + u.search).replace(`/api/v1/courses/${C}`, ''));
+    await new Promise(r => setTimeout(r, 30 + (mode.slow || 0)));
+    inflight--;
+    const json = (body, headers = {}, status = 200) => route.fulfill({ status, headers, contentType: 'application/json', body: 'while(1);' + JSON.stringify(body) });
+    if (u.pathname === `/api/v1/courses/${C}/modules`) {
+      if (mode.limitOnce) { mode.limitOnce = false; return route.fulfill({ status: 403, headers: { 'Retry-After': '0.1' }, body: '403 Forbidden (Rate Limit Exceeded)' }); }
+      if (mode.denied) return json({ status: 'unauthorized' }, {}, 401);
+      return json(MODULES, { 'X-Rate-Limit-Remaining': '700' });
+    }
+    if (u.pathname === `/api/v1/courses/${C}/modules/2/items`) return json(ITEMS_2);
+    if (u.pathname === `/api/v1/courses/${C}/pages`) {
+      const withBody = mode.withBody !== false && u.searchParams.get('include[]') === 'body';
+      const all = Object.entries(pages).map(([url, body]) => ({ url, title: url, ...(withBody ? { body } : {}) }));
+      const p = Number(u.searchParams.get('page') || 1);
+      const next = p * 3 < all.length ? { Link: `<${CANVAS}${u.pathname}?include[]=body&per_page=100&page=${p + 1}>; rel="next"` } : {};
+      return json(all.slice((p - 1) * 3, p * 3), next);
+    }
+    const pm = u.pathname.match(new RegExp(`^/api/v1/courses/${C}/pages/([^/]+)$`));
+    if (pm) {
+      const url = decodeURIComponent(pm[1]);
+      if (mode.unreadable === url) return json({ status: 'unauthorized' }, {}, 401);
+      return json({ url, body: pages[url] });
+    }
+    return json({}, {}, 404);
+  });
+  // chrome.storage falso, sem a chave gravada (vale o padrão); __setCfg
+  // muda e avisa os ouvintes, como o popup faria. Fica no sessionStorage, para
+  // o cache dos selos passar de uma abertura para a outra — só com
+  // "?keepcache" no endereço; sem ele, cada abertura começa do zero.
+  await page.addInitScript(() => {
+    if (!/[?&]keepcache\b/.test(location.search)) sessionStorage.removeItem('__cfg');
+    const cfg = JSON.parse(sessionStorage.getItem('__cfg') || '{}'), listeners = [];
+    const save = () => sessionStorage.setItem('__cfg', JSON.stringify(cfg));
+    const copy = v => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
+    window.__setCfg = (key, value) => {
+      const oldValue = cfg[key];
+      cfg[key] = value;
+      save();
+      listeners.forEach(fn => fn({ [key]: { oldValue, newValue: value } }, 'local'));
+    };
+    Object.defineProperty(window, 'chrome', { configurable: true, value: {
+      runtime: { sendMessage: async () => null },
+      storage: {
+        local: {
+          get: async d => Object.fromEntries(Object.entries(d).map(([k, v]) => [k, k in cfg ? copy(cfg[k]) : v])),
+          set: async o => {
+            const changes = {};
+            for (const [k, v] of Object.entries(o)) { changes[k] = { oldValue: cfg[k], newValue: copy(v) }; cfg[k] = copy(v); }
+            save();
+            listeners.forEach(fn => fn(changes, 'local'));
+          },
+        },
+        onChanged: { addListener: fn => listeners.push(fn) },
+      },
+    } });
+  });
+  const open = async (where = 'modules') => {
+    log.length = 0; maxInflight = 0;
+    await page.goto(`${CANVAS}/courses/${C}/${where}`);
+    for (const f of ['h5p-width.js', 'h5p-insert.js', 'canvas-h5p-marks.js']) await page.addScriptTag({ content: fs.readFileSync(path.join(ROOT, f), 'utf8') });
+  };
+  const MARK = '.__svc-h5p-mark';
+  const marks = () => page.$$eval(MARK, bs => bs.map(b => [b.closest('li').id.replace('context_module_item_', ''), b.textContent]));
+  const tip = id => page.$eval(`#context_module_item_${id} ${MARK}`, b => b.title);
+
+  await open();
+
+  await ok('selo H5P — nasce ligado; selo só nas páginas com o quiz no lugar da Atividade de Fixação, antes do ícone de publicado; marcador, H5P só no corpo e Síntese sem selo; a mesma página em dois módulos ganha nos dois', async () => {
+    await page.waitForSelector(`#context_module_item_11 ${MARK}`);
+    same(await marks(), [['11', 'H5P'], ['31', 'H5P']]);
+    same(await page.$eval('#context_module_item_11 .ig-admin', a => [...a.children].map(c => c.className)), ['__svc-h5p-mark', 'publish-icon', 'al-trigger']);
+    // Sem .ig-admin (quem só vê o curso): logo depois do título.
+    assert.ok(await page.$eval(`#context_module_item_31 ${MARK}`, b => b.previousElementSibling.classList.contains('ig-title')));
+    assert.strictEqual(await tip(11), `Tem o quiz H5P da Atividade de Fixação: Tópico 1 – Níveis de Maturidade (nº ${QUIZ_ID} no H5P.com)`);
+    assert.strictEqual(await page.$eval(`#context_module_item_11 ${MARK}`, b => b.getAttribute('aria-label')), await tip(11));
+  });
+
+  await ok('selo H5P — só GET, um pedido por vez: módulos, itens do módulo grande e a lista das páginas com o corpo (2 vezes, pelo Link); nenhuma página avulsa', async () => {
+    assert.strictEqual(maxInflight, 1);
+    same(log, ['/modules?include[]=items&per_page=50', '/modules/2/items?per_page=100',
+      '/pages?include[]=body&per_page=100', '/pages?include[]=body&per_page=100&page=2']);
+  });
+
+  await ok('selo H5P — Microfundamento: item que o Canvas monta depois (módulo aberto) ganha o selo; sem o quiz abaixo do banner, não', async () => {
+    await page.evaluate(html => document.getElementById('context_module_item_22').insertAdjacentHTML('beforebegin', html), LI(21, 'UNIDADE 1 - Tema 1 - Inovação'));
+    await page.waitForSelector(`#context_module_item_21 ${MARK}`);
+    assert.strictEqual(await tip(21), `Tem o quiz H5P da Atividade de Fixação (nº ${MF_ID} no H5P.com)`);
+    assert.strictEqual(await page.$(`#context_module_item_22 ${MARK}`), null);
+  });
+
+  await ok('selo H5P — o Canvas refaz o item: o selo volta, um só', async () => {
+    await page.evaluate(() => { const li = document.getElementById('context_module_item_11'); const copy = li.cloneNode(true); copy.querySelector('.__svc-h5p-mark').remove(); li.replaceWith(copy); });
+    await page.waitForSelector(`#context_module_item_11 ${MARK}`);
+    await page.waitForTimeout(100);
+    assert.strictEqual(await page.$$eval(`#context_module_item_11 ${MARK}`, b => b.length), 1);
+  });
+
+  await ok('selo H5P — desligar tira os selos e ligar põe de volta, sem recarregar e sem pedir de novo', async () => {
+    log.length = 0;
+    await page.evaluate(() => window.__setCfg('h5pMarksEnabled', false));
+    await page.waitForSelector(MARK, { state: 'detached' });
+    await page.evaluate(() => window.__setCfg('h5pMarksEnabled', true));
+    await page.waitForSelector(`#context_module_item_11 ${MARK}`);
+    same(await marks(), [['11', 'H5P'], ['21', 'H5P'], ['31', 'H5P']]);
+    same(log, []);
+  });
+
+  await ok('selo H5P — refresh() (o "📁 Pasta H5P" chama depois de inserir) lê de novo: página que ganhou o quiz ganha o selo, a que perdeu perde', async () => {
+    pages.marcador = TOPIC(`<p style="text-align: center;">${H5P_IFRAME('902')}</p>`);
+    pages['com-quiz'] = TOPIC(MARKER_BOX);
+    await page.evaluate(() => window.__svcH5pMarks.refresh());
+    same(await marks(), [['12', 'H5P'], ['21', 'H5P']]);
+    assert.strictEqual(await tip(12), 'Tem o quiz H5P da Atividade de Fixação (nº 902 no H5P.com)');
+    resetPages();
+  });
+
+  await ok('selo H5P — Canvas sem o corpo na lista: lê só as páginas dos módulos, uma por vez; a que não deu para ler ganha "H5P ?"; 403 do limite espera e repete', async () => {
+    Object.assign(mode, { withBody: false, unreadable: 'sintese', limitOnce: true });
+    await open();
+    await page.waitForSelector(`#context_module_item_11 ${MARK}`);
+    same(await marks(), [['11', 'H5P'], ['14', 'H5P ?'], ['31', 'H5P']]);
+    assert.strictEqual(await tip(14), 'Não consegui ler esta página (HTTP 401): não sei se ela tem o quiz H5P da Atividade de Fixação.');
+    assert.strictEqual(await page.$eval(`#context_module_item_14 ${MARK}`, b => b.getAttribute('data-state')), 'error');
+    assert.strictEqual(maxInflight, 1);
+    assert.strictEqual(log.filter(l => l.startsWith('/modules?')).length, 2);   // o 403 e a repetição
+    same(log.filter(l => /^\/pages\/[^?]+$/.test(l)), ['/pages/com-quiz', '/pages/marcador', '/pages/sintese', '/pages/mf-quiz', '/pages/mf-vazia']);
+    for (const k of Object.keys(mode)) delete mode[k];
+  });
+
+  await ok('selo H5P — sem conseguir ler os módulos: nenhum selo e um aviso para recarregar (não parece que nenhuma página tem o quiz)', async () => {
+    mode.denied = true;
+    await open();
+    await page.waitForFunction(() => /não consegui/.test(document.getElementById('__svc-h5p-mark-toast__')?.textContent || ''));
+    assert.match(await page.textContent('#__svc-h5p-mark-toast__'), /Selo H5P nos módulos: não consegui ler os módulos e as páginas \(HTTP 401\)\. Recarregue a página/);
+    assert.strictEqual(await page.$(MARK), null);
+    delete mode.denied;
+  });
+
+  await ok('selo H5P — sem selos guardados, avisa que está lendo; na próxima vez, os da última leitura aparecem na hora (sem o aviso) e a leitura nova corrige', async () => {
+    const TOAST = '#__svc-h5p-mark-toast__';
+    mode.slow = 300;
+    await open();
+    await page.waitForSelector(`${TOAST}[data-kind="busy"]`);
+    assert.strictEqual(await page.textContent(TOAST), 'Selo H5P: lendo os módulos e as páginas…');
+    await page.waitForSelector(`#context_module_item_11 ${MARK}`, { timeout: 15000 });
+    assert.strictEqual(await page.$(TOAST), null);
+    // Guarda só os selos azuis, de todos os itens dos módulos (o 21 ainda não está na tela).
+    await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('__cfg') || '{}').h5pMarksCache);
+    const cache = await page.evaluate(() => JSON.parse(sessionStorage.getItem('__cfg')).h5pMarksCache);
+    same(Object.keys(cache), [String(C)]);
+    same(Object.keys(cache[C].items), ['11', '21', '31']);
+    // Na leitura nova, o 11 e o 31 perdem o quiz e o 12 ganha.
+    pages['com-quiz'] = TOPIC(MARKER_BOX);
+    pages.marcador = TOPIC(`<p style="text-align: center;">${H5P_IFRAME('902')}</p>`);
+    await open('modules?keepcache');
+    await page.waitForSelector(`#context_module_item_11 ${MARK}`);
+    same(await marks(), [['11', 'H5P'], ['31', 'H5P']]);   // do cache, antes de o Canvas responder
+    assert.strictEqual(await page.$(TOAST), null);
+    await page.waitForSelector(`#context_module_item_12 ${MARK}`, { timeout: 15000 });
+    same(await marks(), [['12', 'H5P']]);
+    resetPages();
+    delete mode.slow;
+  });
+
+  await ok('selo H5P — fora da página de módulos: nenhum pedido', async () => {
+    await open('assignments');
+    await page.waitForTimeout(300);
+    same(log, []);
   });
   await page.close();
 }
