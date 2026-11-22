@@ -253,6 +253,7 @@
   <a class="nav-item" href="#canvas-studio-videos">↳ Vídeos do Studio</a>
   <a class="nav-item" href="#canvas-h5p-pasta">↳ Pasta H5P</a>
   <a class="nav-item" href="#canvas-h5p-botao">↳ Botão H5P do editor</a>
+  <a class="nav-item" href="#canvas-h5p-selo">↳ Selo H5P nos Módulos</a>
   <a class="nav-item" href="#canvas-checklist">↳ Checklist de publicação</a>
   <a class="nav-item" href="#canvas-editor">↳ Edição de página</a>
   <a class="nav-item" href="#canvas-editor-dup">　· Duplicar bloco</a>
@@ -504,11 +505,12 @@ PROVA FINAL</pre>
         <tr><td>Nome do botão</td><td>📁 Pasta H5P</td><td>📁 Pasta H5P MF</td></tr>
         <tr><td>Páginas que ganham quiz</td><td>"Tópico N – …"</td><td>"UNIDADE N - Tema N - …" (podem passar de 6); a "Síntese e referências" fica de fora</td></tr>
         <tr><td>Lugar do quiz na página</td><td>A caixa logo abaixo da faixa "Atividade de Fixação Não Pontuada"</td><td>O parágrafo logo abaixo do banner de Atividades de Fixação (imagem <code>banner-atividades-fixacao</code>); sem ele, entra um parágrafo novo logo depois do banner</td></tr>
-        <tr><td>Arquivos do Extrator</td><td><code>TÓPICO N.h5p</code> → a página "Tópico N"</td><td><code>Questão N.h5p</code> (do relatório da FIC) → a N-ª página da lista, na ordem dos módulos</td></tr>
+        <tr><td>Arquivos do Extrator</td><td><code>TÓPICO N.h5p</code> → a página "Tópico N"</td><td><code>Questão N.h5p</code> (do relatório da FIC) → a N-ª página <strong>marcada</strong> na lista, na ordem dos módulos</td></tr>
         <tr><td>Pasta da equipe (produção)</td><td>PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM</td><td>PRODUÇÕES › GRADUAÇÃO EAD (pastas "Microfundamento: &lt;disciplina&gt;")</td></tr>
       </tbody>
     </table>
-    <p>A confirmação mostra o tipo no título ("📁 Criar pasta no H5P.com? — Microfundamento") e a lista das páginas que vão entrar. Se o curso tiver páginas dos dois tipos, as do outro tipo ficam de fora, com aviso. O nome do botão é só um sinal: confira o tipo e a lista na confirmação.</p>
+    <p>A confirmação mostra o tipo no título ("📁 Criar pasta no H5P.com? — Microfundamento") e a lista das páginas que vão entrar. Se o curso tiver páginas dos dois tipos, as do outro tipo ficam desmarcadas, com aviso. O nome do botão é só um sinal: confira o tipo e a lista na confirmação.</p>
+    <p><strong>Escolher as páginas que vão ter quiz.</strong> Na lista da confirmação, cada página tem uma caixinha. Vêm marcadas as páginas que <strong>já têm o H5P no lugar do quiz</strong> (as do <a href="#canvas-h5p-selo">selo H5P</a>, com o mesmo selo na lista) ou ainda têm o marcador <code>[iframe - Atividade de Fixação H5P]</code> (selo cinza "marcador"). Numa disciplina nova, em que nenhuma página tem um nem outro, vêm marcadas todas as páginas de tópico. <strong>Desmarque as que não vão ter quiz</strong>, e elas ficam sem quiz e sem inserção. Para pôr quiz numa página que não é de tópico, marque <strong>Mostrar as outras páginas dos módulos</strong> e marque a página. Tudo vale só para as páginas marcadas, na ordem dos módulos.</p>
 
     <ol>
       <li><strong>Pasta:</strong> cria no H5P.com uma pasta com o nome da disciplina. O nome vem do Canvas e pode ser editado antes de criar. O destino depende da chave <strong>Salvar na pasta da equipe (produção)</strong> nas configurações:
@@ -519,10 +521,10 @@ PROVA FINAL</pre>
       </li>
       <li><strong>1 quiz por tópico:</strong> dentro da pasta, um <em>Multiple Choice</em> para cada página da lista, com o título exato da página — o mesmo que o botão H5P do editor procura. "Toolbar Below Content" vem desmarcado, e os quizzes são criados um por vez.
         <ul>
-          <li><strong>Com os arquivos do Extrator de Questões:</strong> em <strong>📎 Escolher arquivos .h5p</strong>, escolha os <code>.h5p</code> que o Extrator gerou: um por questão, o <code>.zip</code> com todos ou o Question Set. Cada questão vai com o enunciado, as alternativas, as justificativas e as configurações (Tentar novamente, Mostrar solução, pontuação) <strong>como vieram no arquivo</strong>. A lista mostra, embaixo de cada página, o arquivo que ela recebe e o começo da pergunta; o que ficou de fora aparece com o motivo.
+          <li><strong>Com os arquivos do Extrator de Questões:</strong> em <strong>📎 Escolher arquivos .h5p</strong>, escolha os <code>.h5p</code> que o Extrator gerou: um por questão, o <code>.zip</code> com todos ou o Question Set. Cada questão vai com o enunciado, as alternativas, as justificativas e as configurações (Tentar novamente, Mostrar solução, pontuação) <strong>como vieram no arquivo</strong>. A lista mostra, embaixo de cada página marcada, o arquivo que ela recebe e o começo da pergunta; o que ficou de fora aparece com o motivo. <strong>Dá para trocar à mão:</strong> escolha na lista de cada página outra questão, ou "questão provisória". Questão que fica sem página aparece em "Fora". Se a mesma questão estiver em duas páginas, o <strong>Criar</strong> só libera quando ela ficar em uma só. Marcar ou desmarcar uma página distribui as questões de novo, na ordem, e desfaz as trocas à mão: escolha as páginas primeiro e troque depois.
             <ul>
               <li><strong>Comum:</strong> do Word, o Extrator gera <code>TÓPICO 1.h5p</code>, <code>TÓPICO 2.h5p</code>…, e cada um vai para a página "Tópico N" de mesmo número.</li>
-              <li><strong>Microfundamento:</strong> do relatório da FIC, o Extrator gera <code>Questão 1.h5p</code>, <code>Questão 2.h5p</code>…, numeradas pela página da sessão (a sessão retirada não conta). A "Questão N" vai para a N-ª página "UNIDADE N - Tema N" da lista, na ordem dos módulos. <strong>Confira os pares pelo começo da pergunta antes de criar.</strong></li>
+              <li><strong>Microfundamento:</strong> do relatório da FIC, o Extrator gera <code>Questão 1.h5p</code>, <code>Questão 2.h5p</code>…, numeradas pela página da sessão (a sessão retirada não conta). A "Questão N" vai para a N-ª página <strong>marcada</strong> da lista, na ordem dos módulos. Se uma página "UNIDADE N - Tema N" não tem questão na FIC, desmarque-a: as questões seguintes passam para as próximas páginas. <strong>Confira os pares pelo começo da pergunta antes de criar.</strong></li>
             </ul>
           </li>
           <li><strong>Sem arquivo:</strong> pergunta e alternativas vão provisórias ("Pergunta", "Alternativa A–D"), para a equipe trocar no editor do H5P.com.</li>
@@ -552,6 +554,16 @@ PROVA FINAL</pre>
     <div class="callout blue">
       O nome do quiz no H5P.com tem que ser igual ao título da página. Hífen e travessão, acentos e maiúsculas não contam. É esse o nome que a <a href="#canvas-h5p-pasta">📁 Pasta H5P</a> dá aos quizzes que cria. Na página, o quiz fica ligado pelo número: abrir ou atualizar a página mostra sempre esse quiz, sem procurar de novo pelo nome.
     </div>
+
+    <h3 id="canvas-h5p-selo">🏷 Selo H5P nos Módulos</h3>
+    <p>Na página de <strong>Módulos</strong>, as páginas que já têm o quiz H5P da Atividade de Fixação ganham um selo azul <strong>H5P</strong>, logo antes do ícone de publicado. Assim dá para ver, sem abrir página por página, quais tópicos já estão com o quiz e quais ainda faltam. Vale para a disciplina comum (caixa abaixo da faixa "Atividade de Fixação Não Pontuada") e para o Microfundamento (parágrafo logo abaixo do banner de Atividades de Fixação).</p>
+    <ul>
+      <li>Conta só o H5P que está no lugar do quiz. Outros H5P da página (imagens, carrosséis no corpo do tópico) não dão selo.</li>
+      <li>Com o mouse em cima do selo, aparecem o nome e o número do quiz no H5P.com.</li>
+      <li>O selo cinza <strong>H5P ?</strong> quer dizer que a extensão não conseguiu ler aquela página. Abra a página para conferir.</li>
+      <li>Os selos são lidos quando a página de Módulos abre. Na primeira vez em cada disciplina leva alguns segundos, com o aviso <em>"Selo H5P: lendo os módulos e as páginas…"</em> no canto da tela. Nas vezes seguintes, os selos da última leitura aparecem na hora e se corrigem sozinhos logo depois. Se você inserir um quiz pelo editor, recarregue Módulos (F5) para atualizar. Depois de inserir pela <a href="#canvas-h5p-pasta">📁 Pasta H5P</a>, eles se atualizam sozinhos.</li>
+      <li>Só lê: não muda nada no curso. Liga e desliga em <strong>⚙ Configurações → Canvas LMS</strong> (vem ligado).</li>
+    </ul>
   </section>
 
   <!-- ── Checklist de publicação ── -->
@@ -1091,6 +1103,7 @@ PROVA FINAL</pre>
         <tr><td>Páginas sem vídeo</td><td>Nomes parciais (um por linha) das páginas que não precisam ter vídeo — ficam fora da verificação <strong>▶️ Páginas sem vídeo</strong> do checklist</td></tr>
         <tr><td>Atalho do editor de equação</td><td>Liga o <strong>Ctrl+Shift+Q</strong>, que abre o editor de equação do Canvas (padrão: desligado)</td></tr>
         <tr><td>Colar a fórmula copiada</td><td>Com o atalho ligado, também cola o LaTeX copiado no editor de equação (padrão: desligado)</td></tr>
+        <tr><td>Selo "H5P" nas páginas dos Módulos</td><td>Marca na página de Módulos as páginas que já têm o quiz H5P da Atividade de Fixação (<a href="#canvas-h5p-selo">🏷 Selo H5P</a>). Vale na hora (padrão: ligado)</td></tr>
         <tr><td>Botão "📁 Pasta H5P"</td><td>Mostra o botão <a href="#canvas-h5p-pasta">📁 Pasta H5P</a> na página de Módulos (padrão: desligado)</td></tr>
         <tr><td>Salvar na pasta da equipe (produção)</td><td>Com o botão ligado: desligado, a pasta vai para o seu My Content como pasta privada (teste); ligado, para a pasta da equipe, onde nada pode ser apagado — PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM na disciplina comum, PRODUÇÕES › GRADUAÇÃO EAD no Microfundamento (padrão: desligado)</td></tr>
         <tr><td>Procurar texto em outra aba ou arquivo</td><td>Mostra no menu do botão direito o <a href="#procurar-texto">🔎 Procurar texto</a>, que confere um trecho com outra aba ou com um Word/HTML. Vale na hora (padrão: desligado)</td></tr>
