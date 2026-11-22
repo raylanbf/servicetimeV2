@@ -121,5 +121,21 @@ window.__svcH5pInsert = (() => {
     return { status: h5ps.length ? 'replace' : 'insert', oldIds, layout, body };
   }
 
-  return { plan, embedHtml, contentIdOf };
+  // O que há no lugar do quiz de uma página (HTML da API): o H5P que está lá
+  // ({ title, id } ou null) e se ainda há o marcador da AVA. Usado pelo selo
+  // "H5P" dos módulos (canvas-h5p-marks.js) e pela Pasta H5P, que já deixa
+  // marcadas as páginas com quiz ou marcador.
+  function slotState(html) {
+    const none = { quiz: null, marker: false };
+    if (!html || !/iframe/i.test(html)) return none;   // nem iframe nem marcador
+    const box = window.__svcH5pWidth.quizBox(new DOMParser().parseFromString(html, 'text/html').body).box;
+    if (!box) return none;
+    const frame = [...box.querySelectorAll('iframe')].find(f => isH5pSrc(f.getAttribute('src')));
+    return {
+      quiz: frame ? { title: (frame.getAttribute('title') || '').trim(), id: contentIdOf(frame.getAttribute('src')) } : null,
+      marker: MARKER.test(norm(box.textContent)),
+    };
+  }
+
+  return { plan, embedHtml, contentIdOf, slotState };
 })();

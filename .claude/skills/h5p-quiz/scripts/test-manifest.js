@@ -54,6 +54,7 @@ async function worlds(ctx, url) {
     bridge: window.__svcH5pBridge === true,
     insert: typeof window.__svcH5pInsert?.plan,
     folder: window.__svcH5pFolder === true,
+    marks:  typeof window.__svcH5pMarks?.refresh,
   })`;
   const main = await page.evaluate(probe);
   const isolated = iso ? (await cdp.send('Runtime.evaluate', { expression: probe, contextId: iso.id, returnByValue: true })).result.value : null;
@@ -91,6 +92,8 @@ function check(ok, label) {
     check(mo.isolated?.width === 'function', 'ISOLATED tem o __svcH5pWidth.quizBox (h5p-width.js)');
     check(mo.isolated?.insert === 'function', 'ISOLATED tem o __svcH5pInsert (h5p-insert.js)');
     check(mo.isolated?.folder === true, 'ISOLATED tem a Pasta H5P (canvas-h5p-folder.js)');
+    check(mo.isolated?.marks === 'function', 'ISOLATED tem o selo H5P dos módulos (canvas-h5p-marks.js)');
+    check(ed.isolated?.marks === 'undefined' && ed.main.marks === 'undefined', 'edição de página não tem o selo H5P dos módulos');
   } finally {
     await ctx.close();
     fs.rmSync(profile, { recursive: true, force: true });

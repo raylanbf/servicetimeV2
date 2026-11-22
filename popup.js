@@ -902,6 +902,11 @@ function buildSettings() {
   };
   $('settings-equation-paste').onchange = () => persist({ equationPasteEnabled: $('settings-equation-paste').checked });
 
+  // Selo "H5P" nos Módulos: vale na hora — a página de módulos aberta põe ou
+  // tira os selos sozinha (canvas-h5p-marks.js).
+  $('settings-h5p-marks').checked = !!S.h5pMarksEnabled;
+  $('settings-h5p-marks').onchange = () => persist({ h5pMarksEnabled: $('settings-h5p-marks').checked });
+
   // Botão "📁 Pasta H5P": também vale na hora — a página de módulos aberta
   // mostra ou tira o botão sozinha.
   // O destino (My Content privado x pasta da equipe) só faz sentido com o
@@ -6280,6 +6285,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     canvasFlowTemplates: saved.canvasFlowTemplates ?? DEFAULT_CANVAS_FLOW_TEMPLATES,
     equationShortcutEnabled: saved.equationShortcutEnabled || false,
     equationPasteEnabled:    saved.equationPasteEnabled    || false,
+    h5pMarksEnabled:         saved.h5pMarksEnabled         ?? true,
     h5pFolderEnabled:        saved.h5pFolderEnabled        || false,
     h5pFolderTeam:           saved.h5pFolderTeam           || false,
     findTextEnabled:         saved.findTextEnabled         || false,
