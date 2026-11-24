@@ -1,7 +1,7 @@
 // Caminho CSC — peças comuns aos scripts do mundo isolado em csc.pucminas.br
-// (csc-content.js, csc-chamado.js e csc-arvore.js). O painel (popup.html)
-// também carrega este arquivo, pelo normalizar; ao carregar, nada aqui mexe
-// na página.
+// (csc-content.js, csc-chamado.js, csc-acervo.js e csc-arvore.js). O painel
+// (popup.html) também carrega este arquivo, pelo normalizar e pela lista
+// padrão do Acervo; ao carregar, nada aqui mexe na página.
 //
 // Tudo aqui só LÊ a tela: nenhum script do CSC faz requisição ao servidor.
 // Liga e desliga em ⚙ Configurações › CSC (cscEnabled, padrão desligado);
@@ -12,6 +12,13 @@
 // para não misturar com ela se as duas estiverem instaladas.
 globalThis.__svcCsc = globalThis.__svcCsc || (() => {
   const CHAVE = 'cscEnabled';
+
+  // Serviços cujos chamados precisam ser reencaminhados ao Acervo depois do
+  // atendimento (lembrete do csc-acervo.js). Vale enquanto a lista em
+  // ⚙ Configurações › CSC (cscAcervoCaminhos) nunca tiver sido salva.
+  const CAMINHOS_ACERVO_PADRAO = [
+    'CSC - Central de Serviços Compartilhados/Serviços do Núcleo de Educação Digital (NED)/Pós-graduação Lato Sensu/Produção/criação de conteúdos/Gravar videoaula',
+  ];
 
   // Texto "comparável": sem acento, minúsculo, e / > | - _ viram espaço.
   // Assim o caminho do hidDesc, o do cabeçalho do chamado (todo minúsculo)
@@ -77,5 +84,5 @@ globalThis.__svcCsc = globalThis.__svcCsc || (() => {
     return { atualizado: (c && c.atualizado) || null, itens };
   }
 
-  return { normalizar, acompanharChave, montarLink, copiar, normalizarCatalogo };
+  return { CAMINHOS_ACERVO_PADRAO, normalizar, acompanharChave, montarLink, copiar, normalizarCatalogo };
 })();

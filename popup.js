@@ -937,11 +937,25 @@ function buildSettings() {
 
   // Caminho CSC: vale na hora — mostra ou tira o 🎫 do cabeçalho, e as abas
   // do CSC já abertas ligam ou desligam sozinhas (csc-comum.js).
+  // A lista do Acervo (lembrete do csc-acervo.js) só faz sentido com a chave
+  // ligada, então fica apagada sem ela. Grava ao sair da caixa e vale na hora
+  // no chamado aberto; vazia, nenhum lembrete.
   $('settings-csc').checked = !!S.cscEnabled;
+  $('settings-csc-acervo').value = (S.cscAcervoCaminhos || []).join('\n');
+  const syncCscAcervo = () => {
+    const on = $('settings-csc').checked;
+    $('settings-csc-acervo').disabled = !on;
+    $('settings-csc-acervo-group').classList.toggle('is-disabled', !on);
+  };
+  syncCscAcervo();
   $('settings-csc').onchange = async () => {
     await persist({ cscEnabled: $('settings-csc').checked });
     syncCscButton();
+    syncCscAcervo();
   };
+  $('settings-csc-acervo').onchange = () => persist({
+    cscAcervoCaminhos: $('settings-csc-acervo').value.split('\n').map(s => s.trim()).filter(Boolean),
+  });
 
   $('btn-save-settings').onclick = async () => {
     const name = $('settings-name').value.trim();
@@ -6303,6 +6317,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     h5pFolderTeam:           saved.h5pFolderTeam           || false,
     findTextEnabled:         saved.findTextEnabled         || false,
     cscEnabled:              saved.cscEnabled              || false,
+    cscAcervoCaminhos:       saved.cscAcervoCaminhos       ?? __svcCsc.CAMINHOS_ACERVO_PADRAO,
   };
 
   // Bindings estáticos

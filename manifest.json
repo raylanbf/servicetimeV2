@@ -86,7 +86,7 @@
     },
     {
       "matches": ["https://csc.pucminas.br/*"],
-      "js": ["csc-comum.js", "csc-content.js", "csc-chamado.js", "csc-arvore.js"],
+      "js": ["csc-comum.js", "csc-content.js", "csc-chamado.js", "csc-acervo.js", "csc-arvore.js"],
       "run_at": "document_idle",
       "all_frames": true
     },

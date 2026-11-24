@@ -8,6 +8,10 @@
 //     "Abrir em nova aba" abre o link direto e abrir uma pasta aprende mais;
 //   • formulário dentro do iframe: barrinha e "Serviços salvos";
 //   • chamado: grupos do histórico só das linhas do serviço atual;
+//   • lembrete do Acervo: aba "📦 Enviar para o acervo" depois de "Atividades"
+//     só no chamado de um serviço da lista (padrão: Gravar videoaula), sem
+//     passar os cliques ao RadTabStrip; no canto quando não há abas; a lista
+//     da ⚙ vale na hora;
 //   • busca do painel por nome, grupo e cabeçalho do chamado colado;
 //   • desligar devolve o botão direito normal na aba aberta;
 //   • os dados têm nomes próprios (cscServicos/cscCatalogo), não os da
@@ -81,10 +85,23 @@ const FORM = html('Abertura', `<div class="titulo"><span>Abertura de chamado par
 const LISTA_COM_FORM = html('Pendentes', `<iframe id="janela" src="${FORM_URL}" style="width:900px;height:400px"></iframe>`);
 
 const linhaHist = (servico, grupo) => `<tr><td>01/11/2026</td><td>${servico}</td><td>${grupo}</td></tr>`;
-const CHAMADO = (id, desc, linhas) => html('Chamado', `
+// Abas como as da gravação de 17/11/2026 (RadTabStrip + o CSS da página que
+// põe as abas lado a lado). O ouvinte no #RadTabStrip faz o papel do Telerik,
+// que trata os cliques ali: conta os que ele receberia.
+const ABAS = `
+  <style>.RadTabStrip .rtsUL { display: flex; list-style: none; margin: 0; padding: 0; } .RadTabStrip .rtsLI { flex: 1; } .rtsLink { display: block; text-align: center; padding: 5px; }</style>
+  <div id="RadTabStrip" class="RadTabStrip RadTabStrip_Bootstrap rtsHorizontal rtsTop" style="font-size:9pt;"><div class="rtsLevel rtsLevel1"><ul class="rtsUL">${
+    ['Histórico', 'Detalhes', 'Anexos', 'Print', 'Resolução', 'Horas', 'Atividades'].map((t, i) =>
+      `<li class="rtsLI${i ? '' : ' rtsSelected'}"><span class="rtsLink" style="color:#3A3F49;font-family:Roboto;font-weight:normal;border: 1px solid #3A3F49; border-radius: 12px 12px 0px 0px;"><span class="rtsTxt">${t}</span></span></li>`).join('')
+  }</ul></div></div>
+  <script>window.__cliquesTelerik = 0; document.getElementById('RadTabStrip').addEventListener('click', () => window.__cliquesTelerik++);</script>`;
+const GRAVAR = 'CSC - Central de Serviços Compartilhados/Serviços do Núcleo de Educação Digital (NED)/Pós-graduação Lato Sensu/Produção/criação de conteúdos/Gravar videoaula';
+const CHAMADO = (id, desc, linhas, abas = true) => html('Chamado', `
   <input type="hidden" id="hidTipoItem" value="S">
   <input type="hidden" id="hidCatalogoServicosId" value="${id}">
   <input type="hidden" id="hidDesc" value="${desc}">
+  <span id="lblCabecalho">Código 1 - ${desc.toLowerCase()}</span>
+  ${abas ? ABAS : ''}
   <div id="gridHistorico"><table id="gridHistorico_ctl00">
     <thead><tr><th class="rgHeader">Data</th><th class="rgHeader">Serviço</th><th class="rgHeader">Grupo</th></tr></thead>
     <tbody>${linhas.join('')}</tbody>
@@ -107,6 +124,12 @@ function pagina(url) {
   if (p === '/chamados/viewhistoricochamado.aspx' && u.searchParams.get('Codigo') === '1030000') {
     const d = 'CSC - Central de Serviços Compartilhados/Serviços do Núcleo de Educação Digital (NED)/Gravação de vídeo';
     return CHAMADO('8001', d, [linhaHist(d, 'RES_NED/Acervo')]);
+  }
+  if (p === '/chamados/viewhistoricochamado.aspx' && u.searchParams.get('Codigo') === '1018448') {
+    return CHAMADO('9100', GRAVAR, [linhaHist(GRAVAR, 'RES_NED/COED_Gestão')]);
+  }
+  if (p === '/chamados/viewhistoricochamado.aspx' && u.searchParams.get('Codigo') === '1018449') {
+    return CHAMADO('9100', GRAVAR, [linhaHist(GRAVAR, 'RES_NED/COED_Gestão')], false); // sem as abas
   }
   return null;
 }
@@ -165,6 +188,9 @@ function check(ok, label, extra = '') {
     const ch0 = await ctx.newPage();
     await ch0.goto(`${CSC}/Chamados/viewHistoricoChamado.aspx?id=1&Codigo=1028224&origem=VisualizaChamadosGrupo`);
     await ch0.waitForTimeout(1200);
+    await ch0.goto(`${CSC}/Chamados/viewHistoricoChamado.aspx?id=3&Codigo=1018448&origem=VisualizaChamadosGrupo`);
+    await ch0.waitForTimeout(1200);
+    check(await ch0.evaluate(() => !document.getElementById('st-csc-acervo') && !document.getElementById('st-csc-acervo-aviso')), 'chamado de Gravar videoaula sem a aba do Acervo');
     await ch0.close();
     let st = await storage();
     check(st.cscEnabled === undefined && !st.cscServicos && !st.cscCatalogo, `nada gravado: ${JSON.stringify(Object.keys(st))}`);
@@ -264,6 +290,75 @@ function check(ok, label, extra = '') {
     await painel.waitForTimeout(400);
     check((await nomes()).includes('Serviço novo do núcleo'), 'a busca aberta se atualiza quando o catálogo muda');
 
+    console.log('Lembrete do Acervo:');
+    // O que a aba do Acervo mostra: posição, texto, se está na linha das
+    // outras abas e se o lembrete está aberto.
+    const acervo = pg => pg.evaluate(() => {
+      const aba = document.getElementById('st-csc-acervo');
+      const host = document.getElementById('st-csc-acervo-aviso');
+      const caixa = host && host.shadowRoot.querySelector('.aviso');
+      const abas = [...document.querySelectorAll('#RadTabStrip .rtsUL > li')];
+      const ativ = abas.find(li => li.textContent === 'Atividades');
+      return {
+        aba: aba ? aba.textContent : null,
+        depoisDeAtividades: !!aba && ativ && ativ.nextElementSibling === aba && abas[abas.length - 1] === aba,
+        mesmaLinha: !!aba && ativ && Math.abs(aba.getBoundingClientRect().top - ativ.getBoundingClientRect().top) < 2,
+        avisoAberto: !!caixa && !caixa.hidden,
+        servico: caixa ? caixa.querySelector('.servico').textContent : null,
+        canto: !!caixa && caixa.style.bottom === '16px',
+        cliquesTelerik: window.__cliquesTelerik,
+      };
+    });
+    const gv = await ctx.newPage();
+    await gv.goto(`${CSC}/Chamados/viewHistoricoChamado.aspx?id=3&Codigo=1018448&origem=VisualizaChamadosGrupo`);
+    await gv.waitForTimeout(1200);
+    let a = await acervo(gv);
+    check(a.aba === '📦 Enviar para o acervo' && a.depoisDeAtividades, `chamado de Gravar videoaula ganha a aba depois de "Atividades": ${JSON.stringify(a)}`);
+    check(a.mesmaLinha, 'a aba fica na mesma linha das outras');
+    check(!a.avisoAberto, 'o lembrete começa fechado');
+    await gv.click('#st-csc-acervo');
+    await gv.waitForTimeout(200);
+    a = await acervo(gv);
+    check(a.avisoAberto && a.servico === 'Gravar videoaula', `clicar na aba abre o lembrete com o serviço: ${a.servico}`);
+    check(a.cliquesTelerik === 0, `o clique não chega ao RadTabStrip: ${a.cliquesTelerik}`);
+    await gv.evaluate(() => document.getElementById('st-csc-acervo-aviso').shadowRoot.querySelector('.entendi').click());
+    check(!(await acervo(gv)).avisoAberto, '"Entendi" fecha o lembrete');
+    await gv.click('#RadTabStrip li:nth-child(2)');
+    check((await acervo(gv)).cliquesTelerik === 1, 'as abas do CSC continuam recebendo os próprios cliques');
+
+    const sc = await ctx.newPage();
+    await sc.goto(`${CSC}/Chamados/viewHistoricoChamado.aspx?id=1&Codigo=1028224&origem=VisualizaChamadosGrupo`);
+    await sc.waitForTimeout(1200);
+    check((await acervo(sc)).aba === null, 'chamado de outro serviço (Suporte ao Canvas) não ganha a aba');
+
+    const semAbas = await ctx.newPage();
+    await semAbas.goto(`${CSC}/Chamados/viewHistoricoChamado.aspx?id=4&Codigo=1018449&origem=VisualizaChamadosGrupo`);
+    await semAbas.waitForTimeout(1200);
+    a = await acervo(semAbas);
+    check(a.aba === null && a.avisoAberto && a.canto, `sem as abas na página, o lembrete aparece aberto no canto: ${JSON.stringify(a)}`);
+    await semAbas.close();
+
+    // A lista da ⚙ vale na hora nos chamados abertos (grava ao sair da caixa).
+    const listaCfg = await painel.evaluate(() => document.getElementById('settings-csc-acervo').value);
+    check(listaCfg === GRAVAR, `a ⚙ mostra o caminho padrão: ${listaCfg}`);
+    const salvarLista = v => painel.evaluate(v => {
+      const t = document.getElementById('settings-csc-acervo');
+      t.value = v;
+      t.dispatchEvent(new Event('change'));
+    }, v);
+    await salvarLista('acesso canvas/suporte ao canvas');
+    await gv.waitForTimeout(500);
+    check(JSON.stringify((await storage()).cscAcervoCaminhos) === '["acesso canvas/suporte ao canvas"]', 'a lista é gravada ao sair da caixa');
+    check((await acervo(sc)).aba === '📦 Enviar para o acervo', 'um trecho do fim do caminho (minúsculo, sem o começo) já basta');
+    check((await acervo(gv)).aba === null, 'o chamado que saiu da lista perde a aba');
+    await salvarLista('');
+    await gv.waitForTimeout(500);
+    check((await acervo(sc)).aba === null && JSON.stringify((await storage()).cscAcervoCaminhos) === '[]', 'lista vazia: nenhum lembrete');
+    await salvarLista(GRAVAR);
+    await gv.waitForTimeout(500);
+    check((await acervo(gv)).aba === '📦 Enviar para o acervo', 'voltar o caminho devolve a aba');
+    await sc.close();
+
     console.log('Desligar:');
     await painel.evaluate(() => document.getElementById('btn-settings').click());
     await painel.evaluate(() => { const c = document.getElementById('settings-csc'); c.checked = false; c.dispatchEvent(new Event('change')); });
@@ -274,6 +369,9 @@ function check(ok, label, extra = '') {
     check(await botaoDireito(arvore, 'Suporte ao Canvas') === false, 'na árvore aberta, o botão direito volta ao normal');
     await arvore.waitForTimeout(300);
     check(await menuAberto(arvore) === null, 'e o menu do Caminho CSC não aparece');
+    check((await acervo(gv)).aba === null && !(await acervo(gv)).avisoAberto, 'no chamado aberto, a aba do Acervo some');
+    check(await painel.evaluate(() => document.getElementById('settings-csc-acervo').disabled), 'a lista do Acervo fica apagada sem a chave');
+    await gv.close();
 
     st = await storage();
     check(!('servicos' in st) && !('catalogo' in st) && !('semeado' in st), 'nada gravado com os nomes da extensão Caminho CSC');
