@@ -20,6 +20,7 @@
     <span id="user-label" class="muted small"></span>
     <div style="display:flex;gap:4px;align-items:center">
       <span id="version-label" class="muted small" style="font-size:9px;opacity:0.6"></span>
+      <button id="btn-csc" class="btn-icon" title="Caminho CSC" style="display:none">🎫</button>
       <button id="btn-canvas" class="btn-icon" title="Canvas LMS">🎓</button>
       <button id="btn-settings" class="btn-icon" title="Configurações">⚙</button>
     </div>
@@ -132,6 +133,31 @@
   <button id="btn-canvas-thumb" class="btn btn-surface btn-full mt4">🖼  Criar capa de vídeo</button>
   <button id="btn-canvas-materiais" class="btn btn-surface btn-full mt4">📎  Importar materiais complementares</button>
   <button id="btn-canvas-banner" class="btn btn-surface btn-full mt4">🖼  Trocar banner dos cursos</button>
+</div>
+
+<!-- ── Caminho CSC (csc-panel.js) ──────────────────────────────────── -->
+<div id="view-csc" class="view">
+  <div class="view-header">
+    <button id="btn-back-csc" class="btn-icon">←</button>
+    <span class="view-title">Caminho CSC</span>
+  </div>
+  <input id="csc-busca" type="text" placeholder="Nome, caminho, ID, grupo ou cabeçalho do chamado…">
+
+  <span class="label mt8">Listas de chamados</span>
+  <div id="csc-listas" class="csc-chips mt4"></div>
+
+  <div class="divider"></div>
+  <span id="csc-titulo" class="label">Serviços salvos</span>
+  <span id="csc-aviso" class="small muted"></span>
+  <ul id="csc-servicos" class="csc-lista mt4"></ul>
+
+  <div class="divider"></div>
+  <span class="label">Catálogo de serviços</span>
+  <span id="csc-status" class="small muted mt4"></span>
+  <span class="small muted mt4">Aprende os serviços das pastas que você abre na árvore do CSC e dos chamados que você abre, sem nenhuma requisição a mais.</span>
+  <button id="btn-csc-arvore" class="btn btn-surface btn-full mt6">🌳  Abrir a árvore do CSC</button>
+  <button id="btn-csc-copiar-todos" class="btn btn-surface btn-full mt4">📋  Copiar todos os links salvos</button>
+  <span class="small muted mt6">Atalho na Área de Trabalho: clique em "Abrir" e arraste o cadeado da barra de endereço até a Área de Trabalho.</span>
 </div>
 
 <!-- ── Editar serviços ─────────────────────────────────────────────── -->
@@ -284,6 +310,20 @@
         </label>
       </div>
       <span class="small muted">Mostra no menu do botão direito o "🔎 Procurar texto", que confere um trecho com outra aba ou com um Word/HTML (ex.: o quiz com o Word ou a FIC)</span>
+    </div>
+  </div>
+
+  <div class="cfg-section">
+    <div class="cfg-section-title">CSC</div>
+    <div class="cfg-group">
+      <div class="row-between">
+        <label class="cfg-label" for="settings-csc" style="margin-bottom:0">Caminho CSC (link direto dos serviços)</label>
+        <label class="toggle">
+          <input type="checkbox" id="settings-csc">
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      <span class="small muted">Mostra o botão 🎫 no topo do painel, para achar o link direto de cada serviço do csc.pucminas.br. Enquanto você navega no CSC, aprende os serviços das pastas da árvore e dos chamados que você abre, sem nenhuma requisição a mais</span>
     </div>
   </div>
 
@@ -746,6 +786,8 @@
 <script src="video-size.js"></script>
 <script src="video-slots.js"></script>
 <script src="xlsx-read.js"></script>
+<script src="csc-comum.js"></script>
+<script src="csc-panel.js"></script>
 <script src="popup.js"></script>
 </body>
 </html>

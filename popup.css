@@ -834,3 +834,20 @@ input[type=text]:focus { border-color: #60a5fa; }
 label.mat-file, label.bulk-course-row-head { cursor: pointer; }
 .ban-off { color: #64748b; text-decoration: line-through; }
 #view-canvas-banner .btn-link-sm:disabled { opacity: .4; cursor: default; text-decoration: none; }
+
+/* ── Caminho CSC (view-csc) ────────────────────────────────────── */
+.csc-chips        { display: flex; flex-wrap: wrap; gap: 4px; }
+.csc-chip         { background: #2a2a3e; color: #e2e8f0; border: 1px solid #3a3a4e; border-radius: 999px; padding: 3px 9px; font-size: 11px; cursor: pointer; }
+.csc-chip:hover   { border-color: #60a5fa; }
+.csc-lista        { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.csc-item         { background: #2a2a3e; border: 1px solid #3a3a4e; border-radius: 6px; padding: 7px 8px; }
+.csc-nome         { font-size: 12px; font-weight: bold; word-break: break-word; }
+.csc-nome input   { font-weight: normal; }
+.csc-meta         { font-size: 10px; color: #94a3b8; margin-top: 3px; word-break: break-word; }
+.csc-tag          { display: inline-block; font-size: 10px; padding: 0 5px; border-radius: 3px; background: #3a3a4e; color: #e2e8f0; margin-right: 4px; }
+.csc-acoes        { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.csc-acoes button { background: #1e1e2e; color: #e2e8f0; border: 1px solid #3a3a4e; border-radius: 4px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
+.csc-acoes button:hover { border-color: #60a5fa; }
+.csc-acoes .csc-principal { background: #60a5fa; border-color: #60a5fa; color: #000; font-weight: bold; }
+.csc-acoes .csc-perigo.confirmar { background: #f87171; border-color: #f87171; color: #fff; }
+.csc-vazio        { font-size: 11px; color: #64748b; padding: 4px 0; }

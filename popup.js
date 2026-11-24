@@ -157,6 +157,11 @@ function show(name) {
   $('view-' + name).classList.add('active');
 }
 
+// Botão 🎫 do cabeçalho (Caminho CSC): só aparece com a chave ligada.
+function syncCscButton() {
+  $('btn-csc').style.display = S.cscEnabled ? '' : 'none';
+}
+
 function elapsedMs() {
   if (!S.running) return 0;
   return S.paused ? S.accMs : S.accMs + (Date.now() - S.startTs);
@@ -929,6 +934,14 @@ function buildSettings() {
   // mostra ou esconde o item na hora, ao ver a chave mudar.
   $('settings-find-text').checked = !!S.findTextEnabled;
   $('settings-find-text').onchange = () => persist({ findTextEnabled: $('settings-find-text').checked });
+
+  // Caminho CSC: vale na hora — mostra ou tira o 🎫 do cabeçalho, e as abas
+  // do CSC já abertas ligam ou desligam sozinhas (csc-comum.js).
+  $('settings-csc').checked = !!S.cscEnabled;
+  $('settings-csc').onchange = async () => {
+    await persist({ cscEnabled: $('settings-csc').checked });
+    syncCscButton();
+  };
 
   $('btn-save-settings').onclick = async () => {
     const name = $('settings-name').value.trim();
@@ -6289,6 +6302,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     h5pFolderEnabled:        saved.h5pFolderEnabled        || false,
     h5pFolderTeam:           saved.h5pFolderTeam           || false,
     findTextEnabled:         saved.findTextEnabled         || false,
+    cscEnabled:              saved.cscEnabled              || false,
   };
 
   // Bindings estáticos
@@ -6323,6 +6337,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-settings').addEventListener('click',   () => { buildSettings();  show('settings');  });
   $('btn-canvas').addEventListener('click',     () => { syncCanvasTools(); show('canvas');   });
   $('btn-back-canvas').addEventListener('click', () => show('main'));
+  syncCscButton();
+  $('btn-csc').addEventListener('click', () => { show('csc'); CscPanel.abrir(); });
+  $('btn-back-csc').addEventListener('click', () => show('main'));
   $('btn-back-help').addEventListener('click',  () => show('main'));
   $('btn-starters').addEventListener('click', doOpenStarters);
   $('btn-links').addEventListener('click', () => { buildLinks(); show('links'); });
