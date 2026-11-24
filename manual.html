@@ -266,6 +266,7 @@
   <a class="nav-item" href="#marca-texto">Marca-texto</a>
   <a class="nav-item" href="#copia-inteligente">Copia Inteligente</a>
   <a class="nav-item" href="#procurar-texto">Procurar texto</a>
+  <a class="nav-item" href="#caminho-csc">Caminho CSC</a>
   <a class="nav-item" href="#clipboard-test">Teste de Clipboard</a>
 
   <div class="nav-section">Configuração</div>
@@ -1056,6 +1057,47 @@ PROVA FINAL</pre>
     </div>
   </section>
 
+  <!-- ── Caminho CSC ── -->
+  <section id="caminho-csc">
+    <h2><span class="icon">🎫</span>Caminho CSC</h2>
+    <p>Acha o link direto do formulário de cada serviço do CSC (<code>csc.pucminas.br</code>). Com o link, você abre o formulário com um clique, sem passar de novo por Chamados → Abertura → árvore → pasta → subpasta → serviço. Só lê o que já está na tela: não faz nenhuma requisição a mais ao CSC e não preenche nem envia nada.</p>
+    <div class="callout blue">
+      Vem desligado. Ligue <strong>Caminho CSC</strong> em <strong>⚙ Configurações → CSC</strong>. Vale na hora: o botão <strong>🎫</strong> aparece no topo do painel e as abas do CSC já abertas passam a funcionar.
+    </div>
+
+    <h3>Como ele aprende os serviços</h3>
+    <ul>
+      <li><strong>Na árvore</strong> (Chamados → Abertura → Buscar o serviço na árvore): toda pasta que você abre tem os serviços anotados na hora. Pastas que você nunca abriu ficam de fora, porque ele não abre nada sozinho.</li>
+      <li><strong>Nos chamados</strong> (pelas listas Pendentes, Todos, Meus chamados…): cada chamado aberto ensina o serviço dele e os grupos (filas) por onde ele passou, na aba Histórico. Do chamado, só são lidos o serviço e a coluna Grupo; descrição, solicitante e anexos ficam de fora.</li>
+      <li><strong>No formulário</strong> de um serviço: aparece no canto a barrinha <strong>Copiar link direto</strong>, e o serviço vai para os salvos.</li>
+    </ul>
+
+    <h3>Na árvore: botão direito</h3>
+    <p>Botão direito em cima de um serviço mostra <strong>📋 Copiar link do serviço</strong> e <strong>↗ Abrir em nova aba</strong>. Em pastas e no resto da página continua o menu normal do Chrome.</p>
+
+    <h3>A tela 🎫 do painel</h3>
+    <table>
+      <thead><tr><th>Parte</th><th>O que faz</th></tr></thead>
+      <tbody>
+        <tr><td>Caixa de busca</td><td>Vazia, mostra os serviços salvos. Com texto, procura em todos os conhecidos: parte do nome, o caminho (sem acento também vale), o ID, um grupo (<code>RES_NED/CEAD_Gestão_do_Ambiente_Virtual</code>) ou o cabeçalho de um chamado colado inteiro (<code>Código 1028224 - Csc - central de .../suporte ao canvas</code>), que põe o serviço exato em primeiro</td></tr>
+        <tr><td>Listas de chamados</td><td>Abrem Todos, Pendentes, Minha responsabilidade e Meus chamados, com os filtros que você salvou na sua conta do CSC</td></tr>
+        <tr><td>Abrir · Copiar link</td><td>Abre o formulário do serviço numa aba nova · copia o link</td></tr>
+        <tr><td>☆ Salvar · Renomear · Remover</td><td>Põe um resultado da busca nos salvos · troca o nome que aparece (Enter salva, Esc cancela) · tira dos salvos (pede um segundo clique)</td></tr>
+        <tr><td>Catálogo de serviços</td><td>Quantos serviços já são conhecidos, e o botão <strong>🌳 Abrir a árvore do CSC</strong></td></tr>
+        <tr><td>Copiar todos os links salvos</td><td>Lista em texto com as listas de chamados e os serviços salvos, para mandar a um colega</td></tr>
+      </tbody>
+    </table>
+    <p>Com o painel aberto ao lado do CSC, a busca se atualiza sozinha enquanto você abre pastas e chamados. Para criar um atalho na Área de Trabalho, clique em <strong>Abrir</strong> e arraste o cadeado da barra de endereço até a Área de Trabalho.</p>
+
+    <h3>📦 Lembrete de enviar para o Acervo</h3>
+    <p>Alguns chamados precisam ser reencaminhados ao <strong>Acervo</strong> depois do atendimento. Por exemplo, os de gravação de videoaula numa atualização de disciplina. Quando você abre um chamado de um desses serviços, aparece a aba <strong>📦 Enviar para o acervo</strong>, em laranja, depois de <strong>Atividades</strong>. Clicar nela mostra o lembrete; <strong>Entendi</strong> fecha. O lembrete só avisa: o reencaminhamento continua sendo feito por você, no CSC.</p>
+    <p>Os serviços ficam em <strong>⚙ Configurações → CSC → Serviços que vão para o Acervo</strong>, um caminho por linha. Já vem com <code>…/Pós-graduação Lato Sensu/Produção/criação de conteúdos/Gravar videoaula</code>. Vale colar o caminho do cabeçalho do chamado ou só o fim dele; maiúsculas e acentos não contam. A lista é gravada ao sair da caixa e vale na hora, inclusive no chamado aberto. Vazia, nenhum lembrete aparece.</p>
+
+    <div class="callout yellow">
+      É preciso estar logado no CSC: com a sessão expirada, o link leva ao login (depois de entrar, clique de novo). Os serviços de <strong>Solicitante</strong> e de <strong>Atendente</strong> ficam separados, porque o CSC mostra árvores diferentes; o serviço aprendido num chamado entra como Solicitante. Os grupos são os que você já viu nos chamados que abriu, não um mapa oficial. Se a extensão <strong>Caminho CSC</strong> também estiver instalada, desative-a: com as duas ligadas, a barrinha e o menu aparecem em dobro.
+    </div>
+  </section>
+
   <!-- ── Teste de Clipboard ── -->
   <section id="clipboard-test">
     <h2><span class="icon">🧪</span>Teste de Clipboard</h2>
@@ -1107,6 +1149,15 @@ PROVA FINAL</pre>
         <tr><td>Botão "📁 Pasta H5P"</td><td>Mostra o botão <a href="#canvas-h5p-pasta">📁 Pasta H5P</a> na página de Módulos (padrão: desligado)</td></tr>
         <tr><td>Salvar na pasta da equipe (produção)</td><td>Com o botão ligado: desligado, a pasta vai para o seu My Content como pasta privada (teste); ligado, para a pasta da equipe, onde nada pode ser apagado — PRODUÇÕES › UDA - UNIDADE DIGITAL DE APRENDIZAGEM na disciplina comum, PRODUÇÕES › GRADUAÇÃO EAD no Microfundamento (padrão: desligado)</td></tr>
         <tr><td>Procurar texto em outra aba ou arquivo</td><td>Mostra no menu do botão direito o <a href="#procurar-texto">🔎 Procurar texto</a>, que confere um trecho com outra aba ou com um Word/HTML. Vale na hora (padrão: desligado)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>CSC</h3>
+    <table>
+      <thead><tr><th>Campo</th><th>Descrição</th></tr></thead>
+      <tbody>
+        <tr><td>Caminho CSC (link direto dos serviços)</td><td>Mostra o botão <a href="#caminho-csc">🎫 Caminho CSC</a> no topo do painel e liga, no <code>csc.pucminas.br</code>, o aprendizado dos serviços, o menu do botão direito na árvore, a barrinha do formulário e o lembrete do Acervo. Vale na hora (padrão: desligado)</td></tr>
+        <tr><td>Serviços que vão para o Acervo</td><td>Com a chave ligada: caminhos dos serviços (um por linha, pode ser só o fim) cujo chamado ganha a aba <strong>📦 Enviar para o acervo</strong>. Vale ao sair da caixa; vazia, nenhum lembrete (padrão: Gravar videoaula da Pós Lato Sensu)</td></tr>
       </tbody>
     </table>
 

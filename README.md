@@ -231,6 +231,32 @@ Só lê, pela API do Canvas, um pedido por vez e no ritmo do `X-Rate-Limit-Remai
 
 ---
 
+## Caminho CSC
+
+Tela **🎫** do painel (botão no topo, ao lado do 🎓) que acha o **link direto** do formulário de cada serviço do CSC (`https://csc.pucminas.br`), para abrir com um clique sem passar pela árvore. Veio da extensão **Caminho CSC** (`C:\Users\Casa\csc-links-extensao`, [raylanbf/caminho_CSC](https://github.com/raylanbf/caminho_CSC), v1.4.0), que continua separada; o README de lá explica como o link foi descoberto com o Gravador de Ações.
+
+O link é o mesmo que o CSC monta no duplo clique da árvore (`AbreTela`): `/Chamados/viewIncidenteDireto.aspx?id=<ID do serviço>&origem=<Incidente|ChamadosGrupo>&width=1632&height=756&incidenteid=0&Userid=0` (`Incidente` = solicitante, `ChamadosGrupo` = atendente; `width`/`height` não mudam o serviço).
+
+Só lê a tela: nenhum script do CSC faz requisição ao servidor, abre pasta da árvore, preenche ou envia formulário.
+
+| Arquivo | Onde roda | O que faz |
+|---|---|---|
+| `csc-comum.js` | isolado, todos os frames, e o painel | `__svcCsc`: chave liga/desliga, `normalizar`, montagem do link, cópia, lista padrão do Acervo |
+| `csc-arvore-main.js` | MAIN, `IncidenteV2.aspx` | lê os serviços já carregados no RadTreeView (`$find('ctl00_MainContent_rdTreeView')`, valor `ID;S;...`) e o botão direito num serviço |
+| `csc-arvore.js` | isolado, `IncidenteV2.aspx` | junta no catálogo e mostra o menu Copiar/Abrir |
+| `csc-content.js` | isolado, todos os frames, `viewIncidenteDireto.aspx` e `AberturaChamado.aspx` | salva o serviço e mostra a barrinha "Copiar link direto" |
+| `csc-chamado.js` | isolado, todos os frames, `viewHistoricoChamado.aspx` | lê `hidCatalogoServicosId`, `hidDesc` e a coluna Grupo do histórico (só as linhas do serviço atual) |
+| `csc-acervo.js` | isolado, todos os frames, `viewHistoricoChamado.aspx` | lembrete "📦 Enviar para o acervo": aba depois de "Atividades" quando o `hidDesc` está na lista do Acervo |
+| `csc-panel.js` | painel (`view-csc`) | busca, salvos e listas de chamados |
+
+**Lembrete do Acervo.** Chamados de alguns serviços precisam ser reencaminhados ao Acervo depois do atendimento (ex.: gravar videoaula numa atualização de disciplina). Na tela do chamado, se o caminho do serviço (`hidDesc`) contém um dos caminhos de `cscAcervoCaminhos` (comparados pelo `normalizar` do `csc-comum.js`: sem acento, maiúsculas e separadores), o `csc-acervo.js` põe a aba **📦 Enviar para o acervo** depois de "Atividades" no RadTabStrip (`#RadTabStrip .rtsUL > li.rtsLI`; a página já tem `.rtsUL { display: flex }`). A aba copia o estilo da "Atividades" e segura os próprios eventos (o Telerik trata os cliques no elemento das abas e não a conhece); clicar abre o lembrete embaixo dela. Sem as abas na página, o lembrete abre no canto. Um `MutationObserver` devolve a aba se um postback parcial redesenhar as abas. Só lembra: não encaminha nada. Padrão da lista: `CAMINHOS_ACERVO_PADRAO` (Gravar videoaula da Pós Lato Sensu); seletores conferidos no HTML real da gravação de 17/11/2026.
+
+Dados em `chrome.storage.local`: `cscServicos` (salvos, chave `ID|origem`), `cscCatalogo` (`{ Incidente | ChamadosGrupo: { itens: { [id]: { id, nome, caminho, tipo, fonte?, grupos? } } } }`), `cscSemeado` e `cscAcervoCaminhos` (lista do Acervo; ausente = padrão, `[]` = nenhum lembrete). Os nomes são diferentes dos da extensão Caminho CSC (`servicos`, `catalogo`), e as mensagens entre os mundos usam `stCsc: 'main' | 'isolado'`, para as duas não se misturarem. Mesmo assim, com as duas ligadas, a barrinha e o menu aparecem em dobro.
+
+O `csc-arvore-main.js` é quem bloqueia o menu do Chrome no botão direito. Por isso ele fica parado até o `csc-arvore.js` dizer `pronto` (chave ligada), e `desligado` o para de novo. A ordem de carga não importa: o MAIN manda `ola` ao carregar, e o isolado responde `pronto` se a chave estiver ligada. Chave **Caminho CSC** em ⚙ Configurações › CSC (`cscEnabled`, padrão **desligado**; vale na hora, inclusive nas abas do CSC já abertas). Regressão (carrega a extensão de verdade num CSC falso): `.claude/skills/h5p-quiz/scripts/test-csc.js`.
+
+---
+
 ## Teste de Clipboard
 
 Acessível em **Configurações → 🧪 Teste de Clipboard**, abre uma página com dois painéis lado a lado:
@@ -265,6 +291,13 @@ Acessível pelo botão **⚙** no topo do painel.
 | Campo | Descrição |
 |---|---|
 | Páginas sem recuo | Lista de nomes parciais (um por linha) das páginas que não devem receber indentação ao aplicar o recuo nos módulos |
+
+### CSC
+
+| Campo | Descrição |
+|---|---|
+| Caminho CSC (link direto dos serviços) | Mostra o botão 🎫 no topo do painel e liga, no `csc.pucminas.br`, o aprendizado dos serviços, o menu do botão direito na árvore, a barrinha do formulário e o lembrete do Acervo (padrão: desligado; vale na hora) |
+| Serviços que vão para o Acervo | Caminhos (um por linha, pode ser só o fim) cujo chamado ganha a aba "📦 Enviar para o acervo" (padrão: Gravar videoaula da Pós Lato Sensu; grava ao sair da caixa; vazia = nenhum lembrete) |
 
 ### Ferramentas
 
