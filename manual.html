@@ -256,8 +256,6 @@
   <a class="nav-item" href="#canvas-h5p-selo">↳ Selo H5P nos Módulos</a>
   <a class="nav-item" href="#canvas-checklist">↳ Checklist de publicação</a>
   <a class="nav-item" href="#canvas-editor">↳ Edição de página</a>
-  <a class="nav-item" href="#canvas-editor-dup">　· Duplicar bloco</a>
-  <a class="nav-item" href="#canvas-editor-move">　· Reorganizar blocos</a>
   <a class="nav-item" href="#canvas-editor-map">　· Mapa de elementos</a>
   <a class="nav-item" href="#canvas-blocos">　· Blocos salvos</a>
 
@@ -669,78 +667,19 @@ PROVA FINAL</pre>
     <table>
       <thead><tr><th>Ferramenta</th><th>Cursor no editor</th><th>Atalho para sair</th></tr></thead>
       <tbody>
-        <tr><td>📑 Duplicar bloco</td><td><code>copy</code> durante toda a seleção</td><td>ESC</td></tr>
-        <tr><td>✋ Reorganizar blocos</td><td><code>grab</code> ao ativar · <code>grabbing</code> ao arrastar</td><td>ESC</td></tr>
         <tr><td>🗺 Mapa de elementos</td><td><code>pointer</code> quando aberto · <code>grab</code> com M · <code>grabbing</code> ao arrastar</td><td>ESC ou fechar painel</td></tr>
       </tbody>
     </table>
-  </section>
-
-  <!-- ── Duplicar bloco ── -->
-  <section id="canvas-editor-dup">
-    <h2><span class="icon">📑</span>Duplicar bloco na página</h2>
-    <p>Copia um bloco HTML completo (div, seção, card etc.) para outra posição da mesma página, em dois cliques.</p>
-
-    <ol class="steps">
-      <li>Clique em <strong>📑 Duplicar bloco na página</strong> — o cursor muda para <code>copy</code> e uma barra de instrução aparece no topo</li>
-      <li>Passe o mouse sobre o bloco que deseja copiar — ele fica destacado em <strong>azul</strong></li>
-      <li>Use <strong>↑ / ↓</strong> para subir ou descer um nível na hierarquia HTML, se necessário</li>
-      <li>Clique no bloco de origem — a seleção muda para a fase de destino (destaque em <strong>verde</strong>)</li>
-      <li>Clique no bloco de destino — a cópia é inserida <strong>logo abaixo</strong> dele</li>
-    </ol>
-
-    <div class="callout yellow">
-      A cópia remove automaticamente atributos <code>id</code> do HTML copiado, evitando âncoras duplicadas na página.
-    </div>
-
-    <table>
-      <thead><tr><th>Ação</th><th>Como fazer</th></tr></thead>
-      <tbody>
-        <tr><td>Subir nível (pegar elemento pai)</td><td>Tecla <strong>↑</strong></td></tr>
-        <tr><td>Descer nível (pegar filho)</td><td>Tecla <strong>↓</strong></td></tr>
-        <tr><td>Cancelar</td><td><strong>ESC</strong></td></tr>
-        <tr><td>Desfazer</td><td><strong>Ctrl+Z</strong> no editor</td></tr>
-      </tbody>
-    </table>
-  </section>
-
-  <!-- ── Reorganizar blocos ── -->
-  <section id="canvas-editor-move">
-    <h2><span class="icon">✋</span>Reorganizar blocos (arrastar)</h2>
-    <p>Reordena blocos HTML por arraste direto no editor. Ao ativar, o cursor muda para <code>grab</code> em todo o editor.</p>
-
-    <ol class="steps">
-      <li>Clique em <strong>✋ Reorganizar blocos (arrastar)</strong> — barra de instrução aparece no topo e o cursor vira <code>grab</code></li>
-      <li>Passe o mouse sobre o bloco que deseja mover — ele fica destacado em azul</li>
-      <li>Clique e arraste — cursor vira <code>grabbing</code> e o bloco fica semitransparente</li>
-      <li>Uma <strong>linha verde</strong> aparece entre os elementos indicando onde o bloco vai cair</li>
-      <li>Solte o mouse para confirmar o reposicionamento</li>
-    </ol>
 
     <div class="callout">
-      O editor faz <strong>scroll automático</strong> enquanto você arrasta: a linha verde segue o destino e o editor rola suavemente para mostrar onde o elemento será inserido.
-    </div>
-
-    <table>
-      <thead><tr><th>Ação</th><th>Como fazer</th></tr></thead>
-      <tbody>
-        <tr><td>Subir nível (selecionar elemento pai)</td><td>Tecla <strong>↑</strong> (sem arrastar)</td></tr>
-        <tr><td>Descer nível (selecionar filho)</td><td>Tecla <strong>↓</strong> (sem arrastar)</td></tr>
-        <tr><td>Excluir elemento em hover</td><td>Tecla <strong>Del</strong> com elemento destacado</td></tr>
-        <tr><td>Desfazer</td><td><strong>Ctrl+Z</strong> no editor</td></tr>
-        <tr><td>Sair do modo</td><td><strong>ESC</strong></td></tr>
-      </tbody>
-    </table>
-
-    <div class="callout yellow">
-      A operação <strong>não cria HTML extra</strong>: apenas reposiciona o nó DOM existente. O layout original é preservado.
+      Duplicar, mover (antigo "Reorganizar blocos"), inserir bloco salvo e excluir ficam todos no <strong>🗺 Mapa de elementos</strong>.
     </div>
   </section>
 
   <!-- ── Mapa de elementos ── -->
   <section id="canvas-editor-map">
     <h2><span class="icon">🗺</span>Mapa de elementos</h2>
-    <p>Abre um painel lateral (300 px) mostrando a <strong>hierarquia de elementos</strong> da página aberta no editor Canvas. Permite navegar, reordenar, duplicar e excluir blocos diretamente pelo painel.</p>
+    <p>Abre um painel lateral (300 px) mostrando a <strong>hierarquia de elementos</strong> da página aberta no editor Canvas. Permite navegar, duplicar, mover (pelo painel ou direto na página, segurando <strong>M</strong>), inserir blocos salvos e excluir.</p>
 
     <h3>Estrutura do painel</h3>
     <p>Cada linha representa um bloco classificado — com ícone, rótulo e prévia do texto. A indentação indica a profundidade na hierarquia HTML (até 4 níveis).</p>
@@ -779,21 +718,23 @@ PROVA FINAL</pre>
         <tr><td>Passar o mouse sobre uma linha</td><td>Destaca o elemento em <strong>laranja</strong> no editor</td></tr>
         <tr><td>Clicar em uma linha</td><td>Seleciona o elemento (destaque verde pulsante) e abre ações</td></tr>
         <tr><td>Clicar em elemento no editor</td><td>Painel scrolla e destaca a linha correspondente automaticamente</td></tr>
-        <tr><td>Botão <strong>📑 Duplicar</strong></td><td>Insere cópia do bloco logo abaixo, marcada em vermelho no painel</td></tr>
+        <tr><td>Botão <strong>📑 Duplicar</strong></td><td>Insere a cópia do bloco logo abaixo (sem os <code>id</code>, para não repetir âncoras), marcada em vermelho no painel e já selecionada — é só segurar <strong>M</strong> e arrastá-la até o lugar</td></tr>
         <tr><td>Botão <strong>📋 Copiar HTML</strong></td><td>Copia o HTML limpo do elemento para o clipboard</td></tr>
         <tr><td>Botão <strong>✕</strong> na cópia</td><td>Remove a cópia do editor e do painel</td></tr>
       </tbody>
     </table>
 
-    <h3>Reordenar elementos com drag</h3>
+    <h3>Mover blocos (segurar M)</h3>
+    <p>Com o mapa aberto, segure <strong>M</strong> e arraste — pelas linhas do painel ou direto na página. Enquanto o M estiver segurado, o cursor vira <code>grab</code> e o bloco que vai ser pego fica destacado em <strong>azul</strong>.</p>
     <ol class="steps">
-      <li>Mantenha a tecla <strong>M</strong> pressionada — cursor do painel e editor mudam para <code>grab</code></li>
-      <li>Clique e arraste uma linha do painel — ela fica semitransparente</li>
-      <li>Uma <strong>linha verde</strong> aparece no painel indicando a posição destino</li>
-      <li>Simultaneamente, uma <strong>linha verde com brilho</strong> é inserida no editor mostrando onde o bloco vai cair</li>
-      <li>O editor faz <strong>scroll automático</strong> conforme você passa sobre linhas fora da área visível</li>
-      <li>Solte o mouse para confirmar — tanto o painel quanto o editor são atualizados</li>
+      <li><strong>No painel:</strong> arraste uma linha. A linha verde do painel e a <strong>linha verde com brilho</strong> no editor mostram onde o bloco vai cair (antes ou depois do bloco sob o mouse, no mesmo nível dele). Serve para tirar um bloco de dentro de outro ou levá-lo para outro nível.</li>
+      <li><strong>Na página:</strong> arraste o bloco. Ele troca de lugar com os blocos do mesmo nível, como no antigo "Reorganizar blocos". Se houver um bloco selecionado e o clique cair dentro dele, é ele que vai; senão vai o bloco mais interno sob o mouse.</li>
+      <li>Para pegar o bloco de fora (o card inteiro em vez do parágrafo), use <strong>M + ↑</strong>; <strong>M + ↓</strong> desce para o primeiro bloco de dentro.</li>
+      <li>Solte o mouse para confirmar. O editor rola sozinho até o destino, e o bloco movido continua selecionado para novos ajustes.</li>
     </ol>
+    <div class="callout">
+      Soltar fora da área onde o arraste começou (ou apertar <strong>ESC</strong> durante o arraste) cancela. Um bloco nunca vai para dentro dele mesmo.
+    </div>
 
     <h3>Excluir elemento</h3>
     <ol class="steps">
@@ -802,16 +743,21 @@ PROVA FINAL</pre>
     </ol>
 
     <div class="callout yellow">
-      <strong>Del</strong> funciona independentemente do foco — tanto com o cursor no painel quanto dentro do editor Canvas.
+      Com o mapa aberto, <strong>Del</strong> exclui o bloco selecionado e <strong>M</strong> não escreve no texto do editor, mesmo com o cursor dentro dele. Os campos da página do Canvas (como o título) continuam normais. Para voltar a digitar no editor, feche o mapa.
+    </div>
+
+    <div class="callout blue">
+      Os destaques (verde, laranja e azul) são desenhados por cima da página e <strong>não entram no HTML salvo</strong>, mesmo que a página seja salva com o mapa aberto. Depois de um <strong>Ctrl+Z</strong>, o mapa se refaz sozinho.
     </div>
 
     <table>
       <thead><tr><th>Atalho</th><th>Ação</th></tr></thead>
       <tbody>
-        <tr><td><strong>M</strong> (segurar)</td><td>Ativa modo drag no painel</td></tr>
+        <tr><td><strong>M</strong> (segurar) + arrastar</td><td>Move o bloco — pelo painel ou direto na página</td></tr>
+        <tr><td><strong>M + ↑ / ↓</strong></td><td>Sobe para o bloco de fora / desce para o de dentro</td></tr>
         <tr><td><strong>Del</strong></td><td>Exclui o elemento selecionado</td></tr>
         <tr><td><strong>Ctrl+Z</strong></td><td>Desfaz a última operação no editor</td></tr>
-        <tr><td><strong>ESC</strong></td><td>Fecha o painel</td></tr>
+        <tr><td><strong>ESC</strong></td><td>Cancela o arraste; sem arraste, fecha o painel</td></tr>
       </tbody>
     </table>
 
@@ -836,8 +782,7 @@ PROVA FINAL</pre>
     <table>
       <thead><tr><th>Ferramenta</th><th>Como</th></tr></thead>
       <tbody>
-        <tr><td>🗺 Mapa de elementos</td><td>Selecione a linha de referência, clique em <strong>➕ Inserir</strong>, escolha o bloco e depois <strong>⬆ Antes</strong> ou <strong>⬇ Depois</strong></td></tr>
-        <tr><td>✋ Reorganizar blocos</td><td>Escolha o bloco no seletor <strong>📦 inserir bloco salvo…</strong> da barra superior e clique num bloco da página — metade de cima insere antes, metade de baixo insere depois</td></tr>
+        <tr><td>🗺 Mapa de elementos</td><td>Selecione a linha de referência, clique em <strong>➕ Inserir</strong>, escolha o bloco e depois <strong>⬆ Antes</strong> ou <strong>⬇ Depois</strong>. O bloco inserido fica selecionado: segure <strong>M</strong> e arraste para ajustar o lugar.</td></tr>
       </tbody>
     </table>
 

@@ -84,6 +84,22 @@ select:disabled { opacity: 0.5; cursor: default; }
 
 .btn-full { width: 100%; padding: 7px; }
 
+/* Atalho de teclado ao lado do nome do botão (ex.: Mapa de elementos  [M] mover) */
+.kbd {
+  display: inline-block;
+  min-width: 14px;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid #45475a;
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  background: #1e1e2e;
+  color: #e2e8f0;
+  font: bold 10px/14px system-ui, sans-serif;
+  text-align: center;
+}
+.kbd-note { margin-left: 4px; font-weight: normal; opacity: .7; }
+
 .btn-icon {
   background: none;
   border: none;

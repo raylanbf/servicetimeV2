@@ -119,11 +119,9 @@
   <span class="small muted">Edição de páginas</span>
   <button id="btn-canvas-indent" class="btn btn-surface btn-full mt4">🔧  Aplicar recuo nos módulos</button>
   <span id="canvas-indent-status" class="small mt4" style="display:none"></span>
-  <button id="btn-canvas-dup" class="btn btn-surface btn-full mt4">📑  Duplicar bloco na página</button>
-  <button id="btn-canvas-move" class="btn btn-surface btn-full mt4">✋  Reorganizar blocos (arrastar)</button>
-  <button id="btn-canvas-map" class="btn btn-surface btn-full mt4">🗺  Mapa de elementos</button>
+  <button id="btn-canvas-map" class="btn btn-surface btn-full mt4" title="Segure M e arraste um bloco (no painel do mapa ou direto na página) para mover">🗺  Mapa de elementos <span class="kbd">M</span><span class="kbd-note">mover</span></button>
   <button id="btn-canvas-blocks" class="btn btn-surface btn-full mt4">📦  Blocos salvos</button>
-  <span class="small muted mt4" style="display:block;opacity:.6">Duplicar, reorganizar e mapa exigem uma página aberta no editor.</span>
+  <span class="small muted mt4" style="display:block;opacity:.6">O mapa exige uma página aberta no editor. Nele: 📑 duplicar, ➕ inserir bloco salvo, Del exclui e, segurando M, arrastar move o bloco.</span>
 
   <div class="divider"></div>
   <span class="small muted">Edição em escala</span>
@@ -360,7 +358,7 @@
     <button id="btn-back-blocks" class="btn-icon">←</button>
     <span class="view-title">Blocos Salvos</span>
   </div>
-  <p class="small muted" style="margin-top:0">Trechos de HTML reutilizáveis. Insira-os pela ferramenta <b>Reorganizar</b> ou <b>Mapa de elementos</b>, no local selecionado.</p>
+  <p class="small muted" style="margin-top:0">Trechos de HTML reutilizáveis. Insira-os pelo <b>Mapa de elementos</b> (➕ Inserir), no local selecionado.</p>
   <div id="blocks-saved-list" class="links-saved-list"></div>
   <div class="divider mt6"></div>
   <label class="field-label">Nome</label>

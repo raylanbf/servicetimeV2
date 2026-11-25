@@ -1231,422 +1231,6 @@ async function doFetchRevisions() {
   }
 }
 
-// ── Duplicar bloco no editor do Canvas (Camada 1) ────────────────────
-// Injeta no MAIN world (precisa do window.tinymce real da página) o modo de
-// seleção: destaca blocos, clica na origem e no destino, insere uma cópia limpa.
-async function doDuplicateBlock() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tabs[0]?.id) return;
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tabs[0].id },
-      world:  'MAIN',
-      func:   blockDuplicatorMain,
-    });
-  } catch (err) {
-    alert('Não foi possível ativar nesta página: ' + err.message);
-  }
-}
-
-function blockDuplicatorMain() {
-  if (window.__svcDupActive) return;
-
-  const ed = window.tinymce && (tinymce.activeEditor || (tinymce.editors && tinymce.editors[0]));
-  if (!ed || (ed.isHidden && ed.isHidden())) {
-    alert('Abra uma página no editor de conteúdo do Canvas em modo visual (Rich Content) e tente de novo.');
-    return;
-  }
-
-  const body = ed.getBody();
-  const doc  = body.ownerDocument;
-  const win  = doc.defaultView;
-  window.__svcDupActive = true;
-  doc.documentElement.style.cursor = 'copy';
-
-  let phase   = 'source';   // 'source' (origem) | 'dest' (destino)
-  let current = null;       // elemento destacado no momento
-  let srcHTML = null;       // HTML da origem, já limpo
-  const COLOR = { source: '#3b82f6', dest: '#22c55e' };
-
-  // Barra de instruções (no topo da página, fora do iframe do editor)
-  const bar = document.createElement('div');
-  bar.id = '__svc-dup-bar__';
-  Object.assign(bar.style, {
-    position: 'fixed', top: '0', left: '0', right: '0', zIndex: '2147483647',
-    background: '#1e1e2e', color: '#e2e8f0', font: '13px system-ui, sans-serif',
-    padding: '8px 14px', textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,.4)',
-  });
-  document.body.appendChild(bar);
-  function setBar() {
-    bar.innerHTML = phase === 'source'
-      ? '📑 <b>Duplicar bloco</b> — clique no bloco que quer copiar. <span style="opacity:.7">↑/↓ ajusta o nível · ESC cancela</span>'
-      : '📑 <b>Clique no destino</b> — a cópia entra logo abaixo dele. <span style="opacity:.7">↑/↓ ajusta · ESC cancela</span>';
-  }
-  setBar();
-
-  // Bloco mais interno sob o cursor (sobe nós inline até achar um bloco)
-  function blockOf(node) {
-    let el = node && node.nodeType === 3 ? node.parentElement : node;
-    while (el && el !== body) {
-      const d = win.getComputedStyle(el).display;
-      if (d && d.slice(0, 6) !== 'inline') return el;
-      el = el.parentElement;
-    }
-    return null;
-  }
-
-  function paint(el) {
-    if (!el) return;
-    el.__svcOutline = el.style.outline;
-    el.__svcOffset  = el.style.outlineOffset;
-    el.style.outline       = '2px solid ' + (phase === 'source' ? COLOR.source : COLOR.dest);
-    el.style.outlineOffset = '-2px';
-  }
-  function unpaint(el) {
-    if (!el) return;
-    el.style.outline       = el.__svcOutline || '';
-    el.style.outlineOffset = el.__svcOffset  || '';
-    delete el.__svcOutline; delete el.__svcOffset;
-  }
-  function setCurrent(el) {
-    if (el === current) return;
-    unpaint(current);
-    current = el;
-    paint(current);
-  }
-
-  // Remove ids e marcações internas do TinyMCE para não duplicar âncoras
-  function cleanHTML(html) {
-    const tmp = doc.createElement('div');
-    tmp.innerHTML = html;
-    tmp.querySelectorAll('script').forEach(n => n.remove());
-    tmp.querySelectorAll('[id]').forEach(n => n.removeAttribute('id'));
-    tmp.querySelectorAll('[data-mce-selected],[data-mce-bogus]').forEach(n => {
-      n.removeAttribute('data-mce-selected');
-      n.removeAttribute('data-mce-bogus');
-    });
-    return tmp.innerHTML;
-  }
-
-  function onMove(e) {
-    const blk = blockOf(e.target);
-    if (blk) setCurrent(blk);
-  }
-
-  function onDown(e) {
-    if (!current) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-
-    if (phase === 'source') {
-      srcHTML = cleanHTML(current.outerHTML);
-      unpaint(current);
-      current = null;
-      phase = 'dest';
-      setBar();
-      return;
-    }
-
-    const dest = current;
-    const run  = () => dest.insertAdjacentHTML('afterend', srcHTML);
-    if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run);
-    else run();
-    if (ed.nodeChanged) ed.nodeChanged();
-    if (ed.fire)        ed.fire('input');
-    if (ed.setDirty)    ed.setDirty(true);
-    flash('✓ Bloco duplicado! (Ctrl+Z desfaz)');
-    cleanup();
-  }
-
-  function onKey(e) {
-    if (e.key === 'Escape') { e.preventDefault(); cleanup(); return; }
-    if (!current) return;
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      const p = current.parentElement;
-      if (p && p !== body) setCurrent(p);
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      const child = [...current.children].find(c => c.nodeType === 1);
-      if (child) setCurrent(child);
-    }
-  }
-
-  function flash(msg) {
-    const t = document.createElement('div');
-    t.textContent = msg;
-    Object.assign(t.style, {
-      position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
-      background: '#166534', color: '#fff', padding: '10px 18px', borderRadius: '8px',
-      font: '13px system-ui', zIndex: '2147483647', boxShadow: '0 2px 10px rgba(0,0,0,.4)',
-    });
-    document.body.appendChild(t);
-    setTimeout(() => t.remove(), 2500);
-  }
-
-  function cleanup() {
-    unpaint(current);
-    doc.documentElement.style.cursor = '';
-    doc.removeEventListener('mousemove', onMove, true);
-    doc.removeEventListener('mousedown', onDown, true);
-    doc.removeEventListener('keydown', onKey, true);
-    document.removeEventListener('keydown', onKey, true);
-    bar.remove();
-    window.__svcDupActive = false;
-  }
-
-  doc.addEventListener('mousemove', onMove, true);
-  doc.addEventListener('mousedown', onDown, true);
-  doc.addEventListener('keydown', onKey, true);
-  document.addEventListener('keydown', onKey, true);
-}
-
-// ── Reorganizar blocos por arraste (drag-and-drop) ──────────────────
-async function doMoveBlocks() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tabs[0]?.id) return;
-  const { savedBlocks = [] } = await chrome.storage.local.get('savedBlocks');
-  try {
-    await chrome.scripting.executeScript({ target: { tabId: tabs[0].id }, world: 'MAIN', func: blockMoverMain, args: [savedBlocks] });
-  } catch (err) { alert('Não foi possível ativar nesta página: ' + err.message); }
-}
-
-function blockMoverMain(savedBlocks) {
-  savedBlocks = savedBlocks || [];
-  if (window.__svcMoveActive) return;
-  const ed = window.tinymce && (tinymce.activeEditor || (tinymce.editors && tinymce.editors[0]));
-  if (!ed || (ed.isHidden && ed.isHidden())) {
-    alert('Abra uma página no editor visual do Canvas e tente de novo.');
-    return;
-  }
-  const body = ed.getBody();
-  const doc  = body.ownerDocument;
-  const win  = doc.defaultView;
-  window.__svcMoveActive = true;
-  doc.documentElement.style.cursor = 'grab';
-
-  let current = null;    // bloco destacado no hover
-  let dragEl  = null;    // bloco sendo arrastado
-  let overEl  = null;    // irmão sob o cursor
-  let before  = false;   // soltar antes (true) / depois (false) do overEl
-  let dragging = false;
-  let downX = 0, downY = 0;
-  const THRESHOLD = 5;
-
-  // Modo "inserir bloco salvo": clique posiciona o snippet escolhido
-  let pendingHtml = null;  // HTML do bloco salvo aguardando clique
-  let insTarget   = null;  // bloco-alvo sob o cursor
-  let insBefore   = false; // inserir antes (true) / depois (false)
-
-  const BAR_NORMAL = '✋ <b>Reorganizar blocos</b> — arraste um bloco para mudar a ordem. <span style="opacity:.7">↑/↓ ajusta o que pega · a linha verde mostra onde cai · Ctrl+Z desfaz · ESC sai</span>';
-  const BAR_INSERT = '➕ <b>Inserir bloco salvo</b> — clique num bloco. <span style="opacity:.7">metade de cima = antes · metade de baixo = depois · ESC cancela</span>';
-
-  const bar = document.createElement('div');
-  bar.id = '__svc-move-bar__';
-  Object.assign(bar.style, { position:'fixed', top:'0', left:'0', right:'0', zIndex:'2147483647',
-    background:'#1e1e2e', color:'#e2e8f0', font:'13px system-ui,sans-serif', padding:'8px 14px',
-    textAlign:'center', boxShadow:'0 2px 8px rgba(0,0,0,.4)', cursor:'default' });
-  const barText = document.createElement('span');
-  barText.innerHTML = BAR_NORMAL;
-  bar.appendChild(barText);
-  const setBarNormal = () => { barText.innerHTML = BAR_NORMAL; };
-  const setBarInsert = () => { barText.innerHTML = BAR_INSERT; };
-
-  if (savedBlocks.length) {
-    const sel = document.createElement('select');
-    Object.assign(sel.style, { marginLeft:'10px', fontSize:'12px', padding:'2px 4px', borderRadius:'4px',
-      border:'1px solid #45475a', background:'#313244', color:'#e2e8f0', cursor:'pointer' });
-    sel.innerHTML = '<option value="">📦 inserir bloco salvo…</option>' +
-      savedBlocks.map((b, i) => `<option value="${i}">${(b.name || '').replace(/</g, '&lt;')}</option>`).join('');
-    sel.onchange = () => {
-      if (sel.value === '') { pendingHtml = null; setBarNormal(); doc.documentElement.style.cursor = 'grab'; return; }
-      pendingHtml = savedBlocks[+sel.value].html;
-      sel.value = '';
-      unpaint(current); current = null;
-      setBarInsert();
-      doc.documentElement.style.cursor = 'copy';
-    };
-    bar.appendChild(sel);
-  }
-  document.body.appendChild(bar);
-
-  // Linha de drop inline (inserida no DOM entre blocos, permite scrollIntoView)
-  const line = doc.createElement('div');
-  Object.assign(line.style, { height: '3px', background: '#22c55e', borderRadius: '2px',
-    margin: '2px 0', pointerEvents: 'none', boxShadow: '0 0 10px 3px rgba(34,197,94,0.6)' });
-
-  function blockOf(node) {
-    let el = node && node.nodeType === 3 ? node.parentElement : node;
-    while (el && el !== body) {
-      const d = win.getComputedStyle(el).display;
-      if (d && d.slice(0, 6) !== 'inline') return el;
-      el = el.parentElement;
-    }
-    return null;
-  }
-  function paint(el, color) {
-    if (!el) return;
-    el.__o = el.style.outline; el.__oo = el.style.outlineOffset;
-    el.style.outline = '2px solid ' + color; el.style.outlineOffset = '-2px';
-  }
-  function unpaint(el) {
-    if (!el) return;
-    el.style.outline = el.__o || ''; el.style.outlineOffset = el.__oo || '';
-    delete el.__o; delete el.__oo;
-  }
-  function setCurrent(el) {
-    if (el === current) return;
-    unpaint(current); current = el; paint(current, '#3b82f6');
-  }
-  function posLine(sib, isBefore) {
-    const prevSib = line.previousElementSibling;
-    if (isBefore) sib.before(line); else sib.after(line);
-    if (prevSib !== line.previousElementSibling) {
-      line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }
-  function flash(msg) {
-    const t = document.createElement('div'); t.textContent = msg;
-    Object.assign(t.style, { position:'fixed', bottom:'24px', left:'50%', transform:'translateX(-50%)',
-      background:'#166534', color:'#fff', padding:'10px 18px', borderRadius:'8px', font:'13px system-ui',
-      zIndex:'2147483647', boxShadow:'0 2px 10px rgba(0,0,0,.4)' });
-    document.body.appendChild(t); setTimeout(() => t.remove(), 2200);
-  }
-
-  function onMove(e) {
-    if (pendingHtml) {
-      const blk = blockOf(e.target);
-      if (!blk || blk === body) { line.remove(); insTarget = null; return; }
-      const r = blk.getBoundingClientRect();
-      insBefore = e.clientY < r.top + r.height / 2;
-      insTarget = blk;
-      posLine(blk, insBefore);
-      return;
-    }
-    if (dragEl && !dragging) {
-      if (Math.abs(e.clientX - downX) > THRESHOLD || Math.abs(e.clientY - downY) > THRESHOLD) {
-        dragging = true;
-        unpaint(current); current = null;
-        dragEl.style.opacity = '0.45';
-        doc.documentElement.style.cursor = 'grabbing';
-      } else return;
-    }
-    if (dragging) {
-      const sibs = [...dragEl.parentElement.children].filter(c => c.nodeType === 1 && c !== line && c !== dragEl);
-      let found = null;
-      for (const s of sibs) {
-        const r = s.getBoundingClientRect();
-        if (e.clientY >= r.top && e.clientY <= r.bottom) { found = s; break; }
-      }
-      if (!found) { overEl = null; line.remove(); return; }
-      const r = found.getBoundingClientRect();
-      before = (e.clientY < r.top + r.height / 2);
-      overEl = found;
-      posLine(found, before);
-      return;
-    }
-    const blk = blockOf(e.target);
-    if (blk) setCurrent(blk);
-  }
-
-  function onDown(e) {
-    if (pendingHtml) {
-      e.preventDefault(); e.stopPropagation();
-      if (insTarget) {
-        const target = insTarget, html = pendingHtml, isBefore = insBefore;
-        const run = () => target.insertAdjacentHTML(isBefore ? 'beforebegin' : 'afterend', html);
-        if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
-        if (ed.nodeChanged) ed.nodeChanged();
-        if (ed.fire) ed.fire('input');
-        if (ed.setDirty) ed.setDirty(true);
-        flash('✓ Bloco inserido! (Ctrl+Z desfaz)');
-      }
-      pendingHtml = null; insTarget = null; line.remove();
-      setBarNormal();
-      doc.documentElement.style.cursor = 'grab';
-      return;
-    }
-    if (!current) return;
-    e.preventDefault(); e.stopPropagation();
-    dragEl = current; downX = e.clientX; downY = e.clientY; dragging = false;
-  }
-
-  function onUp(e) {
-    if (!dragEl) return;
-    if (dragging) {
-      e.preventDefault(); e.stopPropagation();
-      dragEl.style.opacity = '';
-      doc.documentElement.style.cursor = 'grab';
-      line.remove();
-      if (overEl && overEl !== dragEl) {
-        const ref = before ? overEl : overEl.nextSibling;
-        if (ref !== dragEl) {
-          const run = () => dragEl.parentElement.insertBefore(dragEl, ref);
-          if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
-          if (ed.nodeChanged) ed.nodeChanged();
-          if (ed.fire) ed.fire('input');
-          if (ed.setDirty) ed.setDirty(true);
-          flash('✓ Bloco movido! (Ctrl+Z desfaz)');
-        }
-      }
-    }
-    dragEl = null; dragging = false; overEl = null;
-  }
-
-  function onKey(e) {
-    const tag = e.target && e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;   // não sequestrar teclas do seletor
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      if (pendingHtml) { pendingHtml = null; insTarget = null; line.remove(); setBarNormal(); doc.documentElement.style.cursor = 'grab'; return; }
-      cleanup(); return;
-    }
-    if (e.key === 'Delete' && current && !dragging) {
-      e.preventDefault();
-      const el = current;
-      unpaint(el); current = null;
-      const run = () => el.remove();
-      if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
-      if (ed.nodeChanged) ed.nodeChanged();
-      if (ed.fire) ed.fire('input');
-      if (ed.setDirty) ed.setDirty(true);
-      flash('🗑 Bloco excluído. (Ctrl+Z desfaz)');
-      return;
-    }
-    if (dragging || !current) return;
-    if (e.key === 'ArrowUp')   { e.preventDefault(); const p = current.parentElement; if (p && p !== body) setCurrent(p); }
-    if (e.key === 'ArrowDown') { e.preventDefault(); const c = [...current.children].find(x => x.nodeType === 1); if (c) setCurrent(c); }
-  }
-
-  function block(e) { e.preventDefault(); }
-
-  function cleanup() {
-    unpaint(current);
-    if (dragEl) dragEl.style.opacity = '';
-    doc.documentElement.style.cursor = '';
-    doc.removeEventListener('mousemove', onMove, true);
-    doc.removeEventListener('mousedown', onDown, true);
-    doc.removeEventListener('mouseup', onUp, true);
-    doc.removeEventListener('keydown', onKey, true);
-    doc.removeEventListener('dragstart', block, true);
-    doc.removeEventListener('selectstart', block, true);
-    document.removeEventListener('keydown', onKey, true);
-    document.removeEventListener('mouseup', onUp, true);
-    line.remove(); bar.remove();
-    window.__svcMoveActive = false;
-  }
-
-  doc.addEventListener('mousemove', onMove, true);
-  doc.addEventListener('mousedown', onDown, true);
-  doc.addEventListener('mouseup', onUp, true);
-  doc.addEventListener('keydown', onKey, true);
-  doc.addEventListener('dragstart', block, true);
-  doc.addEventListener('selectstart', block, true);
-  document.addEventListener('keydown', onKey, true);
-  document.addEventListener('mouseup', onUp, true);
-}
-
 // ── Mapa de elementos (Camada 2) ────────────────────────────────────
 async function doElementMap() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -1810,52 +1394,99 @@ function blockMapMain(savedBlocks) {
   }
 
   const MAX_DEPTH = 12;
+  const itemOf = el => items.find(it => it.el === el);
+
+  // ── Estado ──
+  let selected = null;                              // bloco selecionado (verde): é o que o M arrasta
+  let actionsRow = null, activeRow = null;
+  let hoverEl = null;                               // destaque de passagem: laranja (linha) ou azul (M na página)
+  let dragRow = null, dragEl = null, drop = null;   // arraste pelas linhas do painel; drop = { el, before }
+  let pDrag = null;                                 // arraste direto na página
+  let mKey = false, skipClick = false, closed = false;
+  const marks = new WeakMap();                      // blocos criados pelo mapa → 'cópia' | 'novo' (linha vermelha, com ✕)
+
+  // Linha verde no editor mostrando onde o bloco vai cair (sai do editor antes de qualquer gravação)
+  const editorLine = doc.createElement('div');
+  Object.assign(editorLine.style, { height: '3px', background: '#22c55e', margin: '2px 0', borderRadius: '2px',
+    boxShadow: '0 0 10px 3px rgba(34,197,94,0.6)', pointerEvents: 'none' });
+
   const items = [];
-  (function collect(parent, depth) {
-    [...parent.children].forEach(el => {
-      if (el.nodeType !== 1 || trivial(el)) return;
-      const cls = classify(el);
-      const leaf = isLeaf(el);
-      items.push({ el, depth, icon: cls.icon, label: cls.label, preview: leaf ? previewOf(el) : '' });
-      if (!leaf && depth < MAX_DEPTH) collect(el, depth + 1);
-    });
-  })(body, 0);
+  function collectItems() {
+    items.length = 0;
+    (function collect(parent, depth) {
+      [...parent.children].forEach(el => {
+        if (el.nodeType !== 1 || el === editorLine || trivial(el)) return;
+        const cls = classify(el);
+        const leaf = isLeaf(el);
+        items.push({ el, depth, icon: cls.icon, label: cls.label, preview: leaf ? previewOf(el) : '' });
+        if (!leaf && depth < MAX_DEPTH) collect(el, depth + 1);
+      });
+    })(body, 0);
+  }
+  collectItems();
 
   if (!items.length) { alert('Nenhum bloco reconhecido nesta página.'); return; }
 
   doc.documentElement.style.cursor = 'pointer';
 
-  let selected = null, actionsRow = null, activeRow = null;
-  let dragRow = null, dragEl = null, mKey = false;
   const pulseStyle = doc.createElement('style');
   pulseStyle.textContent = '@keyframes __svcMapPulse{0%,100%{box-shadow:0 0 0 3px #22c55e,0 0 6px 2px rgba(34,197,94,.45)}50%{box-shadow:0 0 0 6px #22c55e,0 0 24px 10px rgba(34,197,94,.9)}}'
     + ' iframe{pointer-events:none!important}';   // deixa o clique no vídeo "atravessar" para o <p> que o envolve
   (doc.head || doc.documentElement).appendChild(pulseStyle);
-  function paint(el, color, strong) {
+
+  // ── Destaques ──
+  // Desenhados numa camada presa ao <html> do editor, FORA do <body>: nunca entram no HTML
+  // salvo nem no Ctrl+Z. (Estilo inline no próprio bloco entrava — visto no TinyMCE 5 e 6.)
+  const layer = doc.createElement('div');
+  Object.assign(layer.style, { position: 'absolute', left: '0', top: '0', width: '0', height: '0',
+    pointerEvents: 'none', zIndex: '2147483646' });
+  doc.documentElement.appendChild(layer);
+  const slots = {};                                 // 'sel' | 'hover' | 'drag' → { el, box }
+  function paintSlot(slot, el, color, mode) {
+    clearSlot(slot);
     if (!el) return;
-    el.__mo = el.style.outline; el.__moo = el.style.outlineOffset;
-    el.__mbs = el.style.boxShadow; el.__man = el.style.animation;
-    el.style.outline = (strong ? '3px' : '2px') + ' solid ' + color;
-    el.style.outlineOffset = '2px';
-    if (strong) {
-      el.style.boxShadow = '0 0 0 3px ' + color + ', 0 0 16px 6px ' + color + 'aa';
-      el.style.animation = '__svcMapPulse .8s ease-in-out 3';
+    const box = doc.createElement('div');
+    Object.assign(box.style, { position: 'absolute', pointerEvents: 'none' });
+    if (mode === 'fade') {
+      Object.assign(box.style, { background: 'rgba(255,255,255,.55)', outline: '2px dashed ' + color, outlineOffset: '2px' });
     } else {
-      el.style.boxShadow = '0 0 0 2px ' + color;
+      const strong = mode === 'strong';
+      Object.assign(box.style, { outline: (strong ? '3px' : '2px') + ' solid ' + color, outlineOffset: '2px',
+        boxShadow: strong ? '0 0 0 3px ' + color + ', 0 0 16px 6px ' + color + 'aa' : '0 0 0 2px ' + color,
+        animation: strong ? '__svcMapPulse .8s ease-in-out 3' : '' });
+    }
+    layer.appendChild(box);
+    slots[slot] = { el, box };
+    placeBoxes();
+  }
+  function clearSlot(slot) {
+    if (!slots[slot]) return;
+    slots[slot].box.remove();
+    delete slots[slot];
+  }
+  function placeBoxes() {
+    for (const k in slots) {
+      const { el, box } = slots[k];
+      if (!el.isConnected) { box.style.display = 'none'; continue; }
+      const r = el.getBoundingClientRect();
+      Object.assign(box.style, { display: '', left: (r.left + win.scrollX) + 'px', top: (r.top + win.scrollY) + 'px',
+        width: r.width + 'px', height: r.height + 'px' });
     }
   }
-  function unpaint(el) {
-    if (!el) return;
-    el.style.outline = el.__mo || ''; el.style.outlineOffset = el.__moo || '';
-    el.style.boxShadow = el.__mbs || ''; el.style.animation = el.__man || '';
-    delete el.__mo; delete el.__moo; delete el.__mbs; delete el.__man;
+  let raf = 0;
+  (function follow() { placeBoxes(); raf = win.requestAnimationFrame(follow); })();   // acompanha rolagem e edição
+
+  function hover(el, color) {
+    hoverEl = el && el !== selected ? el : null;
+    if (hoverEl) paintSlot('hover', hoverEl, color, 'soft'); else clearSlot('hover');
   }
+
   function flash(msg) {
     const t = document.createElement('div'); t.textContent = msg;
     Object.assign(t.style, { position:'fixed', bottom:'24px', left:'50%', transform:'translateX(-50%)',
       background:'#166534', color:'#fff', padding:'10px 18px', borderRadius:'8px', font:'13px system-ui',
       zIndex:'2147483647', boxShadow:'0 2px 10px rgba(0,0,0,.4)' });
-    document.body.appendChild(t); setTimeout(() => t.remove(), 2000);
+    document.body.appendChild(t); setTimeout(() => t.remove(), 2400);
   }
   function cleanHTML(html) {
     const tmp = doc.createElement('div'); tmp.innerHTML = html;
@@ -1864,22 +1495,77 @@ function blockMapMain(savedBlocks) {
     tmp.querySelectorAll('[data-mce-selected],[data-mce-bogus]').forEach(n => { n.removeAttribute('data-mce-selected'); n.removeAttribute('data-mce-bogus'); });
     return tmp.innerHTML;
   }
-  function dupe(el, sourceRow) {
-    const html = cleanHTML(el.outerHTML);
-    let clone = null;
-    const run = () => { el.insertAdjacentHTML('afterend', html); clone = el.nextElementSibling; };
+
+  // Toda mudança passa pelo undoManager do TinyMCE: Ctrl+Z desfaz.
+  function commit(run) {
     if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
     if (ed.nodeChanged) ed.nodeChanged();
     if (ed.fire) ed.fire('input');
     if (ed.setDirty) ed.setDirty(true);
-    flash('✓ Bloco duplicado! (Ctrl+Z desfaz)');
+  }
+
+  // ── Seleção ──
+  // from: 'panel' rola a página até o bloco; 'page' rola o painel até a linha.
+  function selectEl(el, from) {
+    selected = el;
+    if (hoverEl === el) hover(null);
+    paintSlot('sel', el, '#22c55e', 'strong');
+    const it = itemOf(el);
+    setActiveRow(it ? it.row : null);
+    if (it) openActions(it.row, el); else closeActions();
+    if (from === 'panel') el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (from === 'page' && it) it.row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  function clearSelection() {
+    selected = null;
+    clearSlot('sel');
+    setActiveRow(null);
+    closeActions();
+  }
+  function setActiveRow(row) {
+    if (activeRow && activeRow !== row) activeRow.style.background = activeRow.__origBg || '';
+    activeRow = row;
+    if (row) { row.__origBg = row.style.background; row.style.background = 'rgba(34,197,94,0.15)'; }
+  }
+  function parentItem(el) {
+    for (let n = el.parentElement; n && n !== body; n = n.parentElement) if (itemOf(n)) return n;
+    return null;
+  }
+  function firstChildItem(el) {
+    const it = items.find(x => x.el !== el && el.contains(x.el));
+    return it ? it.el : null;
+  }
+  // Bloco que o M pega na página: o selecionado, se o clique cair dentro dele; senão o bloco do mapa mais interno.
+  function pickAt(target) {
+    if (selected && selected.isConnected && selected.contains(target)) return selected;
+    for (let n = target; n && n !== body; n = n.parentElement) if (itemOf(n)) return n;
+    return null;
+  }
+
+  // ── Mudanças no editor ──
+  function dupe(el) {
+    const html = cleanHTML(el.outerHTML);
+    let clone = null;
+    commit(() => { el.insertAdjacentHTML('afterend', html); clone = el.nextElementSibling; });
     if (!clone) return;
-    if (actionsRow) { actionsRow.remove(); actionsRow = null; }
-    // Linha da cópia entra logo abaixo do original, marcada em vermelho e com ✕
-    const cls = classify(clone) || { icon: '📄', label: 'Bloco' };
-    const dupRow = buildRow({ el: clone, icon: cls.icon, label: cls.label, preview: txt(clone).slice(0, 45), depth: sourceRow.__depth || 0, isDup: true });
-    sourceRow.insertAdjacentElement('afterend', dupRow);
-    clone.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    marks.set(clone, 'cópia');
+    refresh();
+    selectEl(clone, 'panel');   // a cópia já fica selecionada: é só segurar M e arrastar até o lugar
+    flash('✓ Bloco duplicado — segure M e arraste para levá-lo ao lugar. (Ctrl+Z desfaz)');
+  }
+  function moveBlock(el, target, before) {
+    if (!el || !target || el === target || el.contains(target) || !body.contains(target)) return;   // nunca dentro dele mesmo
+    if ((before ? target.previousElementSibling : target.nextElementSibling) === el) return;        // já estava aí
+    commit(() => { if (before) target.before(el); else target.after(el); });
+    refresh();
+    selectEl(el, 'page');       // o bloco movido fica selecionado: dá para continuar ajustando
+    flash('↕ Bloco movido! (Ctrl+Z desfaz)');
+  }
+  function removeBlock(el, msg) {
+    if (selected === el) clearSelection();
+    commit(() => el.remove());
+    refresh();
+    flash(msg);
   }
   function copyHtml(el) {
     const html = cleanHTML(el.outerHTML);
@@ -1944,30 +1630,35 @@ function blockMapMain(savedBlocks) {
       if (ed.setDirty) ed.setDirty(true);
     } catch (e) {}
   }
-  // Cria a linha do vídeo recém-inserido pelo Studio no painel do mapa.
-  function addVideoRow(iframe, sourceRow, depth) {
+  // Põe no mapa o vídeo recém-inserido pelo Studio (marcado "novo").
+  function addVideoRow(iframe, srcEl) {
     let videoEl = iframe;
     const p = iframe.closest && iframe.closest('p');
     if (p && body.contains(p)) videoEl = p;
     centerVideo(iframe);                                        // centraliza por padrão
-    if (items.find(it => it.el === videoEl)) return;            // já listado
-    const preview = previewOf(videoEl);
-    const row = buildRow({ el: videoEl, icon: '▶', label: 'Vídeo', preview, depth: depth || 0, isDup: true, tag: 'novo' });
-    if (sourceRow && sourceRow.parentNode) sourceRow.insertAdjacentElement('afterend', row);
-    else panel.appendChild(row);
-    items.push({ el: videoEl, row, depth: depth || 0, icon: '▶', label: 'Vídeo', preview });
+    if (closed) return;
+    marks.set(videoEl, 'novo');
+    refresh();
+    if (!itemOf(videoEl)) {
+      // Caiu dentro de um bloco que o mapa mostra fechado: a linha entra à mão, logo abaixo da origem.
+      const src = itemOf(srcEl);
+      const it = { el: videoEl, icon: '▶', label: 'Vídeo', preview: previewOf(videoEl), depth: src ? src.depth + 1 : 0 };
+      it.row = buildRow(it);
+      if (src) lastRowOf(src.row).after(it.row); else panel.appendChild(it.row);
+      items.push(it);
+    }
     try { videoEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
     flash('▶ Vídeo adicionado ao mapa!');
   }
   // Observa o editor e, quando o Studio inserir um vídeo novo, cria a linha dele no mapa.
-  function watchForStudioVideo(sourceRow, depth) {
+  function watchForStudioVideo(srcEl) {
     if (typeof MutationObserver === 'undefined') return;
     const before = new Set([...body.querySelectorAll('iframe')]);
     const obs = new MutationObserver(() => {
       const fresh = [...body.querySelectorAll('iframe')].find(f => !before.has(f));
       if (!fresh) return;
       obs.disconnect();
-      addVideoRow(fresh, sourceRow, depth);
+      addVideoRow(fresh, srcEl);
     });
     obs.observe(body, { childList: true, subtree: true });
     setTimeout(() => obs.disconnect(), 180000);
@@ -2006,21 +1697,19 @@ function blockMapMain(savedBlocks) {
       setTimeout(poll, 120);
     })();
   }
-  function studioInsert(el, sourceRow) {
+  function studioInsert(el) {
     if (ed.focus) ed.focus();
     const reveal = findRevealArea(el);
-    let rowDepth = (sourceRow && sourceRow.__depth) || 0;
     if (reveal) {
       const det = (reveal.closest && reveal.closest('details')) || (reveal.tagName === 'DETAILS' ? reveal : null);
       if (det && !det.hasAttribute('open')) det.setAttribute('open', 'open');   // abre pra poder inserir dentro
       const target = [...reveal.querySelectorAll('p')].find(p => !txt(p)) || reveal;
       placeCursorInside(target);
       if (det) collapseWhenVideoArrives(det, reveal);
-      rowDepth += 1;
     } else {
       placeCursorAfter(el);
     }
-    watchForStudioVideo(sourceRow, rowDepth);
+    watchForStudioVideo(el);
     tryOpenStudio(ok => {
       const onde = reveal ? 'dentro do bloco (vai ficar escondido)' : 'colado abaixo deste bloco';
       flash(ok
@@ -2029,6 +1718,7 @@ function blockMapMain(savedBlocks) {
     });
   }
 
+  // ── Painel ──
   const panel = document.createElement('div');
   Object.assign(panel.style, { position:'fixed', top:'0', left:'0', width:'300px', maxHeight:'100vh',
     overflowY:'auto', background:'#1e1e2e', color:'#e2e8f0', font:'12px system-ui,sans-serif',
@@ -2046,122 +1736,158 @@ function blockMapMain(savedBlocks) {
   panel.appendChild(head);
 
   const hint = document.createElement('div');
-  Object.assign(hint.style, { padding: '3px 12px 5px', fontSize: '10px', opacity: '.4', background: '#11111b', borderBottom: '1px solid #313244' });
-  hint.textContent = 'Clique num elemento da página para achá-lo aqui · Segure M + arraste para reordenar';
+  Object.assign(hint.style, { padding: '4px 12px 6px', fontSize: '10px', lineHeight: '1.45', opacity: '.6', background: '#11111b', borderBottom: '1px solid #313244' });
+  hint.innerHTML = 'Clique num bloco (aqui ou na página) para selecionar.<br>'
+    + '<b>Segure M</b> e arraste — aqui ou direto na página — para mover · M + ↑/↓ troca o nível · Del exclui · ESC fecha';
   panel.appendChild(hint);
 
   const dropLine = document.createElement('div');
   Object.assign(dropLine.style, { height: '2px', background: '#22c55e', margin: '0', display: 'none', pointerEvents: 'none' });
 
-  const editorLine = doc.createElement('div');
-  Object.assign(editorLine.style, { height: '3px', background: '#22c55e', margin: '2px 0', borderRadius: '2px',
-    boxShadow: '0 0 10px 3px rgba(34,197,94,0.6)', pointerEvents: 'none' });
+  // Refaz a lista a partir do editor depois de cada mudança: o painel nunca fica fora de ordem.
+  function refresh() {
+    if (closed) return;
+    const top = panel.scrollTop;
+    closeActions();
+    hover(null);
+    panel.querySelectorAll('[data-map-row]').forEach(r => r.remove());
+    activeRow = null;
+    collectItems();
+    items.forEach(it => { it.row = buildRow(it); panel.appendChild(it.row); });
+    panel.scrollTop = top;
+    if (selected && !selected.isConnected) clearSelection();
+    else if (selected && itemOf(selected)) setActiveRow(itemOf(selected).row);
+  }
+  // Última linha do "galho" de uma linha (ela + as linhas dos blocos de dentro dela).
+  function lastRowOf(row) {
+    let last = row;
+    for (let n = row.nextElementSibling; n; n = n.nextElementSibling) {
+      if (!n.dataset || !n.dataset.mapRow) continue;   // barra de ações, linha de soltar
+      if (n.__depth > row.__depth) last = n; else break;
+    }
+    return last;
+  }
+  // Mostra no editor onde o bloco vai cair; rola só quando a posição muda.
+  function showEditorLine(target, before) {
+    const prev = editorLine.isConnected ? editorLine.previousElementSibling : undefined;
+    if (before) target.before(editorLine); else target.after(editorLine);
+    if (prev !== editorLine.previousElementSibling) editorLine.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 
+  // ── Arrastar pelas linhas do painel (M + arrastar) ──
   function cancelDrag() {
     if (dragRow) dragRow.style.opacity = '';
     document.body.style.cursor = '';
-    panel.style.cursor = '';
-    dragRow = null; dragEl = null;
+    panel.style.cursor = mKey ? 'grab' : '';
+    dragRow = null; dragEl = null; drop = null;
     dropLine.style.display = 'none';
     editorLine.remove();
   }
-
   function onDragMove(e) {
     if (!dragRow) return;
+    if (!e.buttons) { cancelDrag(); return; }        // o botão foi solto fora da página
+    drop = null;
     const rows = [...panel.querySelectorAll('[data-map-row]')].filter(r => r !== dragRow);
-    let placed = false;
-    for (const r of rows) {
-      const rect = r.getBoundingClientRect();
-      if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-        const before = e.clientY < rect.top + rect.height / 2;
-        if (before) r.before(dropLine); else r.after(dropLine);
-        dropLine.style.display = 'block';
-        const targetEl = r.__el;
-        if (targetEl && targetEl !== dragEl) {
-          const wasPlaced = !!editorLine.parentNode;
-          const prevSibling = editorLine.previousElementSibling;
-          if (before) targetEl.before(editorLine); else targetEl.after(editorLine);
-          // Rola o editor para mostrar onde o elemento vai cair, só quando muda de posição
-          if (!wasPlaced || prevSibling !== editorLine.previousElementSibling) {
-            editorLine.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          }
-        }
-        placed = true;
-        break;
-      }
+    const r = rows.find(x => { const b = x.getBoundingClientRect(); return e.clientY >= b.top && e.clientY <= b.bottom; });
+    const target = r && r.__el;
+    if (!target || target === dragEl || dragEl.contains(target)) {   // não dá para pôr um bloco dentro dele mesmo
+      dropLine.style.display = 'none'; editorLine.remove(); return;
     }
-    if (!placed) { dropLine.style.display = 'none'; editorLine.remove(); }
+    const b = r.getBoundingClientRect();
+    const before = e.clientY < b.top + b.height / 2;
+    drop = { el: target, before };                    // o mesmo destino que a linha verde do editor mostra
+    if (before) r.before(dropLine); else lastRowOf(r).after(dropLine);
+    dropLine.style.display = 'block';
+    showEditorLine(target, before);
   }
-
   function onDragDrop() {
     if (!dragRow) return;
-    const next = dropLine.nextElementSibling;
-    const prev = dropLine.previousElementSibling;
-    if (dropLine.parentNode === panel) {
-      const targetRow = (next && next.dataset && next.dataset.mapRow) ? next
-        : (prev && prev.dataset && prev.dataset.mapRow) ? prev : null;
-      if (targetRow && targetRow !== dragRow) {
-        const targetEl = targetRow.__el;
-        const before = next === targetRow;
-        if (targetEl && dragEl && targetEl !== dragEl) {
-          const run = () => { if (before) targetEl.before(dragEl); else targetEl.after(dragEl); };
-          if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
-          if (ed.nodeChanged) ed.nodeChanged();
-          if (ed.fire) ed.fire('input');
-          if (ed.setDirty) ed.setDirty(true);
-          if (before) targetRow.before(dragRow); else targetRow.after(dragRow);
-          flash('↕ Bloco movido! (Ctrl+Z desfaz)');
-        }
-      }
-    }
-    cancelDrag();
+    const d = drop, el = dragEl;
+    cancelDrag();                                     // tira as linhas antes de mexer no editor
+    if (d) moveBlock(el, d.el, d.before);
   }
 
-  function buildRow({ el, icon, label, preview, depth, isDup, tag }) {
+  // ── Arrastar direto na página (M + arrastar o bloco) ──
+  function cancelPageDrag() {
+    if (!pDrag) return;
+    pDrag = null;
+    clearSlot('drag');
+    editorLine.remove();
+    doc.documentElement.style.cursor = mKey ? 'grab' : 'pointer';
+  }
+  function onPageDown(e) {
+    if (!mKey || e.button !== 0) { skipClick = false; return; }
+    e.preventDefault(); e.stopPropagation();          // nada de cursor de texto nem seleção no editor
+    skipClick = true;                                 // M + clique não muda a seleção
+    const el = pickAt(e.target);
+    if (el) pDrag = { el, x: e.clientX, y: e.clientY, moving: false, over: null, before: false };
+  }
+  function onPageMove(e) {
+    if (!pDrag) { if (mKey && !dragRow) hover(pickAt(e.target), '#3b82f6'); return; }
+    if (!e.buttons) { cancelPageDrag(); return; }
+    if (!pDrag.moving) {
+      if (Math.abs(e.clientX - pDrag.x) <= 5 && Math.abs(e.clientY - pDrag.y) <= 5) return;
+      pDrag.moving = true;
+      hover(null);
+      paintSlot('drag', pDrag.el, '#3b82f6', 'fade');
+      doc.documentElement.style.cursor = 'grabbing';
+    }
+    e.preventDefault();
+    // Como no antigo "Reorganizar": troca de lugar com os blocos do mesmo nível.
+    const sibs = [...pDrag.el.parentElement.children].filter(c => c !== editorLine && c !== pDrag.el);
+    const over = sibs.find(s => { const r = s.getBoundingClientRect(); return e.clientY >= r.top && e.clientY <= r.bottom; });
+    if (!over) { pDrag.over = null; editorLine.remove(); return; }
+    const r = over.getBoundingClientRect();
+    pDrag.over = over;
+    pDrag.before = e.clientY < r.top + r.height / 2;
+    showEditorLine(over, pDrag.before);
+  }
+  function onPageUp(e) {
+    if (!pDrag) return;
+    const d = pDrag;
+    cancelPageDrag();
+    if (!d.moving) return;
+    e.preventDefault(); e.stopPropagation();
+    if (d.over) moveBlock(d.el, d.over, d.before);
+  }
+  // Soltar o botão fora da área onde o arraste começou cancela.
+  function onInnerUp(e) { if (dragRow) cancelDrag(); onPageUp(e); }
+  function onOuterUp() { if (pDrag) cancelPageDrag(); onDragDrop(); }
+
+  function buildRow(it) {
+    const { el, icon, label, preview, depth } = it;
+    const tag = marks.get(el);
     const row = document.createElement('div');
     row.__depth = depth;
     row.__el = el;
     row.dataset.mapRow = '1';
     Object.assign(row.style, { padding: '6px 12px 6px ' + (12 + Math.min(depth, 7) * 12) + 'px', cursor: 'pointer',
       borderBottom: '1px solid #28283b', display: 'flex', alignItems: 'center', gap: '6px',
-      background: isDup ? 'rgba(239,68,68,0.18)' : '' });
+      background: tag ? 'rgba(239,68,68,0.18)' : '' });
     const info = document.createElement('div');
     Object.assign(info.style, { flex: '1', minWidth: '0', display: 'flex', flexDirection: 'column', gap: '2px' });
     info.innerHTML = '<span>' + icon + ' <b>' + label + '</b>' +
-      (isDup ? ' <span style="color:#f87171;font-size:10px">(' + (tag || 'cópia') + ')</span>' : '') + '</span>' +
+      (tag ? ' <span style="color:#f87171;font-size:10px">(' + tag + ')</span>' : '') + '</span>' +
       (preview ? '<span style="opacity:.55;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + preview.replace(/</g, '&lt;') + '</span>' : '');
     row.appendChild(info);
-    row.onmouseenter = () => { if (el !== selected && !dragRow) paint(el, '#f59e0b'); };
-    row.onmouseleave = () => { if (el !== selected && !dragRow) unpaint(el); };
-    row.onclick = () => {
-      if (selected && selected !== el) unpaint(selected);
-      selected = el;
-      paint(selected, '#22c55e', true);
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setActiveRow(row);
-      openActions(row, el);
-    };
-    if (isDup) {
+    row.onmouseenter = () => { if (!dragRow && !pDrag) hover(el, '#f59e0b'); };
+    row.onmouseleave = () => { if (!dragRow && !pDrag && hoverEl === el) hover(null); };
+    row.onclick = () => selectEl(el, 'panel');
+    if (tag) {
       const x = document.createElement('button');
       x.textContent = '✕';
       x.title = 'Excluir este bloco do editor';
       Object.assign(x.style, { background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '14px', flexShrink: '0', padding: '0 4px' });
       x.onclick = (e) => {
         e.stopPropagation();
-        if (selected === el) { unpaint(el); selected = null; } else { unpaint(el); }
-        const run = () => el.remove();
-        if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
-        if (ed.nodeChanged) ed.nodeChanged();
-        if (ed.fire) ed.fire('input');
-        if (ed.setDirty) ed.setDirty(true);
-        row.remove();
-        flash('🗑 Cópia excluída.');
+        removeBlock(el, (tag === 'cópia' ? '🗑 Cópia excluída.' : '🗑 Bloco excluído.') + ' (Ctrl+Z desfaz)');
       };
       row.appendChild(x);
     }
     row.addEventListener('mousedown', e => {
-      if (!mKey) return;
+      if (!mKey || e.button !== 0) return;
       e.preventDefault(); e.stopPropagation();
+      hover(null);
       dragRow = row; dragEl = el;
       row.style.opacity = '0.45';
       document.body.style.cursor = 'grabbing';
@@ -2169,8 +1895,11 @@ function blockMapMain(savedBlocks) {
     return row;
   }
 
+  function closeActions() {
+    if (actionsRow) { actionsRow.remove(); actionsRow = null; }
+  }
   function openActions(afterRow, el) {
-    if (actionsRow) actionsRow.remove();
+    closeActions();
     actionsRow = document.createElement('div');
     Object.assign(actionsRow.style, { display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '6px 12px', background: '#181825' });
     const mk = (label, fn) => {
@@ -2178,10 +1907,10 @@ function blockMapMain(savedBlocks) {
       Object.assign(b.style, { flex: '1 1 64px', minWidth: '64px', padding: '5px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: '#313244', color: '#e2e8f0', fontSize: '11px' });
       b.onclick = fn; return b;
     };
-    actionsRow.appendChild(mk('📑 Duplicar', () => dupe(el, afterRow)));
+    actionsRow.appendChild(mk('📑 Duplicar', () => dupe(el)));
     actionsRow.appendChild(mk('📋 Copiar', () => copyHtml(el)));
     actionsRow.appendChild(mk('➕ Inserir', () => openInsertPicker(afterRow, el)));
-    actionsRow.appendChild(mk('🎬 Studio', () => studioInsert(el, afterRow)));
+    actionsRow.appendChild(mk('🎬 Studio', () => studioInsert(el)));
     actionsRow.appendChild(mk('💾 Salvar', () => saveBlock(el)));
     afterRow.insertAdjacentElement('afterend', actionsRow);
   }
@@ -2208,7 +1937,7 @@ function blockMapMain(savedBlocks) {
 
   // Escolhe qual bloco salvo inserir (substitui a barra de ações por uma lista)
   function openInsertPicker(afterRow, el) {
-    if (actionsRow) { actionsRow.remove(); actionsRow = null; }
+    closeActions();
     if (!savedBlocks.length) { flash('Nenhum bloco salvo. Use 📦 Blocos salvos.'); return; }
     const pick = document.createElement('div');
     Object.assign(pick.style, { padding: '6px 12px', background: '#181825' });
@@ -2223,7 +1952,7 @@ function blockMapMain(savedBlocks) {
         marginBottom: '3px', borderRadius: '4px', border: 'none', cursor: 'pointer',
         background: '#313244', color: '#e2e8f0', fontSize: '11px',
         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
-      btn.onclick = () => choosePosition(pick, afterRow, el, b.html);
+      btn.onclick = () => choosePosition(pick, el, b.html);
       pick.appendChild(btn);
     });
     actionsRow = pick;                    // mantém a referência para o cleanup remover
@@ -2231,7 +1960,7 @@ function blockMapMain(savedBlocks) {
   }
 
   // Pergunta antes/depois e insere
-  function choosePosition(container, afterRow, el, html) {
+  function choosePosition(container, el, html) {
     container.innerHTML = '';
     const t = document.createElement('div');
     t.textContent = 'Inserir onde?';
@@ -2242,111 +1971,119 @@ function blockMapMain(savedBlocks) {
     const mkb = (label, pos) => {
       const b = document.createElement('button'); b.textContent = label;
       Object.assign(b.style, { flex: '1', padding: '5px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: '#313244', color: '#e2e8f0', fontSize: '11px' });
-      b.onclick = () => insertSnippet(afterRow, el, html, pos); return b;
+      b.onclick = () => insertSnippet(el, html, pos); return b;
     };
     row.appendChild(mkb('⬆ Antes', 'before'));
     row.appendChild(mkb('⬇ Depois', 'after'));
     container.appendChild(row);
   }
 
-  function insertSnippet(afterRow, el, html, pos) {
+  function insertSnippet(el, html, pos) {
     let inserted = null;
-    const run = () => {
+    commit(() => {
       el.insertAdjacentHTML(pos === 'before' ? 'beforebegin' : 'afterend', html);
       inserted = pos === 'before' ? el.previousElementSibling : el.nextElementSibling;
-    };
-    if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
-    if (ed.nodeChanged) ed.nodeChanged();
-    if (ed.fire) ed.fire('input');
-    if (ed.setDirty) ed.setDirty(true);
+    });
+    if (inserted) marks.set(inserted, 'novo');   // linha vermelha "novo", removível pelo ✕
+    refresh();
+    if (inserted) selectEl(inserted, 'panel');
     flash('✓ Bloco inserido! (Ctrl+Z desfaz)');
-    if (actionsRow) { actionsRow.remove(); actionsRow = null; }
-    if (!inserted) return;
-    // Cria uma linha no painel para o bloco recém-inserido (marcada "novo", removível)
-    const cls = classify(inserted) || { icon: '📄', label: 'Bloco' };
-    const item = items.find(it => it.el === el);
-    const depth = item ? item.depth : (afterRow.__depth || 0);
-    const newRow = buildRow({ el: inserted, icon: cls.icon, label: cls.label, preview: txt(inserted).slice(0, 45), depth, isDup: true, tag: 'novo' });
-    if (pos === 'before') afterRow.insertAdjacentElement('beforebegin', newRow);
-    else afterRow.insertAdjacentElement('afterend', newRow);
-    items.push({ el: inserted, row: newRow, depth, icon: cls.icon, label: cls.label, preview: txt(inserted).slice(0, 45) });
-    inserted.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-
-  function setActiveRow(row) {
-    if (activeRow && activeRow !== row) activeRow.style.background = activeRow.__origBg || '';
-    activeRow = row;
-    if (row) { row.__origBg = row.style.background; row.style.background = 'rgba(34,197,94,0.15)'; }
-  }
-
-  function selectRowFromEditor(item) {
-    if (selected && selected !== item.el) unpaint(selected);
-    selected = item.el;
-    paint(selected, '#22c55e', true);
-    setActiveRow(item.row);
-    item.row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    openActions(item.row, item.el);
   }
 
   function onEditorClick(e) {
-    let target = e.target;
-    while (target && target !== body) {
-      const item = items.find(it => it.el === target);
-      if (item) { selectRowFromEditor(item); break; }
-      target = target.parentElement;
+    if (skipClick) { skipClick = false; return; }
+    for (let n = e.target; n && n !== body; n = n.parentElement) {
+      if (itemOf(n)) { selectEl(n, 'page'); return; }
     }
   }
-  body.addEventListener('click', onEditorClick, true);
 
-  items.forEach(it => {
-    it.row = buildRow({ el: it.el, icon: it.icon, label: it.label, preview: it.preview, depth: it.depth, isDup: false });
-    panel.appendChild(it.row);
-  });
+  items.forEach(it => { it.row = buildRow(it); panel.appendChild(it.row); });
 
+  // ── Teclado ──
+  const isM = e => (e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.altKey && !e.metaKey;
+  const inField = e => { const t = e.target; return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT'); };
   function onKey(e) {
-    if (e.key === 'Escape') { cleanup(); return; }
-    if (e.key === 'Delete' && selected) {
+    if (e.key === 'Escape') {
       e.preventDefault();
-      const el = selected;
-      const item = items.find(it => it.el === el);
-      unpaint(el); selected = null;
-      if (activeRow) { activeRow.style.background = activeRow.__origBg || ''; activeRow = null; }
-      if (actionsRow) { actionsRow.remove(); actionsRow = null; }
-      if (item && item.row) item.row.remove();
-      const run = () => el.remove();
-      if (ed.undoManager && ed.undoManager.transact) ed.undoManager.transact(run); else run();
-      if (ed.nodeChanged) ed.nodeChanged();
-      if (ed.fire) ed.fire('input');
-      if (ed.setDirty) ed.setDirty(true);
-      flash('🗑 Bloco excluído. (Ctrl+Z desfaz)');
+      if (dragRow || pDrag) { cancelDrag(); cancelPageDrag(); } else cleanup();
       return;
     }
-    if (e.key === 'm' || e.key === 'M') { mKey = true; panel.style.cursor = 'grab'; doc.documentElement.style.cursor = 'grab'; }
+    if (inField(e)) return;                           // campos do Canvas (título da página etc.) seguem normais
+    if (isM(e)) {
+      e.preventDefault();                             // com o mapa aberto, M é o atalho de mover: não escreve "m" no texto
+      if (!mKey) {
+        mKey = true;
+        panel.style.cursor = 'grab';
+        if (!pDrag) doc.documentElement.style.cursor = 'grab';
+      }
+      return;
+    }
+    if (mKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      // M + ↑/↓: sobe ou desce um nível no bloco que o M vai pegar
+      e.preventDefault();
+      const base = hoverEl || selected;
+      const next = base && (e.key === 'ArrowUp' ? parentItem(base) : firstChildItem(base));
+      if (next) selectEl(next, 'page');
+      return;
+    }
+    if (e.key === 'Delete' && selected) {
+      e.preventDefault();
+      removeBlock(selected, '🗑 Bloco excluído. (Ctrl+Z desfaz)');
+    }
+  }
+  // Soltar o M não interrompe um arraste já começado: ele termina ao soltar o mouse.
+  function releaseM() {
+    if (!mKey) return;
+    mKey = false;
+    if (!dragRow && !pDrag) hover(null);
+    panel.style.cursor = '';
+    if (!pDrag) doc.documentElement.style.cursor = 'pointer';
   }
   function onKeyUp(e) {
-    if (e.key === 'm' || e.key === 'M') { mKey = false; panel.style.cursor = ''; doc.documentElement.style.cursor = 'pointer'; cancelDrag(); }
+    if (e.key === 'm' || e.key === 'M') releaseM();
   }
+  // Ctrl+Z / Ctrl+Y do editor trocam os blocos por outros: o mapa é refeito.
+  function onEditorUndo() { setTimeout(refresh, 0); }
+
   function cleanup() {
-    items.forEach(it => unpaint(it.el));
-    unpaint(selected);
-    doc.documentElement.style.cursor = '';
+    closed = true;
+    cancelDrag();
+    cancelPageDrag();
+    win.cancelAnimationFrame(raf);
+    layer.remove();
+    editorLine.remove();
     pulseStyle.remove();
+    doc.documentElement.style.cursor = '';
     document.removeEventListener('keydown', onKey, true);
     document.removeEventListener('keyup', onKeyUp, true);
     document.removeEventListener('mousemove', onDragMove, true);
-    document.removeEventListener('mouseup', onDragDrop, true);
+    document.removeEventListener('mouseup', onOuterUp, true);
     doc.removeEventListener('keydown', onKey, true);
+    doc.removeEventListener('keyup', onKeyUp, true);
+    doc.removeEventListener('mousedown', onPageDown, true);
+    doc.removeEventListener('mousemove', onPageMove, true);
+    doc.removeEventListener('mouseup', onInnerUp, true);
     body.removeEventListener('click', onEditorClick, true);
-    cancelDrag();
+    window.removeEventListener('blur', releaseM);
+    win.removeEventListener('blur', releaseM);
+    if (ed.off) ed.off('Undo Redo SetContent', onEditorUndo);
     panel.remove();
     window.__svcMapCleanup = null;
   }
   window.__svcMapCleanup = cleanup;
   document.addEventListener('keydown', onKey, true);
   document.addEventListener('keyup', onKeyUp, true);
-  doc.addEventListener('keydown', onKey, true);
   document.addEventListener('mousemove', onDragMove, true);
-  document.addEventListener('mouseup', onDragDrop, true);
+  document.addEventListener('mouseup', onOuterUp, true);
+  doc.addEventListener('keydown', onKey, true);
+  doc.addEventListener('keyup', onKeyUp, true);
+  doc.addEventListener('mousedown', onPageDown, true);
+  doc.addEventListener('mousemove', onPageMove, true);
+  doc.addEventListener('mouseup', onInnerUp, true);
+  body.addEventListener('click', onEditorClick, true);
+  window.addEventListener('blur', releaseM);
+  win.addEventListener('blur', releaseM);
+  if (ed.on) ed.on('Undo Redo SetContent', onEditorUndo);
   document.body.appendChild(panel);
 }
 
@@ -6362,8 +6099,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-all-records').addEventListener('click', () => { buildAllRecords(); show('records'); });
   $('btn-back-records').addEventListener('click', () => show('main'));
   $('btn-canvas-indent').addEventListener('click', doApplyIndent);
-  $('btn-canvas-dup').addEventListener('click', doDuplicateBlock);
-  $('btn-canvas-move').addEventListener('click', doMoveBlocks);
   $('btn-canvas-map').addEventListener('click', doElementMap);
   $('btn-canvas-blocks').addEventListener('click', () => { buildBlocks(); show('blocks'); });
   $('btn-back-blocks').addEventListener('click', () => show('canvas'));
