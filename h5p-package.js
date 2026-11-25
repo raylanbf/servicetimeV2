@@ -19,12 +19,28 @@
 // imagem, áudio ou vídeo: o que vai para o H5P.com é o content.json, pelo
 // mesmo formulário de criação do quiz provisório. As configurações da
 // questão (Tentar novamente, Mostrar solução, pontuação…) ficam como vieram
-// no arquivo. Fica em globalThis.__svcH5pPackage.
+// no arquivo.
+//
+// Questão com imagem no enunciado: o Extrator põe no .h5p só a pergunta fixa
+// ("Assinale a alternativa correta."), as alternativas e as justificativas,
+// e o enunciado (texto e imagens) vai no .zip, em "enunciados-canvas.json"
+// (na raiz) e nos arquivos "<título> - imagem N.png", para ir à página do
+// Canvas, logo acima do quiz (h5p-insert.js). Cada entrada do .json é ligada
+// ao .h5p que ela nomeia, conferindo o número ("Tópico N" ou "Questão N"); o
+// que não casar vai para "Fora". Uma questão cuja pergunta é só a frase fixa
+// e que ficou sem enunciado também fica de fora: o quiz sairia sem a questão.
+// Fica em globalThis.__svcH5pPackage.
 // Regressão: .claude/skills/h5p-quiz/scripts/test-h5p-folder.js
 globalThis.__svcH5pPackage = (() => {
   const LIBRARY   = 'H5P.MultiChoice 1.16';
-  const MAX_BYTES = 10 * 1024 * 1024;
+  const MAX_BYTES = 10 * 1024 * 1024;   // cada .h5p e cada imagem
+  const ZIP_BYTES = 50 * 1024 * 1024;   // o arquivo escolhido (o .zip com as imagens)
+  const MANIFEST  = 'enunciados-canvas.json';
+  const FORMAT    = 'extrator-questoes/enunciados-canvas';
+  const ASK       = 'Assinale a alternativa correta.';
   const dec = new TextDecoder();
+  const nfc = s => String(s ?? '').normalize('NFC');
+  const baseName = p => String(p).split('/').pop();
 
   // "TÓPICO 1", "Tópico 01 – …", "topico_3.h5p" → '1', '1', '3'.
   const fold = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[‐-―]/g, '-').toLowerCase();
@@ -87,29 +103,118 @@ globalThis.__svcH5pPackage = (() => {
     return null;
   }
 
+  const preview = text => plain(text).replace(/\s+/g, ' ').slice(0, 90);
+  const askKey  = html => fold(plain(html)).replace(/\s+/g, ' ').trim();
+
   // out.kind: 'uda' ("Tópico N") ou 'micro' ("Questão N"). preview: o começo da
-  // pergunta, para a pessoa conferir o par na confirmação.
-  function add(out, { title, fallback, params, source }) {
+  // pergunta, para a pessoa conferir o par na confirmação. at: onde o .h5p
+  // estava ({ zip, path }), para ligar o enunciado do .zip.
+  function add(out, { title, fallback, params, source, at = null }) {
     const why = problemOf(params);
     if (why) return out.problems.push(`${source}: ${why}.`);
     const numberOf = NUMBER[out.kind];
     const number = numberOf(title) || numberOf(fallback);
-    if (!number) return out.problems.push(`${source}: sem "${NAME[out.kind]}" no título${fallback ? ' nem no nome do arquivo' : ''}.`);
-    out.quizzes.push({ number, params, source, preview: plain(params.question).replace(/\s+/g, ' ').slice(0, 90) });
+    if (!number) {
+      // O nome do outro tipo de disciplina: diz qual é a diferença.
+      const other = out.kind === 'micro' ? 'uda' : 'micro';
+      if (NUMBER[other](title) || NUMBER[other](fallback)) {
+        return out.problems.push(out.kind === 'micro'
+          ? `${source}: é "Tópico N" (questões do Word de uma disciplina comum), mas esta disciplina é Microfundamento, que liga pela "Questão N" (do relatório da FIC).`
+          : `${source}: é "Questão N" (do relatório da FIC, Microfundamento), mas esta disciplina é comum, que liga pelo "Tópico N".`);
+      }
+      return out.problems.push(`${source}: sem "${NAME[out.kind]}" no título${fallback ? ' nem no nome do arquivo' : ''}.`);
+    }
+    out.quizzes.push({ number, params, source, preview: preview(params.question), ...(at ? { at } : {}) });
+  }
+
+  // Imagem pelo começo do arquivo (não pela extensão nem pelo "tipo" do .json):
+  // só as que o navegador e o Canvas mostram.
+  function imageType(b) {
+    const s = (i, n) => String.fromCharCode(...b.subarray(i, i + n));
+    if (b.length > 8 && s(1, 3) === 'PNG' && b[0] === 0x89) return 'image/png';
+    if (b.length > 3 && b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return 'image/jpeg';
+    if (b.length > 6 && s(0, 4) === 'GIF8') return 'image/gif';
+    if (b.length > 12 && s(0, 4) === 'RIFF' && s(8, 4) === 'WEBP') return 'image/webp';
+    if (b.length > 2 && s(0, 2) === 'BM') return 'image/bmp';
+    return null;
+  }
+
+  // Enunciados (enunciados-canvas.json) → statement de cada questão lida do
+  // mesmo pacote (mine): { title, raw (enunciadoHtml), images: [{ path,
+  // name, type, bytes, size }], problems }. O que não casar vai para "Fora".
+  // pack: o .zip ({ label: 'x.zip › ', where: 'no .zip', manifest(), read(path) })
+  // ou os arquivos tirados dele e escolhidos soltos (loose: casam pelo nome,
+  // sem a pasta). → os nomes que o .json usa (o .json, as imagens e os .html).
+  async function attachStatements(pack, out, mine) {
+    const where = `${pack.label}${MANIFEST}`;
+    let m = null;
+    try { m = json(await pack.manifest()); }
+    catch (e) { out.problems.push(`${where}: não consegui ler (${e.message}) — os enunciados ficam de fora.`); }
+    if (m && (m.formato !== FORMAT || m.versao !== 1 || !Array.isArray(m.questoes))) {
+      out.problems.push(`${where}: formato que não conheço (${m.formato || '?'} ${m.versao ?? ''}) — os enunciados ficam de fora.`);
+      m = null;
+    }
+    for (const q of mine) q.ask = askKey(m?.perguntaNoH5P || ASK);
+    const key = p => nfc(pack.loose ? baseName(p) : p);
+    const used = new Set([key(MANIFEST)]);
+    for (const e of m?.questoes || []) {
+      if (e?.html) used.add(key(e.html));
+      for (const im of Array.isArray(e?.imagens) ? e.imagens : []) if (im?.arquivo) used.add(key(im.arquivo));
+    }
+    const numberOf = NUMBER[out.kind];
+    const taken = new Set();
+    for (const e of m?.questoes || []) {
+      const title = String(e?.titulo || '').trim();
+      const src = `${pack.label}enunciado ${title || e?.h5p || '?'}`;
+      const q = mine.find(x => key(x.at.path) === key(e?.h5p || ''));
+      if (!q) { out.problems.push(`${src}: o .h5p "${e?.h5p || '?'}" não está ${pack.where} ou ficou de fora — o enunciado também.`); continue; }
+      const n = numberOf(title);
+      if (n !== q.number) { out.problems.push(`${src}: o título não é ${NAME[out.kind].replace('N', q.number)}, como o de ${q.source} — o enunciado fica de fora.`); continue; }
+      if (taken.has(q)) { out.problems.push(`${src}: há dois enunciados para ${q.source} — deixe só um.`); q.conflict = true; continue; }
+      taken.add(q);
+      const raw = typeof e.enunciadoHtml === 'string' ? e.enunciadoHtml : '';
+      if (!plain(raw) && !/<img\b/i.test(raw)) { out.problems.push(`${src}: enunciado vazio — fica de fora.`); continue; }
+      const images = [], problems = [];
+      for (const im of Array.isArray(e.imagens) ? e.imagens : []) {
+        const path = nfc(im?.arquivo || ''), name = baseName(path);
+        try {
+          const bytes = path && await pack.read(path);
+          if (!bytes) throw new Error(`não está ${pack.where}`);
+          const type = imageType(bytes);
+          if (!type) throw new Error('não é PNG, JPEG, GIF, WEBP nem BMP');
+          images.push({ path, name, type, bytes, size: bytes.length });
+        } catch (err) {
+          problems.push(`a imagem "${name || '?'}" ${err.message} — no lugar dela vai o aviso para copiar a figura à mão.`);
+        }
+      }
+      q.statement = { title, raw, images, problems };
+      q.preview = preview(raw);
+      problems.forEach(p => out.problems.push(`${src}: ${p}`));
+    }
+    return used;
   }
 
   // Um arquivo (.h5p, ou .zip com .h5p dentro) → questões em out.quizzes, motivos em out.problems.
-  async function readFile(name, buf, out, depth = 0) {
-    if (buf.byteLength > MAX_BYTES) return out.problems.push(`${name}: maior que 10 MB.`);
+  async function readFile(name, buf, out, depth = 0, at = null) {
+    if (buf.byteLength > (depth ? MAX_BYTES : ZIP_BYTES)) return out.problems.push(`${name}: maior que ${depth ? 10 : 50} MB.`);
     const entries = entriesOf(buf);
     if (!entries) return out.problems.push(`${name}: não é um .h5p nem um .zip válido.`);
     try {
       if (!entries.has('h5p.json')) {
         const inner = [...entries.keys()].filter(n => /\.h5p$/i.test(n));
         if (!inner.length || depth) return out.problems.push(`${name}: não tem h5p.json nem arquivos .h5p dentro.`);
+        const from = out.quizzes.length;
         for (const n of inner) {
           const bytes = await readEntry(buf, entries.get(n));
-          await readFile(n.split('/').pop(), bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), out, depth + 1);
+          await readFile(baseName(n), bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), out, depth + 1, { zip: name, path: n });
+        }
+        if (entries.has(MANIFEST)) {
+          const byPath = new Map([...entries].map(([k, v]) => [nfc(k), v]));
+          await attachStatements({
+            label: `${name} › `, where: 'no .zip',
+            manifest: () => readEntry(buf, entries.get(MANIFEST)),
+            read: async p => { const ent = byPath.get(nfc(p)); return ent ? (await readEntry(buf, ent)).slice() : null; },
+          }, out, out.quizzes.slice(from).filter(q => q.at?.zip === name));
         }
         return;
       }
@@ -125,7 +230,7 @@ globalThis.__svcH5pPackage = (() => {
         const dep = (h5p.preloadedDependencies || []).find(d => d?.machineName === main);
         const lib = dep ? `${main} ${dep.majorVersion}.${dep.minorVersion}` : main;
         if (lib !== LIBRARY) return out.problems.push(`${name}: é ${lib}; o H5P.com da PUC usa ${LIBRARY}.`);
-        add(out, { title: h5p.title, fallback: name.replace(/\.h5p$/i, ''), params, source: name });
+        add(out, { title: h5p.title, fallback: name.replace(/\.h5p$/i, ''), params, source: name, at });
       } else if (main === 'H5P.QuestionSet') {
         const qs = Array.isArray(params.questions) ? params.questions : [];
         if (!qs.length) return out.problems.push(`${name}: Question Set sem questões.`);
@@ -171,11 +276,44 @@ globalThis.__svcH5pPackage = (() => {
 
   // Só lê os arquivos: files: [{ name, buffer: ArrayBuffer }]; kind: 'uda'
   // (padrão) ou 'micro' (o número vem de "Tópico N" ou de "Questão N").
-  // → { quizzes: [{ number, params, source, preview }], problems: [texto] }
+  // → { quizzes: [{ number, params, source, preview, statement? }], problems: [texto] }
   async function read(files, kind = 'uda') {
     const out = { quizzes: [], problems: [], kind: kind === 'micro' ? 'micro' : 'uda' };
-    for (const f of files) await readFile(f.name, f.buffer, out);
-    return { quizzes: out.quizzes, problems: out.problems };
+    // O .zip do Extrator extraído e escolhido inteiro (os .h5p, o .json, as
+    // imagens e os .html): lido como se fosse o .zip, casando pelo nome.
+    const LOOSE = '\u0000soltos';
+    const isManifest = f => nfc(baseName(f.name)).toLowerCase() === MANIFEST;
+    const manifest = files.find(isManifest);
+    const packs = manifest ? files.filter(f => /\.h5p$/i.test(f.name)) : files;
+    for (const f of packs) await readFile(f.name, f.buffer, out, 0, manifest ? { zip: LOOSE, path: f.name } : null);
+    if (manifest) {
+      const rest = files.filter(f => !packs.includes(f) && f !== manifest);
+      const byName = new Map(rest.map(f => [nfc(baseName(f.name)), f]));
+      const used = await attachStatements({
+        label: '', where: 'entre os arquivos escolhidos', loose: true,
+        manifest: async () => new Uint8Array(manifest.buffer),
+        read: async p => {
+          const f = byName.get(nfc(baseName(p)));
+          if (!f) return null;
+          if (f.buffer.byteLength > MAX_BYTES) throw new Error('é maior que 10 MB');
+          return new Uint8Array(f.buffer).slice();
+        },
+      }, out, out.quizzes.filter(q => q.at?.zip === LOOSE));
+      // O que o .json não usa é lido como antes (um .zip com outro nome, por exemplo).
+      for (const f of rest) if (!used.has(nfc(baseName(f.name)))) await readFile(f.name, f.buffer, out);
+    }
+    // Pergunta só com a frase fixa e sem o enunciado: o quiz sairia sem a questão.
+    const quizzes = out.quizzes.filter(q => {
+      if (q.conflict) delete q.statement;
+      if (q.statement) return true;
+      if (askKey(q.params.question) !== (q.ask || askKey(ASK))) return true;
+      out.problems.push(q.ask
+        ? `${q.source}: a pergunta é só "${plain(q.params.question)}" e o enunciado dela não veio (veja acima) — fica de fora.`
+        : `${q.source}: a pergunta é só "${plain(q.params.question)}" — o enunciado (com a imagem) vem no .zip do Extrator: escolha o .zip.`);
+      return false;
+    });
+    for (const q of quizzes) { delete q.at; delete q.ask; delete q.conflict; }
+    return { quizzes, problems: out.problems };
   }
 
   // Lê e liga: topics: [{ title }] (na ordem dos módulos).

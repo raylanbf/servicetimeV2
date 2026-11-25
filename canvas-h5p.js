@@ -76,9 +76,14 @@
     if (!where.box) return { ...where, old: [] };
     const box   = where.box;
     const probe = box.cloneNode(true);
+    // O enunciado que o "📁 Pasta H5P" põe acima do quiz (filho direto da caixa)
+    // fica como está — desde que não tenha um H5P dentro.
+    const stmts = [...probe.children].filter(window.__svcH5pWidth.isStatement);
+    const stmtH5p = stmts.some(s => h5pIn(s).length);
+    stmts.forEach(n => n.remove());
     h5pIn(probe).forEach(n => n.remove());
     const extra = probe.querySelector('img, iframe, video, audio, object, embed, table, a, span.mce-preview-object');
-    if (norm(probe.textContent).replace(MARKER, '').trim() || extra) {
+    if (norm(probe.textContent).replace(MARKER, '').trim() || extra || stmtH5p || stmts.length > 1) {
       return { error: `${where.layout === 'micro' ? 'O bloco abaixo do banner' : 'A caixa abaixo da faixa'} tem outro conteúdo além do H5P — confira. Nada foi alterado.` };
     }
     return { ...where, old: h5pIn(box) };

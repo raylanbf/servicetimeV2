@@ -187,6 +187,34 @@ const QS_FILE = (titles, library = 'H5P.MultiChoice 1.16') => zip({
 });
 const toAB = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
 
+// ── Questão com imagem, como o Extrator gera desde 24/11/2026 (src/h5p.ts ›
+// arquivosEnunciadoCanvas): o .h5p só com a frase fixa, e o enunciado no
+// .zip (enunciados-canvas.json, "<título> - imagem N.png", "<título> - enunciado.html").
+const ASK = 'Assinale a alternativa correta.';
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+const JPG = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0, 16, 74, 70, 73, 70, 0, 1]);
+const EMF = Buffer.from([1, 0, 0, 0, 108, 0, 0, 0, 0, 0, 0, 0]);
+const ASK_PARAMS = q => ({ ...MC_PARAMS(q), question: `<p>${ASK}</p>\n` });
+const STMT_HTML = (t, img = `${t} - imagem 1.png`) => `<p>O desenvolvimento de sistemas exige comunicação precisa (${t}).</p>\n`
+  + '<p>Analise o fragmento de código na linguagem C apresentado a seguir:</p>\n'
+  + `<p><img src="${img}" alt="Figura 1 do enunciado" style="max-width: 100%;"></p>\n`
+  + '<p>Ao ser executado, exibe 20.00 &amp; não 15.00 — x<sup>2</sup> e \\(a+b\\).</p>';
+// O que vai para a página: a imagem centralizada (só ela), como o editor do Canvas grava.
+const CENTER = 'display: block; margin-left: auto; margin-right: auto; max-width: 100%;';
+const CLEAN = raw => raw.split('style="max-width: 100%;"').join(`style="${CENTER}"`);
+const ENTRY = (t, { pasta = '', h5p = `${pasta}${t}.h5p`, html = STMT_HTML(t, `${pasta}${t} - imagem 1.png`), imagens = [{ arquivo: `${pasta}${t} - imagem 1.png`, tipo: 'image/png' }], titulo = t } = {}) =>
+  ({ documento: 'Atividades de Fixação VALIDADAS', titulo, h5p, html: `${pasta}${t} - enunciado.html`, enunciadoHtml: html, imagens });
+const MANIFEST = (questoes, extra = {}) => JSON.stringify({ formato: 'extrator-questoes/enunciados-canvas', versao: 1, explicacao: '…', perguntaNoH5P: ASK, questoes, ...extra });
+// O .zip de "uma questão por arquivo": com imagem (t1) e sem imagem (t2).
+const STMT_ZIP = (t1 = 'TÓPICO 1', t2 = 'TÓPICO 2', extra = {}) => zip({
+  [`${t1}.h5p`]: MC_FILE(t1, ASK_PARAMS(t1)),
+  [`${t1} - imagem 1.png`]: PNG,
+  [`${t1} - enunciado.html`]: `<!doctype html><html><body>${STMT_HTML(t1)}</body></html>`,
+  [`${t2}.h5p`]: MC_FILE(t2),
+  'enunciados-canvas.json': MANIFEST([ENTRY(t1)]),
+  ...extra,
+}, 0);
+
 (async () => {
   await ok('lê a lista: pastas e quizzes, id de 19 dígitos intacto, nome decodificado, pasta-mãe', () => {
     const html = ROW({ id: BIG, title: 'Ciência & Tecnologia "UDA"' }) + ROW({ id: '1', title: 'Quiz', folder: false })
@@ -439,7 +467,9 @@ const toAB = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
   await ok('pacote — título sem número: usa o nome do arquivo; sem número em nenhum, fica de fora', async () => {
     const r = await load([['Tópico_02.h5p', MC_FILE('Questão 1')], ['questao.h5p', MC_FILE('Questão 7')]]);
     same(r.map, { [PAGES[1].title]: 'Tópico_02.h5p' });
-    same(r.problems, ['questao.h5p: sem "Tópico N" no título nem no nome do arquivo.']);
+    same(r.problems, ['questao.h5p: é "Questão N" (do relatório da FIC, Microfundamento), mas esta disciplina é comum, que liga pelo "Tópico N".']);
+    const none = await load([['quiz.h5p', MC_FILE('Revisão geral')]]);
+    same(none.problems, ['quiz.h5p: sem "Tópico N" no título nem no nome do arquivo.']);
   });
 
   await ok('pacote — fica de fora, com o motivo: imagem, outra versão, outro tipo, sem correta, sem página, dois para o mesmo tópico, arquivo que não é .h5p', async () => {
@@ -472,6 +502,102 @@ const toAB = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
     same([r.byTopic.size, [...r.problems]], [0, ['TÓPICO 1.h5p: há 2 páginas "Tópico 1" marcadas nos módulos.']]);
   });
 
+  await ok('enunciado — .zip do Extrator com enunciados-canvas.json: o enunciado vai com o quiz do .h5p que ele nomeia, com a imagem (PNG pelo começo do arquivo); a questão sem imagem não muda', async () => {
+    const r = await load([['Atividades - questões H5P.zip', STMT_ZIP()]]);
+    same(r.map, { [PAGES[0].title]: 'TÓPICO 1.h5p', [PAGES[1].title]: 'TÓPICO 2.h5p' });
+    const q1 = r.byTopic.get(PAGES[0].title), q2 = r.byTopic.get(PAGES[1].title);
+    same(q1.params, ASK_PARAMS('TÓPICO 1'));
+    same([q1.statement.title, q1.statement.raw, q1.statement.problems], ['TÓPICO 1', STMT_HTML('TÓPICO 1'), []]);
+    same(q1.statement.images.map(i => [i.path, i.name, i.type, i.size]), [['TÓPICO 1 - imagem 1.png', 'TÓPICO 1 - imagem 1.png', 'image/png', PNG.length]]);
+    assert.ok(Buffer.from(q1.statement.images[0].bytes).equals(PNG), 'a imagem vem inteira');
+    assert.match(q1.preview, /^O desenvolvimento de sistemas exige/, 'o começo da pergunta vem do enunciado, não da frase fixa');
+    assert.strictEqual(q2.statement, undefined);
+    same(r.problems, []);
+  });
+
+  await ok('enunciado — vários documentos no .zip (uma pasta por documento): os caminhos do .json incluem a pasta', async () => {
+    const z = zip({
+      'Doc A/TÓPICO 1.h5p': MC_FILE('TÓPICO 1', ASK_PARAMS('TÓPICO 1')), 'Doc A/TÓPICO 1 - imagem 1.png': PNG,
+      'Doc B/TÓPICO 3.h5p': MC_FILE('TÓPICO 3', ASK_PARAMS('TÓPICO 3')), 'Doc B/TÓPICO 3 - imagem 1.png': JPG,
+      'enunciados-canvas.json': MANIFEST([ENTRY('TÓPICO 1', { pasta: 'Doc A/' }), ENTRY('TÓPICO 3', { pasta: 'Doc B/', imagens: [{ arquivo: 'Doc B/TÓPICO 3 - imagem 1.png', tipo: 'image/png' }] })]),
+    }, 0);
+    const r = await load([['Questões H5P.zip', z]]);
+    same(r.map, { [PAGES[0].title]: 'TÓPICO 1.h5p', [PAGES[2].title]: 'TÓPICO 3.h5p' });
+    same(r.byTopic.get(PAGES[2].title).statement.images.map(i => [i.name, i.type]), [['TÓPICO 3 - imagem 1.png', 'image/jpeg']], 'tipo pelo conteúdo, não pelo .json');
+    same(r.problems, []);
+  });
+
+  await ok('enunciado — fica de fora, com o motivo: .h5p que não está no .zip, número que não bate, dois para o mesmo .h5p, vazio, .json de outro formato; a questão só com a frase fixa e sem enunciado vai junto para "Fora"', async () => {
+    const files = {};
+    for (const t of ['TÓPICO 1', 'TÓPICO 2', 'TÓPICO 3', 'TÓPICO 4']) files[`${t}.h5p`] = MC_FILE(t, ASK_PARAMS(t));
+    files['TÓPICO 1 - imagem 1.png'] = PNG;
+    files['enunciados-canvas.json'] = MANIFEST([
+      ENTRY('TÓPICO 9'),                                  // .h5p que não existe
+      ENTRY('TÓPICO 1', { titulo: 'TÓPICO 2' }),          // aponta para o 1, mas diz 2
+      ENTRY('TÓPICO 3', { imagens: [] }), ENTRY('TÓPICO 3', { imagens: [] }),   // dois para o 3
+      ENTRY('TÓPICO 4', { html: '<p> </p>', imagens: [] }),                     // vazio
+    ]);
+    const r = await load([['qq.zip', zip(files, 0)]]);
+    same(r.map, {});
+    same(r.problems, [
+      'qq.zip › enunciado TÓPICO 9: o .h5p "TÓPICO 9.h5p" não está no .zip ou ficou de fora — o enunciado também.',
+      'qq.zip › enunciado TÓPICO 2: o título não é Tópico 1, como o de TÓPICO 1.h5p — o enunciado fica de fora.',
+      'qq.zip › enunciado TÓPICO 3: há dois enunciados para TÓPICO 3.h5p — deixe só um.',
+      'qq.zip › enunciado TÓPICO 4: enunciado vazio — fica de fora.',
+      `TÓPICO 1.h5p: a pergunta é só "${ASK}" e o enunciado dela não veio (veja acima) — fica de fora.`,
+      `TÓPICO 2.h5p: a pergunta é só "${ASK}" e o enunciado dela não veio (veja acima) — fica de fora.`,
+      `TÓPICO 3.h5p: a pergunta é só "${ASK}" e o enunciado dela não veio (veja acima) — fica de fora.`,
+      `TÓPICO 4.h5p: a pergunta é só "${ASK}" e o enunciado dela não veio (veja acima) — fica de fora.`,
+    ]);
+    const bad = await load([['x.zip', STMT_ZIP('TÓPICO 1', 'TÓPICO 2', { 'enunciados-canvas.json': MANIFEST([ENTRY('TÓPICO 1')], { formato: 'outro', versao: 2 }) })]]);
+    same(bad.map, { [PAGES[1].title]: 'TÓPICO 2.h5p' });
+    assert.match(bad.problems[0], /^x\.zip › enunciados-canvas\.json: formato que não conheço \(outro 2\) — os enunciados ficam de fora\.$/);
+  });
+
+  await ok('enunciado — imagem que falta no .zip ou não é PNG/JPEG/GIF/WEBP/BMP (ex.: .emf do Word): o enunciado vai sem ela, com o aviso para copiar a figura à mão', async () => {
+    const z = STMT_ZIP('TÓPICO 1', 'TÓPICO 2', {
+      'TÓPICO 1 - imagem 1.png': EMF,
+      'enunciados-canvas.json': MANIFEST([ENTRY('TÓPICO 1', { imagens: [{ arquivo: 'TÓPICO 1 - imagem 1.png', tipo: 'image/emf' }, { arquivo: 'TÓPICO 1 - imagem 2.png', tipo: 'image/png' }] })]),
+    });
+    const r = await load([['z.zip', z]]);
+    const st = r.byTopic.get(PAGES[0].title).statement;
+    same(st.images, []);
+    same(r.problems, [
+      'z.zip › enunciado TÓPICO 1: a imagem "TÓPICO 1 - imagem 1.png" não é PNG, JPEG, GIF, WEBP nem BMP — no lugar dela vai o aviso para copiar a figura à mão.',
+      'z.zip › enunciado TÓPICO 1: a imagem "TÓPICO 1 - imagem 2.png" não está no .zip — no lugar dela vai o aviso para copiar a figura à mão.',
+    ]);
+  });
+
+  await ok('enunciado — o .zip extraído e escolhido inteiro (os .h5p, o .json, as imagens e os .html): o mesmo resultado do .zip; imagem que falta avisa; sem o .json, é como antes', async () => {
+    const loose = [
+      ['enunciados-canvas.json', Buffer.from(MANIFEST([ENTRY('TÓPICO 1')]))], ['TÓPICO 1.h5p', MC_FILE('TÓPICO 1', ASK_PARAMS('TÓPICO 1'))],
+      ['TÓPICO 1 - enunciado.html', Buffer.from('<html></html>')], ['TÓPICO 1 - imagem 1.png', PNG], ['TÓPICO 2.h5p', MC_FILE('TÓPICO 2')],
+    ];
+    const r = await load(loose);
+    const z = await load([['Atividades - questões H5P.zip', STMT_ZIP()]]);
+    same([r.map, r.problems], [z.map, []]);
+    same(r.byTopic.get(PAGES[0].title).statement, z.byTopic.get(PAGES[0].title).statement);
+    // Vários documentos: o .json fala em "Doc A/…", e os arquivos vêm sem a pasta.
+    const multi = await load([['enunciados-canvas.json', Buffer.from(MANIFEST([ENTRY('TÓPICO 1', { pasta: 'Doc A/' })]))], ...loose.slice(1)]);
+    same([multi.map, multi.byTopic.get(PAGES[0].title).statement.images.length, multi.problems], [z.map, 1, []]);
+    const noImg = await load(loose.filter(([n]) => !n.endsWith('.png')));
+    same(noImg.problems, ['enunciado TÓPICO 1: a imagem "TÓPICO 1 - imagem 1.png" não está entre os arquivos escolhidos — no lugar dela vai o aviso para copiar a figura à mão.']);
+    const noJson = await load(loose.slice(1));
+    same(noJson.map, { [PAGES[1].title]: 'TÓPICO 2.h5p' });
+    same(noJson.problems, ['TÓPICO 1 - enunciado.html: não é um .h5p nem um .zip válido.', 'TÓPICO 1 - imagem 1.png: não é um .h5p nem um .zip válido.',
+      `TÓPICO 1.h5p: a pergunta é só "${ASK}" — o enunciado (com a imagem) vem no .zip do Extrator: escolha o .zip.`]);
+  });
+
+  await ok('enunciado — .h5p solto só com a frase fixa (sem o .zip): fica de fora e pede o .zip; Microfundamento: "Questão N" no título do enunciado', async () => {
+    const r = await load([['TÓPICO 1.h5p', MC_FILE('TÓPICO 1', ASK_PARAMS('TÓPICO 1'))]]);
+    same([r.map, r.problems], [{}, [`TÓPICO 1.h5p: a pergunta é só "${ASK}" — o enunciado (com a imagem) vem no .zip do Extrator: escolha o .zip.`]]);
+    const fig = '<p>Observe a figura:</p>\n<p>[figura 1 do enunciado: copie do documento original]</p>\n<p>Qual alternativa?</p>';
+    const z = zip({ 'Questão 2.h5p': MC_FILE('Questão 2', ASK_PARAMS('Questão 2')), 'enunciados-canvas.json': MANIFEST([ENTRY('Questão 2', { html: fig, imagens: [] })]) }, 0);
+    const m = await P.read([{ name: 'FIC - questões H5P.zip', buffer: toAB(z) }], 'micro');
+    same(m.quizzes.map(q => [q.number, q.statement.title, q.statement.raw, q.statement.images.length]), [['2', 'Questão 2', fig, 0]]);
+    same(m.problems, []);
+  });
+
   // ── 2. Chrome sem tela ────────────────────────────────────────────────
   let chromium;
   try { ({ chromium } = require('playwright-core')); } catch { console.log('\n(playwright-core ausente: parte 2 pulada)'); }
@@ -481,6 +607,7 @@ const toAB = b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
       await offscreenTests(browser);
       await insertRuleTests(browser);
       await canvasTests(browser);
+      await statementCanvasTests(browser);
       await microCanvasTests(browser);
       await marksTests(browser);
     } finally { await browser.close(); }
@@ -661,6 +788,130 @@ async function insertRuleTests(browser) {
     const r = await plan(withImg(TOPIC(MARKER_BOX)));
     assert.strictEqual(r.layout, 'uda');
     assert.strictEqual(r.body, withImg(TOPIC(`\n    <p style="text-align: center;">${embed}</p>\n`)));
+  });
+
+  // ── Enunciado da questão com imagem ──
+  const RAW = STMT_HTML('TÓPICO 1');
+  const IMG = 'TÓPICO 1 - imagem 1.png';
+  const clean = (raw, paths = [IMG]) => page.evaluate(([r, p]) => window.__svcH5pInsert.cleanStatement(r, p), [raw, paths]);
+  const block = (id = '7001', html = CLEAN(RAW), title = 'TÓPICO 1') => page.evaluate(([h, t, i, c]) =>
+    window.__svcH5pInsert.statementBlock({ title: t, html: h, origin: 'https://pucminas.instructure.com', courseId: c, fileId: () => i }), [html, title, id, COURSE]);
+  const planS = (html, stmt, id = QUIZ_ID) => page.evaluate(([h, i, e, s]) => window.__svcH5pInsert.plan(h, { contentId: i, embed: e, statement: s }), [html, id, embed, stmt]);
+  const OTHER = '1292991947646133608';
+
+  await ok('enunciado — limpeza: só p, pre/code, sup, sub, br e as imagens do .zip; script, iframe, link, atributos e imagem de fora saem (a de fora vira o aviso de copiar a figura)', async () => {
+    const c = await clean(RAW);
+    same([c.html, c.images, c.todo, c.empty], [CLEAN(RAW), [IMG], 0, false], 'o enunciado do Extrator passa inteiro, com a imagem centralizada');
+    assert.ok(c.html.includes(`<p><img src="${IMG}" alt="Figura 1 do enunciado" style="${CENTER}"></p>`), 'só a imagem centraliza; o parágrafo fica como estava');
+    assert.strictEqual(await page.evaluate(() => window.__svcH5pInsert.IMG_STYLE), CENTER);
+    const dirty = '<p onclick="x()" style="color:red" class="a">Texto <strong>forte</strong> e <a href="https://x.example">link</a></p><script>alert(1)</script>'
+      + '<pre><code class="c">int x = 1;\n  y</code></pre><p>x<sup>2</sup> H<sub>2</sub>O<br>linha</p>'
+      + `<p><img src="${IMG}" alt="Fig" onerror="alert(1)" width="9" style="position:fixed"></p>`
+      + '<p><img src="https://evil.example/x.png" alt="x"></p><iframe src="https://x.example"></iframe><!-- c --><p>&nbsp;</p>';
+    const d = await clean(dirty);
+    assert.strictEqual(d.html, '<p>Texto forte e link</p><pre><code>int x = 1;\n  y</code></pre><p>x<sup>2</sup> H<sub>2</sub>O<br>linha</p>'
+      + `<p><img src="${IMG}" alt="Fig" style="${CENTER}"></p><p>[figura 2 do enunciado: copie do documento original]</p>`);
+    same([d.images, d.todo], [[IMG], 1]);
+    same((await clean('<p>Veja:</p><p>[figura 1 do enunciado: copie do documento original]</p>', [])).todo, 1, 'o aviso do Microfundamento conta');
+    assert.ok((await clean('<script>x</script><p> </p>', [])).empty);
+  });
+
+  await ok('enunciado — bloco: imagem no formato do editor do Canvas (…/files/ID/preview com data-api-endpoint), marcado com class e data-svc-enunciado', async () => {
+    const b = await block();
+    assert.strictEqual(b, `<div class="svc-enunciado" data-svc-enunciado="TÓPICO 1">${CLEAN(RAW)
+      .replace(`src="${IMG}"`, `src="${CANVAS}/courses/${COURSE}/files/7001/preview"`)
+      .replace(`style="${CENTER}">`, `style="${CENTER}" data-api-endpoint="${CANVAS}/api/v1/courses/${COURSE}/files/7001" data-api-returntype="File">`)}</div>`);
+    assert.match(await block('1', '<p>x</p>', 'A "B" <c>'), /^<div class="svc-enunciado" data-svc-enunciado="A &quot;B&quot; &lt;c&gt;"><p>x<\/p><\/div>$/);
+  });
+
+  await ok('enunciado — caixa com o marcador: enunciado e quiz entram juntos, o enunciado logo acima do quiz; de novo, nada muda (com ou sem o enunciado); o resto da página igual', async () => {
+    const B = await block();
+    const r = await planS(TOPIC(MARKER_BOX), B);
+    same([r.status, r.stmt], ['insert', 'insert']);
+    assert.strictEqual(r.body, TOPIC(`\n    ${B}<p style="text-align: center;">${embed}</p>\n`));
+    same(Object.values(await planS(r.body, B)).slice(0, 2), ['same', 'same']);
+    const keep = await planS(r.body, null);
+    same([keep.status, keep.stmt, keep.body], ['same', 'keep', undefined]);
+    // Sem enunciado, como antes: só o quiz.
+    assert.strictEqual((await planS(TOPIC(MARKER_BOX), null)).body, TOPIC(`\n    <p style="text-align: center;">${embed}</p>\n`));
+  });
+
+  await ok('enunciado — o Canvas reescreve ao salvar (entidades, aspas, atributos da imagem) ou tira o data-svc-enunciado: ainda é o mesmo enunciado; sem nenhuma das marcas, é "outro conteúdo" e nada duplica', async () => {
+    const B = await block();
+    const body = (await planS(TOPIC(MARKER_BOX), B)).body;
+    const saved = body.replace('não', 'n&atilde;o').replace(`"${CENTER}"`, '"display:block;margin-left:auto;margin-right:auto;max-width:100%"')
+      .replace(` data-api-endpoint="${CANVAS}/api/v1/courses/${COURSE}/files/7001" data-api-returntype="File"`, '');
+    same((await planS(saved, B)).status, 'same');
+    // O enunciado gravado antes com a imagem à esquerda (só max-width): é trocado pelo centralizado.
+    const left = body.replace(`"${CENTER}"`, '"max-width: 100%;"');
+    const t = await planS(left, B);
+    same([t.status, t.stmt], ['statement', 'replace']);
+    assert.strictEqual(t.body, body);
+    same((await planS(body.replace(' data-svc-enunciado="TÓPICO 1"', ''), B)).status, 'same');
+    const bare = await planS(body.replace(' class="svc-enunciado" data-svc-enunciado="TÓPICO 1"', ''), B);
+    same([bare.status, bare.body], ['error', undefined]);
+    assert.match(bare.error, /outro conteúdo além do H5P/);
+  });
+
+  await ok('enunciado — outro enunciado: troca o bloco (fica um só); outro quiz: troca o quiz, e o enunciado que estava fica acima dele (ou é trocado pelo novo)', async () => {
+    const B = await block(), B2 = await block('7002');
+    const body = (await planS(TOPIC(MARKER_BOX), B)).body;
+    const t = await planS(body, B2);
+    same([t.status, t.stmt], ['statement', 'replace']);
+    assert.strictEqual(t.body, TOPIC(`\n    ${B2}<p style="text-align: center;">${embed}</p>\n`));
+    const withOld = TOPIC(`\n    ${B}<p style="text-align: center;">${H5P_IFRAME(OTHER)}</p>\n`);
+    const k = await planS(withOld, null);
+    same([k.status, k.stmt, k.oldIds], ['replace', 'keep', [OTHER]]);
+    assert.strictEqual(k.body, TOPIC(`\n    ${B}<p style="text-align: center;">${embed}</p>\n`));
+    const k2 = await planS(withOld, B2);
+    same([k2.status, k2.stmt], ['replace', 'replace']);
+    assert.strictEqual(k2.body, TOPIC(`\n    ${B2}<p style="text-align: center;">${embed}</p>\n`));
+    // Enunciado que alguém pôs abaixo do quiz volta para cima dele.
+    const below = TOPIC(`<p style="text-align: center;">${H5P_IFRAME(QUIZ_ID)}</p>${B}`);
+    assert.strictEqual((await planS(below, B2)).body, TOPIC(`${B2}<p style="text-align: center;">${H5P_IFRAME(QUIZ_ID)}</p>`));
+  });
+
+  await ok('enunciado — ficam de fora: dois enunciados na caixa, enunciado dentro de outro bloco, H5P dentro do enunciado', async () => {
+    const B = await block();
+    const cases = [
+      [TOPIC(`${B}${B}<p>${H5P_IFRAME(QUIZ_ID)}</p>`), /2 enunciados inseridos/],
+      [TOPIC(`<div>${B}</div><p>${H5P_IFRAME(QUIZ_ID)}</p>`), /outro conteúdo além do H5P/],
+      [TOPIC(`${B.replace('</div>', H5P_IFRAME(OTHER) + '</div>')}<p></p>`), /vídeo ou iframe dentro/],
+    ];
+    for (const [html, re] of cases) {
+      const r = await planS(html, B);
+      same([r.status, r.body], ['error', undefined]);
+      assert.match(r.error, re);
+    }
+  });
+
+  await ok('enunciado — texto que começa com "Atividade de Fixação": a faixa continua uma só; o selo H5P acha o quiz', async () => {
+    const BA = await block('7001', '<p>Atividade de Fixação: observe a figura.</p>');
+    const r = await planS(TOPIC(MARKER_BOX), BA);
+    same([r.status, r.layout], ['insert', 'uda']);
+    same((await planS(r.body, BA)).status, 'same');
+    same((await page.evaluate(h => window.__svcH5pInsert.slotState(h), r.body)).quiz?.id, QUIZ_ID);
+  });
+
+  await ok('Microfundamento — enunciado entre o banner e o parágrafo do quiz; de novo, nada; outro enunciado troca só o bloco; sem o quiz, enunciado e parágrafo novo depois do banner', async () => {
+    const B = await block(), B2 = await block('7002');
+    const r = await planS(MF, B);
+    same([r.status, r.stmt, r.layout], ['replace', 'insert', 'micro']);
+    assert.strictEqual(r.body, MF.replace(MF_SLOT, B + MF_NEW));
+    same((await planS(r.body, B)).status, 'same');
+    same((await planS(r.body, null)).status, 'same', 'sem enunciado: o que está lá fica');
+    const t = await planS(r.body, B2);
+    same([t.status, t.stmt], ['statement', 'replace']);
+    assert.strictEqual(t.body, MF.replace(MF_SLOT, B2 + MF_NEW));
+    const n = await planS(MF_NOSLOT, B);
+    same([n.status, n.stmt], ['insert', 'insert']);
+    assert.strictEqual(n.body, MF_NOSLOT.replace(MF_BANNER, MF_BANNER + B + MF_NEW));
+    same((await planS(n.body, B)).status, 'same');
+    // O enunciado ficou, mas o quiz sumiu: o parágrafo do quiz volta logo depois dele.
+    const lone = MF_NOSLOT.replace(MF_BANNER, MF_BANNER + B);
+    const l = await planS(lone, null);
+    same([l.status, l.stmt], ['insert', 'keep']);
+    assert.strictEqual(l.body, MF_NOSLOT.replace(MF_BANNER, MF_BANNER + B + MF_NEW));
   });
   await page.close();
 }
@@ -1099,6 +1350,259 @@ async function canvasTests(browser) {
   await page.close();
 }
 
+// Questão com imagem: do .zip do Extrator à página. As imagens sobem para os
+// Arquivos do curso pela API (pedido no Canvas, binário no armazenamento —
+// outro domínio, como o inst-fs — e confirmação pelo "location"), só depois
+// do número do curso; a página recebe o enunciado e o quiz numa gravação só.
+async function statementCanvasTests(browser) {
+  const C = 238710;
+  const TOPICS = ['Tópico 1 – Sintaxe e Semântica', 'Tópico 2 – Programação Orientada a Objetos'];
+  const URLS = ['topico-1', 'topico-2'];
+  const MODULES = [{ id: 1, name: 'UNIDADE DIGITAL', items: TOPICS.map((title, i) => ({ title, type: 'Page', page_url: URLS[i] })) }];
+  const STORE = 'https://inst-fs-iad-prod.inscloudgate.net';
+  const DIR = 'Atividades de Fixação';
+  const ZIP = STMT_ZIP();
+  const IMG = 'TÓPICO 1 - imagem 1.png';
+  const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+    <div id="content"><div class="header-bar"><div class="header-bar-right">
+      <button class="btn btn-primary add_module_link"><i class="icon-plus"></i> Módulo</button></div></div></div></body></html>`;
+  const s = { pages: {}, puts: [], preflights: [], uploads: [], folder: null, failUpload: false, nextFile: 7001 };
+  const clearLog = () => { s.puts.length = 0; s.preflights.length = 0; s.uploads.length = 0; };
+  const reset = (files = null) => {
+    const ago = new Date(Date.now() - 600 * 60000).toISOString();
+    URLS.forEach(u => { s.pages[u] = { body: TOPIC(MARKER_BOX), updated_at: ago }; });
+    s.folder = files ? { id: 55, files } : null;
+    s.failUpload = false;
+    clearLog();
+  };
+  reset();
+
+  const page = await browser.newPage();
+  const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: 'while(1);' + JSON.stringify(body) });
+  await page.route(`${CANVAS}/**`, async route => {
+    const req = route.request(), u = new URL(req.url()), base = `/api/v1/courses/${C}`;
+    const path = decodeURIComponent(u.pathname);
+    if (path === base) return json(route, { id: C, name: 'Linguagens de Programação' });
+    if (path === `${base}/modules`) return json(route, MODULES);
+    if (path === `${base}/pages`) return json(route, URLS.map(url => ({ url, body: s.pages[url].body })));
+    const pm = path.match(new RegExp(`^${base}/pages/([^/]+)$`));
+    if (pm) {
+      if (req.method() === 'PUT') {
+        const body = JSON.parse(req.postData()).wiki_page.body;
+        s.puts.push({ url: pm[1], body });
+        s.pages[pm[1]] = { ...s.pages[pm[1]], body, updated_at: new Date().toISOString() };
+      }
+      return json(route, { url: pm[1], ...s.pages[pm[1]] });
+    }
+    if (path === `${base}/folders/by_path/${DIR}`) {
+      return s.folder ? json(route, [{ id: 10, name: 'course files' }, { id: s.folder.id, name: DIR, full_name: `course files/${DIR}` }])
+        : json(route, { errors: [{ message: 'The specified resource does not exist.' }] }, 404);
+    }
+    if (path === '/api/v1/folders/55/files') return json(route, s.folder?.files || []);
+    if (path === `${base}/files` && req.method() === 'POST') {
+      const p = JSON.parse(req.postData());
+      s.preflights.push({ ...p, csrf: req.headers()['x-csrf-token'] });
+      return json(route, { upload_url: `${STORE}/files?token=t${s.preflights.length}`, upload_params: { filename: p.name, content_type: p.content_type }, file_param: 'file' });
+    }
+    const fm = path.match(/^\/api\/v1\/files\/(\d+)$/);
+    if (fm) { const f = s.folder?.files.find(x => String(x.id) === fm[1]); return f ? json(route, f) : json(route, {}, 404); }
+    return route.fulfill({ contentType: 'text/html', body: PAGE });
+  });
+  // O armazenamento do Canvas (outro domínio): recebe o formulário e devolve o "location" do arquivo no Canvas.
+  await page.route(`${STORE}/**`, async route => {
+    const req = route.request(), headers = await req.allHeaders();
+    const cors = { 'Access-Control-Allow-Origin': CANVAS };
+    const pre = s.preflights[Number(new URL(req.url()).searchParams.get('token').slice(1)) - 1];
+    s.uploads.push({ name: pre.name, csrf: headers['x-csrf-token'], cookie: headers.cookie, bytes: req.postDataBuffer()?.length || 0 });
+    if (s.failUpload) return route.fulfill({ status: 500, headers: cors, contentType: 'text/plain', body: 'erro' });
+    s.folder = s.folder || { id: 55, files: [] };
+    const f = { id: s.nextFile++, display_name: pre.name, size: pre.size, 'content-type': pre.content_type };
+    s.folder.files.push(f);
+    // O "location" pode vir com outro endereço do mesmo Canvas: vale o caminho, na origem da aba.
+    return route.fulfill({ status: 201, headers: cors, contentType: 'application/json', body: JSON.stringify({ location: `https://pucminas.beta.instructure.com/api/v1/files/${f.id}?include%5B%5D=enhanced_preview_url`, uuid: 'u' }) });
+  });
+  await page.addInitScript(() => {
+    document.cookie = '_csrf_token=abc%2B123; path=/';
+    window.__sent = [];
+    window.__h5p = { items: [] };   // quizzes na pasta do H5P.com
+    const store = { h5pFolderEnabled: true };
+    window.__store = store;
+    const copy = v => JSON.parse(JSON.stringify(v));
+    Object.defineProperty(window, 'chrome', { configurable: true, value: {
+      runtime: { sendMessage: async m => {
+        window.__sent.push(m);
+        if (m.action === 'h5p-create-folder') return { status: 'exists', title: m.title, folder: { id: '77', title: m.title, url: 'https://pucminasvirtual.h5p.com/content/77' } };
+        if (m.action === 'h5p-list') return { status: 'ok', items: window.__h5p.items };
+        if (m.action === 'h5p-create-quiz') {
+          const had = window.__h5p.items.find(i => i.title === m.title);
+          if (had) return { status: 'exists', item: had, title: m.title };
+          const item = { id: String(9100 + window.__h5p.items.length), title: m.title, folder: false, url: 'x' };
+          window.__h5p.items.push(item);
+          return { status: 'created', item, title: m.title };
+        }
+      } },
+      storage: {
+        local: {
+          get: async d => Object.fromEntries(Object.entries(d).map(([k, v]) => [k, k in store ? copy(store[k]) : v])),
+          set: async o => { Object.assign(store, copy(o)); },
+        },
+        onChanged: { addListener: () => {} },
+      },
+    } });
+  });
+  await page.goto(`${CANVAS}/courses/${C}/modules`);
+  for (const f of ['h5p-width.js', 'h5p-insert.js', 'h5p-package.js', 'canvas-h5p-folder.js']) await page.addScriptTag({ content: fs.readFileSync(path.join(ROOT, f), 'utf8') });
+
+  const BTN = '#__svc-h5p-folder__', MODAL = '#__svc-h5p-folder-modal__', TOAST = '#__svc-h5p-folder-toast__';
+  const CREATE = `${MODAL} button[data-create]`;
+  const toastText = async () => (await page.textContent(TOAST)).replace('×', '').replace('Abrir pasta', '').trim();
+  const waitToast = re => page.waitForFunction(r => new RegExp(r).test(document.getElementById('__svc-h5p-folder-toast__')?.textContent || ''), re.source, { timeout: 15000 });
+  const openWithZip = async () => {
+    await page.evaluate(() => { window.__sent = []; });
+    await page.click(BTN);
+    await page.waitForSelector(MODAL);
+    await page.setInputFiles(`${MODAL} input[data-h5p-files]`, [{ name: 'Atividades de Fixação VALIDADAS - questões H5P.zip', mimeType: 'application/zip', buffer: ZIP }]);
+    await page.waitForFunction(() => /tópico\(s\) com a questão do arquivo/.test(document.getElementById('__svc-h5p-folder-modal__')?.textContent || ''));
+  };
+  const toPreview = async () => {
+    await page.click(CREATE);
+    await page.waitForFunction(() => /Inserir os quizzes/.test(document.getElementById('__svc-h5p-folder-modal__')?.textContent || ''), null, { timeout: 15000 });
+  };
+  const record = ids => page.evaluate(list => { window.__store.h5pStatementQuizzes = Object.fromEntries(list.map(id => [id, { title: 'x', at: 1 }])); }, ids);
+  const embedFor = (id, title) => page.evaluate(([c, i, t]) => window.__svcH5pInsert.embedHtml({ origin: location.origin, courseId: c, contentId: i, title: t }), [C, id, title]);
+  const blockFor = (fileId, html) => page.evaluate(([h, c, i]) => window.__svcH5pInsert.statementBlock({ title: 'TÓPICO 1', html: h, origin: location.origin, courseId: c, fileId: () => i }), [html, C, fileId]);
+  const RAW = CLEAN(STMT_HTML('TÓPICO 1'));   // o enunciado limpo, com a imagem centralizada
+  await page.waitForSelector(BTN);
+
+  await ok('enunciado na página — confirmação: "+ enunciado com 1 imagem" no Tópico 1 e o aviso de que a imagem sobe só depois do número do curso; com "Inserir" desmarcado, o aviso diz que o enunciado não vai', async () => {
+    await openWithZip();
+    same(await page.$$eval(`${MODAL} li [data-statement]`, els => els.map(e => [e.closest('li').getAttribute('data-title'), e.getAttribute('data-statement'), e.textContent])),
+      [[TOPICS[0], '1', '+ enunciado com 1 imagem — vai na página, logo acima do quiz']]);
+    assert.match(await page.textContent(`${MODAL} li[data-title="${TOPICS[0]}"]`), /“O desenvolvimento de sistemas exige/, 'o começo da pergunta vem do enunciado');
+    const NOTE = `${MODAL} [data-statement-note]`;
+    assert.strictEqual(await page.textContent(NOTE), `1 página(s) vão receber também o enunciado da questão (com a imagem), logo acima do quiz, que leva só a frase "${ASK}" e as alternativas. As imagens sobem para Arquivos › ${DIR} depois que você digitar o número do curso, na prévia da inserção.`);
+    await page.uncheck(`${MODAL} input[data-insert]`);
+    assert.match(await page.textContent(NOTE), /^⚠ 1 questão\(ões\) com imagem: com "Inserir" desmarcado, o enunciado não vai para a página/);
+    await page.click(`${MODAL} button:text-is("Cancelar")`);
+    same(await page.evaluate(() => window.__sent), []);
+  });
+
+  await ok('enunciado na página — Criar: o quiz do Tópico 1 só com a frase fixa (registrado neste Chrome); prévia com o enunciado, a imagem a subir e "Ver o enunciado"; nada sobe nem grava antes do número do curso', async () => {
+    await openWithZip();
+    await toPreview();
+    const quizzes = (await page.evaluate(() => window.__sent)).filter(m => m.action === 'h5p-create-quiz');
+    same(quizzes.map(m => [m.title, m.params?.question]), [[TOPICS[0], `<p>${ASK}</p>\n`], [TOPICS[1], MC_PARAMS('TÓPICO 2').question]]);
+    same(Object.keys(await page.evaluate(() => window.__store.h5pStatementQuizzes || {})), ['9100']);
+    const text = await page.textContent(MODAL);
+    assert.match(text, /Tópico 1 – Sintaxe e Semânticavai receber o quiz e o enunciado, logo acima/);
+    assert.match(text, /\+ enunciado com 1 imagem \(TÓPICO 1\):🖼 TÓPICO 1 - imagem 1\.png \(1 KB\) — sobe para Arquivos › Atividades de Fixação depois de confirmar/);
+    assert.match(text, /Tópico 2 – Programação Orientada a Objetosvai receber o quiz(?! e o enunciado)/);
+    assert.strictEqual(await page.$$eval(`${MODAL} [data-statement]`, e => e.length), 1);
+    await page.click(`${MODAL} details summary`);
+    assert.match(await page.textContent(`${MODAL} [data-statement-view]`), /O desenvolvimento de sistemas exige comunicação precisa \(TÓPICO 1\)\./);
+    assert.match(await page.getAttribute(`${MODAL} [data-statement-view] img`, 'src'), /^blob:/);
+    same([s.preflights.length, s.uploads.length, s.puts.length], [0, 0, 0]);
+  });
+
+  await ok('enunciado na página — número errado não libera; com o certo, a imagem sobe (pedido no Canvas com CSRF; binário no armazenamento sem CSRF nem cookie) e cada página grava o enunciado e o quiz de uma vez, conferidos', async () => {
+    await page.fill(`${MODAL} input[data-course]`, '123');
+    assert.ok(await page.$eval(CREATE, b => b.disabled));
+    same(s.preflights.length, 0);
+    await page.fill(`${MODAL} input[data-course]`, String(C));
+    await page.click(CREATE);
+    await waitToast(/Quiz inserido/);
+    same(s.preflights.map(p => [p.name, p.size, p.content_type, p.parent_folder_path, p.on_duplicate, p.csrf]), [[IMG, PNG.length, 'image/png', DIR, 'rename', 'abc+123']]);
+    same(s.uploads.map(u => [u.name, u.csrf, u.cookie]), [[IMG, undefined, undefined]]);
+    assert.ok(s.uploads[0].bytes > PNG.length, 'o binário vai no formulário');
+    const B = await blockFor('7001', RAW);
+    assert.ok(B.includes(`<img src="${CANVAS}/courses/${C}/files/7001/preview" alt="Figura 1 do enunciado" style="${CENTER}" data-api-endpoint="${CANVAS}/api/v1/courses/${C}/files/7001" data-api-returntype="File">`));
+    same(s.puts.map(p => p.url), URLS);
+    assert.strictEqual(s.puts[0].body, TOPIC(`\n    ${B}<p style="text-align: center;">${await embedFor('9100', TOPICS[0])}</p>\n`));
+    assert.strictEqual(s.puts[1].body, TOPIC(`\n    <p style="text-align: center;">${await embedFor('9101', TOPICS[1])}</p>\n`));
+    assert.strictEqual(await toastText(), `✓ Quiz inserido em 2 página(s) (1 com o enunciado).\n🖼 Imagens dos enunciados em Arquivos › ${DIR}: 1 enviada(s).`);
+  });
+
+  await ok('enunciado na página — de novo com o mesmo .zip: o quiz já existe (criado aqui) e o enunciado já está na página; nada para gravar e nada sobe', async () => {
+    clearLog();
+    await openWithZip();
+    await toPreview();
+    const text = await page.textContent(MODAL);
+    assert.match(text, /Prévia — nenhuma página para gravar\./);
+    assert.match(text, /Tópico 1 – Sintaxe e Semânticajá tem este quiz e o enunciadoO enunciado \(TÓPICO 1\) já está na página, igual\./);
+    await page.click(`${MODAL} button:text-is("Fechar")`);
+    await waitToast(/Nenhuma página foi alterada/);
+    assert.doesNotMatch(await toastText(), /Sem o enunciado/);
+    same([s.preflights.length, s.uploads.length, s.puts.length], [0, 0, 0]);
+  });
+
+  await ok('enunciado na página — quiz que já existia na pasta e não foi criado aqui: o enunciado não vai (o antigo tem a questão inteira); a prévia e o resultado avisam', async () => {
+    reset();
+    await record([]);
+    await openWithZip();
+    await toPreview();
+    assert.match(await page.textContent(MODAL), /Tópico 1 – Sintaxe e Semânticavai receber o quiz O quiz já existia na pasta e não foi trocado: o enunciado do \.zip não vai para esta página \(o quiz antigo tem a questão inteira\)\./);
+    assert.strictEqual(await page.$(`${MODAL} [data-statement]`), null);
+    await page.fill(`${MODAL} input[data-course]`, String(C));
+    await page.click(CREATE);
+    await waitToast(/Quiz inserido/);
+    same(s.preflights.length, 0);
+    assert.strictEqual(s.puts[0].body, TOPIC(`\n    <p style="text-align: center;">${await embedFor('9100', TOPICS[0])}</p>\n`));
+    assert.match(await toastText(), /⚠ Enunciado \(com imagem\) não inserido, porque o quiz já existia e não foi trocado: Tópico 1 – Sintaxe e Semântica\./);
+  });
+
+  await ok('enunciado na página — a imagem não sobe (erro do armazenamento): a página dela fica como estava e o resultado diz por quê; a outra página grava', async () => {
+    reset();
+    await record(['9100']);
+    s.failUpload = true;
+    await openWithZip();
+    await toPreview();
+    await page.fill(`${MODAL} input[data-course]`, String(C));
+    await page.click(CREATE);
+    await waitToast(/Não gravado/);
+    same(s.puts.map(p => p.url), [URLS[1]]);
+    assert.strictEqual(s.pages[URLS[0]].body, TOPIC(MARKER_BOX));
+    assert.match(await toastText(), /✗ Não gravado: Tópico 1 – Sintaxe e Semântica: a imagem "TÓPICO 1 - imagem 1\.png" não subiu \(o armazenamento do Canvas respondeu 500\) — nada mudou nesta página/);
+  });
+
+  await ok('enunciado na página — imagem com o mesmo nome e tamanho já em Arquivos › Atividades de Fixação: é reaproveitada (nada sobe); mesmo nome e outro tamanho: sobe outra ("rename"), e a antiga fica', async () => {
+    reset([{ id: 6500, display_name: IMG, size: PNG.length }]);
+    await openWithZip();
+    await toPreview();
+    assert.match(await page.textContent(MODAL), /🖼 TÓPICO 1 - imagem 1\.png \(1 KB\) — já está em Arquivos › Atividades de Fixação \(reaproveitada\)/);
+    await page.fill(`${MODAL} input[data-course]`, String(C));
+    await page.click(CREATE);
+    await waitToast(/Quiz inserido/);
+    same(s.preflights.length, 0);
+    assert.strictEqual(s.puts[0].body, TOPIC(`\n    ${await blockFor('6500', RAW)}<p style="text-align: center;">${await embedFor('9100', TOPICS[0])}</p>\n`));
+    assert.match(await toastText(), /🖼 Imagens dos enunciados em Arquivos › Atividades de Fixação: 0 enviada\(s\), 1 reaproveitada\(s\)\./);
+
+    reset([{ id: 6500, display_name: IMG, size: 999 }]);
+    await openWithZip();
+    await toPreview();
+    assert.match(await page.textContent(MODAL), /sobe para Arquivos › Atividades de Fixação depois de confirmar/);
+    await page.fill(`${MODAL} input[data-course]`, String(C));
+    await page.click(CREATE);
+    await waitToast(/Quiz inserido/);
+    same(s.preflights.map(p => p.on_duplicate), ['rename']);
+    const id = String(s.nextFile - 1);
+    assert.strictEqual(s.puts[0].body, TOPIC(`\n    ${await blockFor(id, RAW)}<p style="text-align: center;">${await embedFor('9100', TOPICS[0])}</p>\n`));
+    same(s.folder.files.map(f => f.id), [6500, Number(id)], 'a antiga continua lá');
+  });
+
+  await ok('enunciado na página — Cancelar na prévia: nada muda, e o aviso diz que o enunciado ficou fora e como pôr', async () => {
+    reset();
+    await record(['9100']);
+    await openWithZip();
+    await toPreview();
+    await page.click(`${MODAL} button:text-is("Cancelar")`);
+    await waitToast(/Nenhuma página foi alterada/);
+    assert.match(await toastText(), new RegExp(`⚠ Sem o enunciado na página \\(o quiz tem só "${ASK.replace('.', '\\.')}"\\): Tópico 1 – Sintaxe e Semântica\\. Para pôr, rode de novo com o mesmo \\.zip e "Inserir" marcado\\.`));
+    same([s.preflights.length, s.uploads.length, s.puts.length], [0, 0, 0]);
+  });
+
+  await page.close();
+}
+
 // Microfundamento: módulos como os do curso 111810 (UNIDADE N - Tema N - …,
 // mais de 6 páginas, Síntese e Atividade avaliativa de fora) e páginas no
 // modelo antigo, com o banner de Atividades de Fixação.
@@ -1241,7 +1745,7 @@ async function microCanvasTests(browser) {
     assert.match(await page.textContent(MODAL), /3 de 11 tópico\(s\) com a questão do arquivo/);
     const fora = await page.textContent(`${MODAL} [data-h5p-problems]`);
     assert.match(fora, /Questão 12\.h5p: não há a 12ª página marcada nos módulos \(são 11\)\./);
-    assert.match(fora, /TÓPICO 2\.h5p: sem "Questão N" no título nem no nome do arquivo\./);
+    assert.match(fora, /TÓPICO 2\.h5p: é "Tópico N" \(questões do Word de uma disciplina comum\), mas esta disciplina é Microfundamento, que liga pela "Questão N" \(do relatório da FIC\)\./);
     assert.match(fora, /Questão 5: 2 questões \(questao_05\.h5p; Questão 5 \(cópia\)\.h5p\) — deixe só uma\./);
     await page.uncheck(`${MODAL} input[data-insert]`);
     await page.click(CREATE);

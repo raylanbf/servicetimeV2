@@ -13,6 +13,12 @@ window.__svcH5pWidth = (() => {
     .replace(/[‐-―]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
   const MARKER = /\[\s*iframe\s*-\s*atividade\s+de\s+fixacao\s+h5p\s*\]/;
   const BANNER = /atividades?[\s_-]*(?:de[\s_-]*)?fixacao/;
+  // Enunciado da questão com imagem, que o "📁 Pasta H5P" (h5p-insert.js) põe
+  // logo acima do quiz: um <div> marcado. É o único bloco além do H5P que o
+  // lugar do quiz aceita — na caixa da faixa (filho direto dela) ou, no
+  // Microfundamento, entre o banner e o parágrafo do quiz.
+  const STMT_SEL = 'div[data-svc-enunciado], div.svc-enunciado';
+  const isStatement = el => !!el && el.nodeType === 1 && el.matches(STMT_SEL);
 
   // H5P no HTML ou no editor visual (o TinyMCE embrulha o iframe num span de prévia).
   const isH5p = el => (el.matches('span.mce-preview-object')
@@ -37,10 +43,15 @@ window.__svcH5pWidth = (() => {
   //    parágrafo logo depois desse bloco. Se o que vem depois não é o lugar
   //    do quiz (ex.: "Voltar ao topo"), ele ainda não existe e o quiz entra
   //    num parágrafo novo logo depois do banner.
-  //    → { layout: 'micro', box } ou { layout: 'micro', box: null, after: <bloco do banner> }
+  //    → { layout: 'micro', box, banner, stmt } ou { layout: 'micro', box: null, after, banner, stmt }
+  //    (stmt: o enunciado marcado entre o banner e o quiz, ou null; after:
+  //    o enunciado ou, sem ele, o bloco do banner)
   // A faixa vem primeiro: página da AVA nunca muda de regra.
   function quizBox(root) {
-    const isBand = d => norm(d.textContent).startsWith('atividade de fixacao');
+    // O enunciado (e a caixa que o tem) nunca é a faixa, mesmo que o texto
+    // dele comece com "Atividade de fixação".
+    const isBand = d => !d.matches(STMT_SEL) && !d.closest(STMT_SEL) && !d.querySelector(STMT_SEL)
+      && norm(d.textContent).startsWith('atividade de fixacao');
     const bands  = [...root.querySelectorAll('div')].filter(d => isBand(d) && ![...d.querySelectorAll('div')].some(isBand));
     if (bands.length > 1) return { error: `Achei ${bands.length} faixas "Atividade de Fixação" nesta página — deve haver só uma.` };
     if (bands.length === 1) {
@@ -52,7 +63,7 @@ window.__svcH5pWidth = (() => {
   }
 
   function bannerSlot(root) {
-    const imgs = [...root.querySelectorAll('img')].filter(i => BANNER.test(norm(`${i.getAttribute('alt') || ''} ${i.getAttribute('title') || ''} ${i.getAttribute('src') || ''}`)));
+    const imgs = [...root.querySelectorAll('img')].filter(i => !i.closest(STMT_SEL) && BANNER.test(norm(`${i.getAttribute('alt') || ''} ${i.getAttribute('title') || ''} ${i.getAttribute('src') || ''}`)));
     if (!imgs.length) return { error: 'Não achei a faixa "Atividade de Fixação Não Pontuada" nem o banner de Atividades de Fixação (Microfundamento) nesta página.' };
     if (imgs.length > 1) return { error: `Achei ${imgs.length} banners de Atividades de Fixação nesta página — deve haver só um.` };
     // O bloco do banner: a div ou o parágrafo que só tem a imagem.
@@ -63,16 +74,23 @@ window.__svcH5pWidth = (() => {
         block.querySelectorAll('img, iframe, video, audio, object, embed, table').length !== 1) {
       return { error: 'O banner de Atividades de Fixação não está num bloco só dele — confira a página.' };
     }
-    const next = block.nextElementSibling;
+    // O enunciado inserido antes fica entre o banner e o parágrafo do quiz.
+    let next = block.nextElementSibling;
+    const stmt = isStatement(next) ? next : null;
+    if (stmt) {
+      if (h5pIn(stmt).length) return { error: 'O enunciado logo abaixo do banner de Atividades de Fixação tem um H5P dentro — confira.' };
+      next = stmt.nextElementSibling;
+    }
     if (next && h5pIn(next).length && !onlyH5p(next)) return { error: 'O bloco logo abaixo do banner de Atividades de Fixação tem outro conteúdo além do H5P — confira.' };
-    const slot = next && /^(DIV|P)$/.test(next.tagName) && onlyH5p(next) ? next : null;
+    const slot = next && /^(DIV|P)$/.test(next.tagName) && !isStatement(next) && onlyH5p(next) ? next : null;
     // Lugar vazio ou nenhum: só vale se não houver H5P mais abaixo (senão ficariam dois).
     if (!slot || !h5pIn(slot).length) {
       for (let s = slot ? slot.nextElementSibling : next; s; s = s.nextElementSibling) {
         if (h5pIn(s).length || isH5p(s)) return { error: 'Há um H5P abaixo do banner de Atividades de Fixação, mas não logo abaixo dele — confira.' };
       }
     }
-    return slot ? { layout: 'micro', box: slot } : { layout: 'micro', box: null, after: block };
+    // after: depois de onde entra o parágrafo novo do quiz (o enunciado, se houver).
+    return slot ? { layout: 'micro', box: slot, banner: block, stmt } : { layout: 'micro', box: null, after: stmt || block, banner: block, stmt };
   }
 
   // Põe width: 100% no style, no lugar da largura que houver (max-width e
@@ -157,5 +175,5 @@ window.__svcH5pWidth = (() => {
     return out;
   }
 
-  return { h5pEdits, applyEdits, quizBox };
+  return { h5pEdits, applyEdits, quizBox, isStatement, STMT_SEL };
 })();

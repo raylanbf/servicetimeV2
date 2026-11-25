@@ -364,6 +364,33 @@ const check = (cond, msg) => { console.log((cond ? '  ✔ ' : '  ✘ ') + msg); 
     check(b.frames.length === 1 && b.frames[0].id === '111' && !/iframe -/.test(b.text), 'marcador trocado pelo quiz — ' + t);
   }
 
+  // ── H2: enunciado da questão com imagem, que o "📁 Pasta H5P" põe na caixa ──
+  console.log('H2 · caixa com o enunciado (questão com imagem) acima do marcador');
+  const STMT = '<div class="svc-enunciado" data-svc-enunciado="TÓPICO 5"><p>Analise o fragmento de código:</p>'
+    + '<p><img src="/courses/1/files/2/preview" alt="Figura 1 do enunciado" style="max-width: 100%;"></p></div>';
+  {
+    await setup({ title: `Tópico 5 – ${T}`, html: pageHtml({ box: STMT + '<p style="text-align: center;">[iframe - Atividade de Fixa&ccedil;&atilde;o H5P]</p>' }), section: 'my' });
+    await page.click('.__svc-h5p-btn__');
+    check(/Quer importar o H5P para a página\?/.test(await confirmText() || ''), 'o enunciado na caixa não faz o botão parar');
+    await answer(true);
+    const t = await waitToast(/✓ Quiz|⚠/);
+    const b = await boxInfo();
+    const order = await page.evaluate(() => {
+      const doc = new DOMParser().parseFromString(tinymce.activeEditor.getContent(), 'text/html');
+      const box = doc.querySelector('#questao-fixacao-atividade');
+      return [...box.children].map(c => c.matches('div.svc-enunciado') ? 'enunciado' : c.querySelector('iframe') ? 'quiz' : c.tagName);
+    });
+    check(b.frames.length === 1 && b.frames[0].id === '111' && JSON.stringify(order) === '["enunciado","quiz"]', `quiz logo abaixo do enunciado, que fica — ${t} ${JSON.stringify(order)}`);
+    check(/Analise o fragmento de código:/.test(b.text) && /files\/2\/preview/.test(b.html), 'texto e imagem do enunciado intactos');
+  }
+  console.log('H3 · dois enunciados na caixa');
+  {
+    await setup({ title: `Tópico 5 – ${T}`, html: pageHtml({ box: STMT + STMT + OLD_BOX }) });
+    await page.click('.__svc-h5p-btn__');
+    const t = await waitToast(/⚠/, 3000);
+    check(/outro conteúdo além do H5P/.test(t) && !(await confirmText()), 'para antes de perguntar: ' + t);
+  }
+
   // ── Microfundamento: página real (curso 111810), sem a faixa ─────────
   // O quiz fica no parágrafo logo depois do bloco do banner de Atividades
   // de Fixação (imagem); a página tem também um vídeo do Studio no corpo.
@@ -415,6 +442,22 @@ const check = (cond, msg) => { console.log((cond ? '  ✔ ' : '  ✘ ') + msg); 
     check(outsideSlot(after) === outsideSlot(original), 'fora do lugar do quiz, nada mudou');
     await page.evaluate(() => { tinymce.activeEditor.undoManager.undo(); tinymce.activeEditor.undoManager.undo(); });
     check(await page.evaluate(() => tinymce.activeEditor.getContent()) === original, 'dois Ctrl+Z voltam ao original');
+  }
+
+  console.log('K · Microfundamento com o enunciado entre o banner e o quiz');
+  {
+    await setup({ title: MF_TITLE, html: MF.replace(MF_SLOT, STMT + MF_SLOT), quizzes: MF_QUIZZES, section: 'my' });
+    await page.click('.__svc-h5p-btn__');
+    check(/logo abaixo do banner será substituído/.test(await confirmText() || ''), 'acha o quiz depois do enunciado e avisa a troca');
+    await answer(true);
+    const t = await waitToast(/✓ Quiz|⚠/);
+    const m = await page.evaluate(() => {
+      const doc = new DOMParser().parseFromString(tinymce.activeEditor.getContent(), 'text/html');
+      const stmt = doc.querySelector('img[alt="banner-atividades-fixacao.jpg"]')?.parentElement.nextElementSibling;
+      const slot = stmt?.nextElementSibling;
+      return { stmt: !!stmt?.matches('div.svc-enunciado'), ids: [...(slot?.querySelectorAll('iframe') || [])].map(f => decodeURIComponent(f.getAttribute('src')).split('/').pop()), total: doc.querySelectorAll('iframe').length };
+    });
+    check(m.stmt && JSON.stringify(m.ids) === '["666"]' && m.total === 2, `banner → enunciado → quiz 666; o antigo saiu — ${t} ${JSON.stringify(m)}`);
   }
 
   await browser.close();

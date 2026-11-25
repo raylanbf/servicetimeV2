@@ -6,9 +6,20 @@
 // editor (canvas-h5p.js), o quizBox do h5p-width.js: a caixa logo depois da
 // faixa "Atividade de Fixação" ou, no Microfundamento, o parágrafo logo
 // depois do banner de Atividades de Fixação (sem ele, entra um parágrafo
-// novo logo depois do banner). O lugar só pode ter H5P, o marcador da AVA e
-// parágrafos vazios — outra coisa deixa a página de fora. O H5P que estiver
-// lá sai e o novo entra no lugar; o resto da página fica byte a byte igual.
+// novo logo depois do banner). O lugar só pode ter H5P, o marcador da AVA,
+// parágrafos vazios e o enunciado marcado (abaixo) — outra coisa deixa a
+// página de fora. O H5P que estiver lá sai e o novo entra no lugar; o resto
+// da página fica byte a byte igual.
+//
+// Enunciado com imagem (Extrator de Questões, enunciados-canvas.json): o
+// quiz dessas questões leva só "Assinale a alternativa correta." e as
+// alternativas; o enunciado (texto e imagens) vai na página, logo acima do
+// quiz, num <div class="svc-enunciado" data-svc-enunciado="Tópico N">. Na
+// comum, dentro da caixa da faixa, antes do parágrafo do quiz; no
+// Microfundamento, entre o banner e o parágrafo do quiz (um <div> não cabe
+// num <p>). Numa segunda vez, o bloco marcado é reconhecido e trocado, nunca
+// duplicado. O HTML do enunciado é limpo antes (cleanStatement): só <p>,
+// <pre>, <code>, <sup>, <sub>, <br> e <img> com as imagens do .zip.
 // Fica em window.__svcH5pInsert.
 // Regressão: .claude/skills/h5p-quiz/scripts/test-h5p-folder.js
 window.__svcH5pInsert = (() => {
@@ -17,11 +28,19 @@ window.__svcH5pInsert = (() => {
   const MARKER_RAW = /\[\s*iframe\s*-\s*atividade\s+de\s+fixa(?:ç|c|&ccedil;)(?:ã|a|&atilde;)o\s+h5p\s*\]/gi;
   const TAG        = tag => new RegExp(`<!--[\\s\\S]*?-->|<(\\/?)(${tag})\\b(?:[^>"']|"[^"]*"|'[^']*')*>`, 'gi');
   const IFRAME     = /<iframe\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/iframe\s*>/gi;
+  const STMT_CLASS = 'svc-enunciado';
+  const STMT_ATTR  = 'data-svc-enunciado';
+  // O aviso que o Extrator (e esta limpeza) põe no lugar da figura sem arquivo.
+  const FIGURE_TODO = /\[figura(?:\s+\d+)?\s+do enunciado:\s*copie do documento original\]/gi;
+  // Imagem do enunciado centralizada (só ela, não o parágrafo), como o editor
+  // do Canvas grava a imagem centralizada; no máximo a largura da página.
+  const IMG_STYLE = 'display: block; margin-left: auto; margin-right: auto; max-width: 100%;';
 
   const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[‐-―]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
   const esc  = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const isH5pSrc = src => /h5p/i.test(src || '');
+  const W = () => window.__svcH5pWidth;
 
   // Id do conteúdo no H5P.com a partir do src do iframe (direto ou no url= do Canvas).
   function contentIdOf(src) {
@@ -40,9 +59,94 @@ window.__svcH5pInsert = (() => {
       'allow="geolocation *; microphone *; camera *; midi *; encrypted-media *; autoplay *; clipboard-write *; display-capture *"></iframe>';
   }
 
+  // ── Enunciado ─────────────────────────────────────────────────────────
+  const KEEP = new Set(['P', 'PRE', 'CODE', 'SUP', 'SUB', 'BR']);
+  // Saem com o conteúdo; as outras tags desconhecidas saem e o texto fica.
+  const DROP = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'FRAME', 'FRAMESET', 'OBJECT', 'EMBED', 'TEMPLATE', 'NOSCRIPT', 'SVG', 'MATH',
+    'FORM', 'INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'LINK', 'META', 'TITLE', 'HEAD', 'AUDIO', 'VIDEO', 'SOURCE', 'TRACK', 'CANVAS', 'PICTURE']);
+
+  // enunciadoHtml do .zip → HTML só com as tags permitidas, sem atributos
+  // (a não ser src/alt/style das imagens) e só com as imagens do .zip
+  // (paths: os caminhos lidos). <img> com outro src vira o aviso
+  // "[figura N do enunciado: copie do documento original]".
+  // → { html, images: [path, na ordem], todo: nº de figuras para copiar à mão, removed: nº de tags tiradas }
+  function cleanStatement(raw, paths = []) {
+    const valid = new Set(paths);
+    const src = new DOMParser().parseFromString(`<!doctype html><body>${String(raw || '')}`, 'text/html').body;
+    const out = document.implementation.createHTMLDocument('');
+    const root = out.createElement('div');
+    const res = { images: [], removed: 0 };
+    let figure = 0;
+    (function copy(from, to) {
+      for (const n of from.childNodes) {
+        if (n.nodeType === 3) { to.appendChild(out.createTextNode(n.nodeValue)); continue; }
+        if (n.nodeType !== 1) continue;   // comentários
+        const tag = n.tagName;
+        if (DROP.has(tag)) { res.removed++; continue; }
+        if (tag === 'IMG') {
+          figure++;
+          const path = n.getAttribute('src') || '';
+          if (valid.has(path)) {
+            const img = out.createElement('img');
+            img.setAttribute('src', path);
+            img.setAttribute('alt', (n.getAttribute('alt') || '').slice(0, 300));
+            img.setAttribute('style', IMG_STYLE);
+            to.appendChild(img);
+            res.images.push(path);
+          } else {
+            to.appendChild(out.createTextNode(`[figura ${figure} do enunciado: copie do documento original]`));
+          }
+          continue;
+        }
+        if (KEEP.has(tag)) {
+          const el = out.createElement(tag.toLowerCase());
+          copy(n, el);
+          to.appendChild(el);
+        } else {
+          res.removed++;
+          copy(n, to);
+        }
+      }
+    })(src, root);
+    // Parágrafos vazios no começo e no fim não servem para nada.
+    const blank = el => el?.tagName === 'P' && !el.textContent.trim() && !el.querySelector('img');
+    while (blank(root.firstElementChild)) root.firstElementChild.remove();
+    while (blank(root.lastElementChild)) root.lastElementChild.remove();
+    const html = root.innerHTML.trim();
+    const todo = (root.textContent.match(FIGURE_TODO) || []).length;
+    return { html, images: res.images, todo, removed: res.removed, empty: !root.textContent.trim() && !res.images.length };
+  }
+
+  // O bloco que vai na página: o HTML limpo, com cada imagem apontando para o
+  // arquivo do curso (url(path) → endereço ou null), no formato que o editor
+  // do Canvas usa (…/files/ID/preview com data-api-endpoint). Imagem sem
+  // endereço fica com o caminho do .zip (só na prévia: nunca é gravada assim).
+  function statementBlock({ title, html, fileId, origin, courseId }) {
+    const doc = new DOMParser().parseFromString('<!doctype html><body><div></div>', 'text/html');
+    const div = doc.body.firstElementChild;
+    div.innerHTML = html;   // vem do cleanStatement
+    for (const img of div.querySelectorAll('img')) {
+      const id = fileId(img.getAttribute('src'));
+      if (!id) continue;
+      img.setAttribute('src', `${origin}/courses/${courseId}/files/${id}/preview`);
+      img.setAttribute('data-api-endpoint', `${origin}/api/v1/courses/${courseId}/files/${id}`);
+      img.setAttribute('data-api-returntype', 'File');
+    }
+    return `<div class="${STMT_CLASS}" ${STMT_ATTR}="${esc(title || '')}">${div.innerHTML}</div>`;
+  }
+
+  // Assinatura de um enunciado: o texto, o arquivo de cada imagem e se ela
+  // está centralizada (o enunciado gravado antes, à esquerda, é trocado). O
+  // Canvas pode reescrever entidades, aspas e atributos ao salvar; isso não conta.
+  const fileOf = src => String(src || '').match(/\/files\/(\d+)(?:[/?#]|$)/)?.[1] || String(src || '');
+  const centered = i => i.style.display === 'block' && i.style.marginLeft === 'auto' && i.style.marginRight === 'auto';
+  const signature = el => `${norm(el.textContent)}|${[...el.querySelectorAll('img')].map(i => `${fileOf(i.getAttribute('src'))}${centered(i) ? ':c' : ''}`).join(',')}`;
+  const parseBlock = html => new DOMParser().parseFromString(`<!doctype html><body>${html}`, 'text/html').body.firstElementChild;
+
+  // ── Lugar no texto ────────────────────────────────────────────────────
   const attrsOf = (tag, name) => new DOMParser().parseFromString(`<div>${tag}</${name}></div>`, 'text/html').body.firstElementChild.firstElementChild;
   const srcOfIframe = tag => new DOMParser().parseFromString(tag, 'text/html').querySelector('iframe')?.getAttribute('src') || '';
-  const sameAttrs = (a, b) => !!a && ['id', 'class', 'style'].every(k => (a.getAttribute(k) || '') === (b.getAttribute(k) || ''));
+  const sameAttrs = (a, b) => !!a && ['id', 'class', 'style', STMT_ATTR].every(k => (a.getAttribute(k) || '') === (b.getAttribute(k) || ''));
 
   // Onde um <div> ou <p> do DOMParser está no texto: a k-ésima tag de
   // abertura do texto é o k-ésimo elemento (conferindo id, class e style); o
@@ -57,7 +161,7 @@ window.__svcH5pInsert = (() => {
     const opens = tags.filter(m => !m[1]);
     if (k < 0 || opens.length !== els.length || !sameAttrs(attrsOf(opens[k][0], name), el)) return null;
     const open = opens[k], from = tags.indexOf(open);
-    const range = close => ({ innerFrom: open.index + open[0].length, innerTo: close.index, outerTo: close.index + close[0].length });
+    const range = close => ({ outerFrom: open.index, innerFrom: open.index + open[0].length, innerTo: close.index, outerTo: close.index + close[0].length });
     if (name === 'p') return tags[from + 1]?.[1] ? range(tags[from + 1]) : null;
     let depth = 0;
     for (const m of tags.slice(from)) {
@@ -68,57 +172,117 @@ window.__svcH5pInsert = (() => {
   }
 
   const textless = s => !s.replace(/<[^>]*>/g, '').replace(/&nbsp;|&#160;|&#xa0;/gi, ' ').replace(/[\s ]+/g, '');
+  const imgCount = s => (s.match(/<img\b/gi) || []).length;
 
   // Conteúdo novo da caixa: sem os H5P antigos e sem o marcador; o quiz entra
-  // no primeiro parágrafo (que fica só com ele) ou num parágrafo centralizado novo.
+  // no primeiro parágrafo (que fica só com ele) ou num parágrafo centralizado
+  // novo. at: onde começa o parágrafo do quiz (o enunciado entra ali).
   function newInner(inner, embed) {
-    let s = inner.replace(IFRAME, m => (isH5pSrc(srcOfIframe(m)) ? '' : m)).replace(MARKER_RAW, '');
+    const s = inner.replace(IFRAME, m => (isH5pSrc(srcOfIframe(m)) ? '' : m)).replace(MARKER_RAW, '');
     const p = s.match(/<p\b[^>]*>([\s\S]*?)<\/p\s*>/i);
     if (p && textless(p[1])) {
       const open = p[0].match(/^<p\b[^>]*>/i)[0];
-      return s.slice(0, p.index) + open + embed + '</p>' + s.slice(p.index + p[0].length);
+      return { content: s.slice(0, p.index) + open + embed + '</p>' + s.slice(p.index + p[0].length), at: p.index };
     }
-    return `<p style="text-align: center;">${embed}</p>` + s;
+    return { content: `<p style="text-align: center;">${embed}</p>` + s, at: 0 };
   }
 
-  // → { status: 'insert' | 'replace' | 'same' | 'error', error?, oldIds, body?, layout? }
+  // Onde começa o parágrafo do H5P que já está na caixa (quiz que não muda).
+  function quizAt(inner) {
+    const f = [...inner.matchAll(IFRAME)].find(m => isH5pSrc(srcOfIframe(m[0])));
+    if (!f) return 0;
+    const before = inner.slice(0, f.index);
+    const p = [...before.matchAll(/<p\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi)].pop();
+    return p && !/<\/p\s*>/i.test(before.slice(p.index)) ? p.index : f.index;
+  }
+
+  const applyEdits = (text, edits) => [...edits].sort((a, b) => b.from - a.from)
+    .reduce((s, e) => s.slice(0, e.from) + e.insert + s.slice(e.to), text);
+
+  // statement: o bloco do enunciado (statementBlock) ou null (sem enunciado:
+  // o que houver na página fica como está).
+  // → { status: 'insert' | 'replace' | 'statement' | 'same' | 'error', error?, oldIds, body?, layout?, stmt? }
+  //   status: o que acontece com o quiz ('statement': o quiz fica e só o
+  //   enunciado muda); stmt: 'insert' | 'replace' | 'same' (com enunciado),
+  //   'keep' (sem enunciado, e a página já tem um) ou null.
   // layout: 'uda' (caixa depois da faixa) ou 'micro' (Microfundamento, depois do banner).
-  function plan(html, { contentId, embed }) {
+  function plan(html, { contentId, embed, statement = null }) {
     const doc   = new DOMParser().parseFromString(html || '', 'text/html');
-    const where = window.__svcH5pWidth.quizBox(doc.body);
+    const where = W().quizBox(doc.body);
     if (where.error) return { status: 'error', error: where.error, oldIds: [] };
     const layout = where.layout;
     const unsure = { status: 'error', error: 'Não consegui localizar o lugar do quiz no HTML com segurança — nada muda nesta página.', oldIds: [], layout };
+    const box = where.box;
 
-    // Microfundamento sem o lugar do quiz: parágrafo novo logo depois do banner.
-    if (!where.box) {
-      const r = elementRange(html, doc, where.after);
-      const block = r && html.slice(r.innerFrom, r.innerTo);
-      if (!r || (block.match(/<img\b/gi) || []).length !== where.after.querySelectorAll('img').length) return unsure;
-      return { status: 'insert', oldIds: [], layout, body: html.slice(0, r.outerTo) + `<p style="text-align: center;">${embed}</p>` + html.slice(r.outerTo) };
+    // O enunciado inserido antes: filho direto da caixa (comum) ou o bloco
+    // entre o banner e o quiz (Microfundamento). Um só, e sem H5P dentro.
+    const olds = layout === 'micro' ? (where.stmt ? [where.stmt] : []) : [...box.children].filter(W().isStatement);
+    if (olds.length > 1) return { status: 'error', layout, oldIds: [], error: `A caixa abaixo da faixa "Atividade de Fixação" tem ${olds.length} enunciados inseridos — confira à mão.` };
+    const old = olds[0] || null;
+    if (old?.querySelector('iframe, video, audio, object, embed')) return { status: 'error', layout, oldIds: [], error: 'O enunciado inserido antes tem um vídeo ou iframe dentro — confira à mão.' };
+    const newSig = statement ? signature(parseBlock(statement)) : null;
+    const stmt = statement ? (old ? (signature(old) === newSig ? 'same' : 'replace') : 'insert') : (old ? 'keep' : null);
+    const stmtSame = stmt === null || stmt === 'same' || stmt === 'keep';
+    const oldRange = old && elementRange(html, doc, old);
+    if (old && (!oldRange || imgCount(html.slice(oldRange.innerFrom, oldRange.innerTo)) !== old.querySelectorAll('img').length)) return unsure;
+
+    // Microfundamento sem o lugar do quiz: parágrafo novo logo depois do
+    // banner (ou do enunciado que já está lá), com o enunciado novo antes.
+    if (!box) {
+      const r = elementRange(html, doc, where.banner);
+      if (!r || imgCount(html.slice(r.innerFrom, r.innerTo)) !== where.banner.querySelectorAll('img').length) return unsure;
+      const quizP = `<p style="text-align: center;">${embed}</p>`;
+      const edits = old
+        ? (statement && stmt !== 'same'
+          ? [{ from: oldRange.outerFrom, to: oldRange.outerTo, insert: statement + quizP }]
+          : [{ from: oldRange.outerTo, to: oldRange.outerTo, insert: quizP }])
+        : [{ from: r.outerTo, to: r.outerTo, insert: (statement || '') + quizP }];
+      return { status: 'insert', stmt, oldIds: [], layout, body: applyEdits(html, edits) };
     }
 
-    const box  = where.box;
-    const h5ps = [...box.querySelectorAll('iframe')].filter(f => isH5pSrc(f.getAttribute('src')));
+    const h5ps = [...box.querySelectorAll('iframe')].filter(f => isH5pSrc(f.getAttribute('src')) && !old?.contains(f));
     const oldIds = h5ps.map(f => contentIdOf(f.getAttribute('src')));
 
     const probe = box.cloneNode(true);
+    [...probe.children].filter(W().isStatement).forEach(n => n.remove());
     probe.querySelectorAll('iframe').forEach(f => { if (isH5pSrc(f.getAttribute('src'))) f.remove(); });
     if (norm(probe.textContent).replace(MARKER, '').trim() || probe.querySelector('img, iframe, video, audio, object, embed, table, a')) {
       return { status: 'error', layout, oldIds, error: layout === 'micro'
         ? 'O bloco abaixo do banner de Atividades de Fixação tem outro conteúdo além do H5P — confira à mão.'
         : 'A caixa abaixo da faixa "Atividade de Fixação" tem outro conteúdo além do H5P — confira à mão.' };
     }
-    if (h5ps.length === 1 && oldIds[0] === String(contentId)) return { status: 'same', oldIds, layout };
+    const quizSame = h5ps.length === 1 && oldIds[0] === String(contentId);
+    if (quizSame && stmtSame) return { status: 'same', stmt, oldIds, layout };
+    const status = quizSame ? 'statement' : h5ps.length ? 'replace' : 'insert';
 
     const range = elementRange(html, doc, box);
     const inner = range && html.slice(range.innerFrom, range.innerTo);
     // Confere a conta: o trecho do texto tem os mesmos iframes da caixa.
     if (!range || (inner.match(/<iframe\b/gi) || []).length !== box.querySelectorAll('iframe').length) return { ...unsure, oldIds };
-    // Parágrafo (Microfundamento): fica só com o quiz. Caixa: newInner.
-    const content = box.tagName === 'P' ? embed : newInner(inner, embed);
-    const body = html.slice(0, range.innerFrom) + content + html.slice(range.innerTo);
-    return { status: h5ps.length ? 'replace' : 'insert', oldIds, layout, body };
+
+    // Microfundamento: o lugar é um parágrafo, que fica só com o quiz; o
+    // enunciado é o bloco irmão logo antes dele.
+    if (box.tagName === 'P') {
+      const edits = [];
+      if (!quizSame) edits.push({ from: range.innerFrom, to: range.innerTo, insert: embed });
+      if (statement && stmt !== 'same') {
+        edits.push(old ? { from: oldRange.outerFrom, to: oldRange.outerTo, insert: statement } : { from: range.outerFrom, to: range.outerFrom, insert: statement });
+      }
+      return { status, stmt, oldIds, layout, body: applyEdits(html, edits) };
+    }
+
+    // Caixa da faixa: tira o enunciado antigo, ajeita o quiz e põe o
+    // enunciado (o novo, ou o antigo como estava) logo antes do parágrafo do quiz.
+    let rest = inner, kept = '';
+    if (old) {
+      if (oldRange.outerFrom < range.innerFrom || oldRange.outerTo > range.innerTo) return { ...unsure, oldIds };
+      kept = html.slice(oldRange.outerFrom, oldRange.outerTo);
+      rest = inner.slice(0, oldRange.outerFrom - range.innerFrom) + inner.slice(oldRange.outerTo - range.innerFrom);
+    }
+    const { content, at } = quizSame ? { content: rest, at: quizAt(rest) } : newInner(rest, embed);
+    const put = statement && stmt !== 'same' ? statement : kept;
+    const body = html.slice(0, range.innerFrom) + content.slice(0, at) + put + content.slice(at) + html.slice(range.innerTo);
+    return { status, stmt, oldIds, layout, body };
   }
 
   // O que há no lugar do quiz de uma página (HTML da API): o H5P que está lá
@@ -128,7 +292,7 @@ window.__svcH5pInsert = (() => {
   function slotState(html) {
     const none = { quiz: null, marker: false };
     if (!html || !/iframe/i.test(html)) return none;   // nem iframe nem marcador
-    const box = window.__svcH5pWidth.quizBox(new DOMParser().parseFromString(html, 'text/html').body).box;
+    const box = W().quizBox(new DOMParser().parseFromString(html, 'text/html').body).box;
     if (!box) return none;
     const frame = [...box.querySelectorAll('iframe')].find(f => isH5pSrc(f.getAttribute('src')));
     return {
@@ -137,5 +301,5 @@ window.__svcH5pInsert = (() => {
     };
   }
 
-  return { plan, embedHtml, contentIdOf, slotState };
+  return { plan, embedHtml, contentIdOf, slotState, cleanStatement, statementBlock, FIGURE_TODO, IMG_STYLE };
 })();

@@ -13,6 +13,15 @@
 //      Fixação" ou, no Microfundamento, logo abaixo do banner de Atividades
 //      de Fixação (h5p-insert.js), com prévia, número do curso redigitado e
 //      conferência de cada página depois de gravar.
+// Questão com imagem (o .zip do Extrator traz enunciados-canvas.json): o
+// quiz leva só "Assinale a alternativa correta." e as alternativas; o
+// enunciado, com as imagens, vai na página, logo acima do quiz. Só depois do
+// número do curso, as imagens sobem para os Arquivos do curso (pasta
+// "Atividades de Fixação"; arquivo com o mesmo nome e tamanho é
+// reaproveitado) e cada página recebe o quiz e o enunciado de uma vez. Quiz
+// que já existia na pasta e não foi trocado não recebe o enunciado (o antigo
+// tem a questão inteira) — a não ser que tenha sido criado antes por aqui,
+// com a frase fixa (h5pStatementQuizzes, neste Chrome).
 // Tipo da disciplina: comum ("📁 Pasta H5P", páginas "Tópico N") ou
 // Microfundamento ("📁 Pasta H5P MF", páginas "UNIDADE N - Tema N"), pelas
 // páginas dos módulos; se elas não decidirem, pelo nome do curso
@@ -56,7 +65,11 @@
   }
   const H5P_HOME   = 'https://pucminasvirtual.h5p.com/content';
   const PAUSE_MS   = 1500; // entre um quiz e outro
+  const WRITE_MS   = 400;  // entre uma gravação no Canvas e outra
   const RECENT_MIN = 30;   // página editada há menos que isso: avisa na prévia
+  const FILES_DIR  = 'Atividades de Fixação';   // pasta dos Arquivos do curso com as imagens dos enunciados
+  const OWN_KEY    = 'h5pStatementQuizzes';     // quizzes criados aqui só com a frase fixa (o enunciado vai na página)
+  const ASK_TEXT   = 'Assinale a alternativa correta.';
   // Tipo da disciplina e páginas de tópico de cada um: comum (UDA), com
   // "Tópico N – …", e Microfundamento, com "UNIDADE N - Tema N - …" (a
   // "UNIDADE N - Síntese e referências" fica de fora). O botão diz o tipo.
@@ -81,12 +94,24 @@
 
   // ── Canvas ────────────────────────────────────────────────────────────
   const api = () => `/api/v1/courses/${courseOf()}`;
+  // Balde do limite de pedidos do Canvas quase vazio: espera um pouco.
+  async function pace(res) {
+    const left = Number(res.headers.get('X-Rate-Limit-Remaining'));
+    if (res.headers.has('X-Rate-Limit-Remaining') && Number.isFinite(left) && left < 300) await sleep(left < 50 ? 5000 : left < 150 ? 2000 : 600);
+  }
+  const parseCanvas = text => { try { return JSON.parse(String(text).replace(/^while\(1\);/, '')); } catch { return null; } };
   async function getJson(url) {
     const res = await fetch(url, { headers: { Accept: 'application/json' } });
     if (!res.ok) throw new Error(`HTTP ${res.status} ao ler ${url.split('?')[0]}`);
     const data = JSON.parse((await res.text()).replace(/^while\(1\);/, ''));
     const next = (res.headers.get('Link') || '').match(/<([^>]+)>;\s*rel="next"/)?.[1] || null;
+    await pace(res);
     return { data, next };
+  }
+  function csrf() {
+    const raw = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('_csrf_token='));
+    return raw ? decodeURIComponent(raw.split('=').slice(1).join('='))
+      : decodeURIComponent(document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
   }
   async function getAll(url) {
     const out = [];
@@ -156,18 +181,79 @@
 
   // Grava o corpo da página; devolve o corpo que o Canvas guardou (ou null).
   async function writePage(url, body) {
-    const raw  = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('_csrf_token='));
-    const csrf = raw ? decodeURIComponent(raw.split('=').slice(1).join('='))
-      : decodeURIComponent(document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '');
     const res = await fetch(`${api()}/pages/${encodeURIComponent(url)}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrf },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrf() },
       body: JSON.stringify({ wiki_page: { body } }),
     });
     const text = await res.text();
     if (!res.ok) throw new Error(`O Canvas respondeu ${res.status} ao gravar${text ? ' — ' + text.slice(0, 120) : ''}`);
-    try { const saved = JSON.parse(text.replace(/^while\(1\);/, '')); return typeof saved?.body === 'string' ? saved.body : null; }
-    catch { return null; }
+    await pace(res);
+    const saved = parseCanvas(text);
+    return typeof saved?.body === 'string' ? saved.body : null;
+  }
+
+  // ── Arquivos do curso: as imagens dos enunciados ──────────────────────
+  const nfc = s => String(s ?? '').normalize('NFC');
+  // O que já há na pasta "Atividades de Fixação": Map(nome → { id, size });
+  // vazia se a pasta ainda não existe (o primeiro envio cria).
+  async function storedImages() {
+    const res = await fetch(`${api()}/folders/by_path/${encodeURIComponent(FILES_DIR)}`, { headers: { Accept: 'application/json' } });
+    if (res.status === 404) return new Map();
+    if (!res.ok) throw new Error(`HTTP ${res.status} ao ler a pasta "${FILES_DIR}" dos Arquivos`);
+    await pace(res);
+    const chain = parseCanvas(await res.text());
+    const folder = Array.isArray(chain) ? chain[chain.length - 1] : null;
+    if (!folder?.id || nfc(folder.name) !== nfc(FILES_DIR)) throw new Error(`não reconheci a pasta "${FILES_DIR}" dos Arquivos`);
+    const files = await getAll(`/api/v1/folders/${folder.id}/files?per_page=100`);
+    return new Map(files.map(f => [nfc(f.display_name), { id: String(f.id), size: Number(f.size) }]));
+  }
+
+  // Sobe uma imagem para a pasta "Atividades de Fixação" (upload em 3 etapas
+  // do Canvas). on_duplicate 'rename': um arquivo com o mesmo nome e outro
+  // conteúdo fica como está, e o novo ganha outro nome. → { id }
+  async function uploadImage(im) {
+    const res = await fetch(`${api()}/files`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrf() },
+      body: JSON.stringify({ name: im.name, size: im.size, content_type: im.type, parent_folder_path: FILES_DIR, on_duplicate: 'rename' }),
+    });
+    const pre = parseCanvas(await res.text());
+    if (!res.ok || !pre?.upload_url) throw new Error(`o Canvas respondeu ${res.status} ao pedir o envio`);
+    await pace(res);
+    // O binário vai para o armazenamento do Canvas (em geral outro domínio, sem CSRF).
+    const form = new FormData();
+    for (const [k, v] of Object.entries(pre.upload_params || {})) form.append(k, v);
+    form.append(pre.file_param || 'file', new Blob([im.bytes], { type: im.type }), im.name);
+    const up = await fetch(pre.upload_url, { method: 'POST', body: form });
+    if (!up.ok) throw new Error(`o armazenamento do Canvas respondeu ${up.status}`);
+    let file = parseCanvas(await up.text());
+    // Confirmação: o armazenamento do Canvas (inst-fs) devolve o "location" do
+    // arquivo na API, como a própria tela do Canvas lê; sem ele, a resposta
+    // já é o arquivo. Só o caminho /api/v1/files/N vale, e na origem desta aba.
+    const loc = file?.location || (!file?.id && up.headers.get('Location'));
+    if (loc) {
+      const u = new URL(loc, location.href);
+      if (!/^\/api\/v1\/files\/\d+(?:\/create_success)?$/.test(u.pathname)) throw new Error('a confirmação do envio veio num endereço inesperado');
+      const r = await fetch(u.pathname + u.search, { headers: { Accept: 'application/json' } });
+      file = r.ok ? parseCanvas(await r.text()) : null;
+    }
+    if (!file?.id) throw new Error('não consegui confirmar o arquivo enviado');
+    return { id: String(file.id) };
+  }
+
+  // Quizzes criados aqui só com a frase fixa ("Assinale a alternativa
+  // correta."), por id: numa próxima vez, mesmo já existindo na pasta, eles
+  // ainda precisam do enunciado na página. Só neste Chrome.
+  async function ownQuizzes() {
+    try { return (await chrome.storage.local.get({ [OWN_KEY]: {} }))[OWN_KEY] || {}; } catch { return {}; }
+  }
+  async function rememberOwn(id, title) {
+    try {
+      const all = { ...(await ownQuizzes()), [id]: { title, course: courseOf(), at: Date.now() } };
+      const keep = Object.entries(all).sort((a, b) => (b[1]?.at || 0) - (a[1]?.at || 0)).slice(0, 500);
+      await chrome.storage.local.set({ [OWN_KEY]: Object.fromEntries(keep) });
+    } catch { /* sem o registro, vale a regra de sempre */ }
   }
 
   // ── Aviso ─────────────────────────────────────────────────────────────
@@ -295,6 +381,21 @@
   // Só serve para avisar: o nome nunca é mudado sozinho (há UDA, MF e outras siglas).
   const fold = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[‐-―]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
   const coreName = s => fold(String(s || '').replace(/^\s*(?:\([A-Z]{1,6}\)|[A-Z]{1,6}\s*[-‐-―:]|[Mm]icrofundamentos?\s*[-‐-―:])\s*/, ''));
+
+  // Enunciados lidos dos .zip (h5p-package.js): o HTML limpo (h5p-insert.js ›
+  // cleanStatement) e só as imagens que ele usa. Enunciado que fica vazio
+  // depois da limpeza: a questão vai para "Fora" (o quiz sairia sem a questão).
+  function prepareStatements(quizzes, problems) {
+    const I = window.__svcH5pInsert;
+    return quizzes.filter(q => {
+      const st = q.statement;
+      if (!st) return true;
+      const c = I.cleanStatement(st.raw, st.images.map(i => i.path));
+      if (c.empty) { problems.push(`${q.source}: o enunciado ficou vazio depois da limpeza — fica de fora.`); return false; }
+      Object.assign(st, { html: c.html, todo: c.todo, images: st.images.filter(i => c.images.includes(i.path)) });
+      return true;
+    });
+  }
 
   // Confirmação: nome editável, as páginas que vão ter quiz (as de tópico do
   // tipo vêm marcadas; dá para desmarcar e marcar outras) e o que fazer com
@@ -435,7 +536,8 @@
         pickBtn.textContent = '📎 Escolher arquivos .h5p';
         Object.assign(pickBtn.style, { padding: '5px 10px', borderRadius: '4px', border: '1px solid #475569', background: '#2a2a3e', color: '#e2e8f0', cursor: 'pointer', fontSize: '12px' });
         const fileInput = document.createElement('input');
-        fileInput.type = 'file'; fileInput.multiple = true; fileInput.accept = '.h5p,.zip';
+        // O .zip do Extrator, ou tudo o que estava nele (com o enunciados-canvas.json e as imagens).
+        fileInput.type = 'file'; fileInput.multiple = true; fileInput.accept = '.h5p,.zip,.json,.png,.jpg,.jpeg,.gif,.webp,.bmp,.html';
         fileInput.setAttribute('data-h5p-files', '');
         fileInput.style.display = 'none';
         const status = document.createElement('span');
@@ -457,7 +559,7 @@
           status.style.color = '#94a3b8';
           try {
             const r = await P.read(await Promise.all(picked.map(async f => ({ name: f.name, buffer: await f.arrayBuffer() }))), kind);
-            pool = r.quizzes; readProblems = r.problems; nFiles = picked.length;
+            pool = prepareStatements(r.quizzes, r.problems); readProblems = r.problems; nFiles = picked.length;
             remap();
           } catch (e) {
             pool = null; readProblems = []; assign = new Map();
@@ -468,12 +570,15 @@
           renderList();
         };
         quizzes.addEventListener('change', () => { pickBtn.disabled = !quizzes.checked; row.style.opacity = quizzes.checked ? '1' : '.5'; sync(); });
-        ui.line('Cada quiz é um Multiple Choice com o título exato da página. Com o .h5p do Extrator de Questões, já vai com a questão e as configurações do arquivo; sem ele, com pergunta e alternativas provisórias para a equipe trocar. Na lista, dá para trocar a questão de cada página.', { fontSize: '11px', color: '#94a3b8' });
+        ui.line(`Cada quiz é um Multiple Choice com o título exato da página. Com o .zip do Extrator de Questões (ou todos os arquivos tirados dele), já vai com a questão e as configurações do arquivo; sem ele, com pergunta e alternativas provisórias para a equipe trocar. Na lista, dá para trocar a questão de cada página. ${kind === 'micro' ? 'Microfundamento: os arquivos têm que ser "Questão N" (do relatório da FIC).' : 'Disciplina comum: os arquivos têm que ser "Tópico N" (do Word).'}`, { fontSize: '11px', color: '#94a3b8' });
         if (kind === 'micro') {
           ui.line('Microfundamento: o Extrator numera as questões do relatório da FIC pela página da sessão, e a "Questão N" vai para a N-ª página marcada na lista acima, na ordem dos módulos — desmarcar uma página passa as questões seguintes para as próximas. Confira os pares: o começo da pergunta aparece embaixo de cada página.', { fontSize: '11px', color: '#fbbf24' })
             .setAttribute('data-micro-files', '');
         }
         insert = ui.check(`Inserir cada quiz na sua página (${kind === 'micro' ? 'logo abaixo do banner de Atividades de Fixação' : 'caixa da "Atividade de Fixação"'}) — antes de gravar, mostra a prévia.`, true, 'data-insert');
+        const stmtNote = ui.line('', { fontSize: '11px', display: 'none', margin: '-2px 0 10px 22px' });
+        stmtNote.setAttribute('data-statement-note', '');
+        insert.addEventListener('change', () => renderStatus());
 
         const selectStyle = {
           display: 'block', margin: '2px 0 0 19px', maxWidth: 'calc(100% - 19px)', padding: '2px 4px', borderRadius: '4px',
@@ -534,6 +639,16 @@
                 Object.assign(pv.style, { color: '#94a3b8', fontSize: '11px', fontStyle: 'italic', marginLeft: '19px' });
                 li.appendChild(pv);
               }
+              // Questão com imagem: o enunciado vai para a página, acima do quiz.
+              const st = i >= 0 ? pool[i].statement : null;
+              if (st) {
+                const n = st.images.length;
+                const sv = document.createElement('div');
+                sv.setAttribute('data-statement', String(n));
+                sv.textContent = `+ enunciado ${n ? `com ${n} imagem${n > 1 ? 'ns' : ''}` : 'sem imagem'} — vai na página, logo acima do quiz${st.todo ? ` · ⚠ ${st.todo} figura(s) para copiar à mão` : ''}`;
+                Object.assign(sv.style, { color: st.todo ? '#fbbf24' : '#93c5fd', fontSize: '11px', marginLeft: '19px' });
+                li.appendChild(sv);
+              }
             }
             return li;
           }));
@@ -561,6 +676,14 @@
             dupNote.textContent = dups.map(([i, titles]) => `⚠ ${pool[i].source} está em ${titles.length} páginas (${titles.join('; ')}): deixe em uma só.`).join('\n');
             dupNote.style.display = dupBlocked ? 'block' : 'none';
           }
+          // Enunciados (questões com imagem): para onde vão, e o que acontece sem a inserção.
+          const withStmt = pool ? list.filter(p => pick(p) >= 0 && pool[pick(p)].statement).length : 0;
+          stmtNote.textContent = !withStmt ? ''
+            : insert.checked
+              ? `${withStmt} página(s) vão receber também o enunciado da questão (com a imagem), logo acima do quiz, que leva só a frase "${ASK_TEXT}" e as alternativas. As imagens sobem para Arquivos › ${FILES_DIR} depois que você digitar o número do curso, na prévia da inserção.`
+              : `⚠ ${withStmt} questão(ões) com imagem: com "Inserir" desmarcado, o enunciado não vai para a página, e o quiz fica só com a frase "${ASK_TEXT}" e as alternativas.`;
+          stmtNote.style.display = withStmt ? 'block' : 'none';
+          stmtNote.style.color = insert.checked ? '#93c5fd' : '#fbbf24';
           sync();
         }
         renderList();
@@ -590,19 +713,53 @@
     });
   }
 
+  const WRITES = new Set(['insert', 'replace', 'statement']);
+  const writesStmt = r => r.stmt === 'insert' || r.stmt === 'replace';
+
+  // O que acontece com a página: [ícone, texto].
+  function describe(r) {
+    const s = writesStmt(r);
+    switch (r.status) {
+      case 'insert':    return ['✅', `vai receber o quiz${s ? ' e o enunciado, logo acima' : ''}`];
+      case 'replace':   return ['⚠', `vai TROCAR o H5P que está no lugar do quiz pelo da pasta${r.stmt === 'insert' ? ' e receber o enunciado, logo acima' : r.stmt === 'replace' ? ' e TROCAR o enunciado inserido antes' : ''}`];
+      case 'statement': return r.stmt === 'replace' ? ['⚠', 'já tem este quiz; vai TROCAR o enunciado inserido antes'] : ['✅', 'já tem este quiz; vai receber o enunciado, logo acima'];
+      case 'same':      return ['—', `já tem este quiz${r.stmt === 'same' ? ' e o enunciado' : ''}`];
+      case 'noquiz':    return ['✗', 'não achei na pasta um quiz com o título desta página'];
+      default:          return ['✗', ''];
+    }
+  }
+
+  const kb = n => `${Math.max(1, Math.round(n / 1024))} KB`;
+
+  // O enunciado como vai ficar na página, com as imagens do .zip (blob:,
+  // revogados quando a janela fecha). O HTML já vem limpo (cleanStatement).
+  function statementView(st, urls) {
+    const box = document.createElement('div');
+    box.setAttribute('data-statement-view', '');
+    Object.assign(box.style, { background: '#f8fafc', color: '#0f172a', borderRadius: '4px', padding: '6px 10px', margin: '4px 0 0',
+      maxHeight: '300px', overflowY: 'auto', fontSize: '12px', lineHeight: '1.45' });
+    const doc = new DOMParser().parseFromString(`<!doctype html><body>${st.html}`, 'text/html');
+    for (const img of doc.querySelectorAll('img')) {
+      const im = st.images.find(i => i.path === img.getAttribute('src'));
+      img.removeAttribute('src');
+      if (im) { const u = URL.createObjectURL(new Blob([im.bytes], { type: im.type })); urls.push(u); img.setAttribute('src', u); }
+      img.setAttribute('style', 'max-width: 100%; max-height: 240px; display: block; margin: 4px auto;');
+    }
+    doc.querySelectorAll('pre').forEach(p => p.setAttribute('style', 'white-space: pre-wrap; font-size: 11px; margin: 4px 0;'));
+    doc.querySelectorAll('p').forEach(p => p.setAttribute('style', 'margin: 0 0 6px;'));
+    box.append(...[...doc.body.childNodes].map(n => document.importNode(n, true)));
+    return box;
+  }
+
   // Prévia da inserção: uma linha por página; as que vão mudar vêm marcadas
   // (dá para testar numa só). Grava só com o número do curso redigitado.
+  // Questão com imagem: o enunciado que vai junto, as imagens (já nos
+  // Arquivos ou para subir) e o aviso de figura para copiar à mão.
   // Resolve a lista de linhas marcadas ou null.
   function askInsert(rows) {
-    const LABEL = {
-      insert:  ['✅', 'vai receber o quiz'],
-      replace: ['⚠', 'vai TROCAR o H5P que está no lugar do quiz pelo da pasta'],
-      same:    ['—', 'já tem este quiz'],
-      noquiz:  ['✗', 'não achei na pasta um quiz com o título desta página'],
-      error:   ['✗', ''],
-    };
+    const urls = [];
     return modal(ui => {
-      const todo = rows.filter(r => r.status === 'insert' || r.status === 'replace');
+      const todo = rows.filter(r => WRITES.has(r.status));
       ui.line('🧩 Inserir os quizzes nas páginas?', { fontSize: '14px', fontWeight: 'bold', color: '#e2e8f0' });
       ui.line(todo.length
         ? `Prévia — ${todo.length} página(s) para gravar. Nada foi gravado ainda. Desmarque as que não quiser (dá para testar numa só).`
@@ -613,8 +770,8 @@
         Object.assign(row.style, { borderTop: '1px solid #334155', padding: '6px 0', fontSize: '12px' });
         const head = document.createElement('label');
         Object.assign(head.style, { display: 'flex', gap: '8px', alignItems: 'flex-start', cursor: 'pointer' });
-        const [icon, what] = LABEL[r.status];
-        if (r.status === 'insert' || r.status === 'replace') {
+        const [icon, what] = describe(r);
+        if (WRITES.has(r.status)) {
           const c = document.createElement('input');
           c.type = 'checkbox'; c.checked = true; c.setAttribute('data-page', r.url);
           c.style.marginTop = '2px';
@@ -632,7 +789,33 @@
         head.appendChild(t);
         row.appendChild(head);
         const note = [what, r.error, r.note].filter(Boolean).join(' ');
-        if (note) ui.line(note, { margin: '2px 0 0 21px', fontSize: '11px', color: r.status === 'error' || r.status === 'noquiz' ? '#f87171' : r.note || r.status === 'replace' ? '#fbbf24' : '#94a3b8' }, row);
+        if (note) ui.line(note, { margin: '2px 0 0 21px', fontSize: '11px', color: r.status === 'error' || r.status === 'noquiz' ? '#f87171' : r.note || r.status === 'replace' || r.stmt === 'replace' ? '#fbbf24' : '#94a3b8' }, row);
+        // O enunciado que vai junto: imagens, aviso de figura e o texto.
+        if (r.statement && WRITES.has(r.status) && writesStmt(r)) {
+          const st = r.statement;
+          const wrap = document.createElement('div');
+          wrap.setAttribute('data-statement', String(st.images.length));
+          wrap.style.margin = '4px 0 0 21px';
+          const n = st.images.length;
+          ui.line(`+ enunciado ${n ? `com ${n} imagem${n > 1 ? 'ns' : ''}` : 'sem imagem'} (${st.title}):`, { margin: '0', fontSize: '11px', color: '#93c5fd' }, wrap);
+          for (const im of r.images || []) {
+            ui.line(`🖼 ${im.name} (${kb(im.size)}) — ${im.reuse ? `já está em Arquivos › ${FILES_DIR} (reaproveitada)` : `sobe para Arquivos › ${FILES_DIR} depois de confirmar`}`,
+              { margin: '1px 0 0 8px', fontSize: '11px', color: '#cbd5e1' }, wrap).setAttribute('data-image', im.reuse ? 'reuse' : 'upload');
+          }
+          if (st.todo) {
+            ui.line(`⚠ O enunciado tem ${st.todo} aviso(s) "[figura … copie do documento original]": depois de gravar, cole a figura no lugar do aviso, no editor da página.`,
+              { margin: '2px 0 0', fontSize: '11px', color: '#fbbf24' }, wrap).setAttribute('data-figure-todo', String(st.todo));
+          }
+          const det = document.createElement('details');
+          const sum = document.createElement('summary');
+          sum.textContent = 'Ver o enunciado como vai ficar na página';
+          Object.assign(sum.style, { cursor: 'pointer', fontSize: '11px', color: '#94a3b8', margin: '2px 0 0' });
+          det.append(sum, statementView(st, urls));
+          wrap.appendChild(det);
+          row.appendChild(wrap);
+        } else if (r.statement && r.stmt === 'same') {
+          ui.line(`O enunciado (${r.statement.title}) já está na página, igual.`, { margin: '2px 0 0 21px', fontSize: '11px', color: '#94a3b8' }, row);
+        }
         ui.box.appendChild(row);
       }
       let input = null;
@@ -657,7 +840,7 @@
       yes.onclick = () => { if (!yes.disabled) ui.done(marked()); };
       sync();
       return input;
-    });
+    }).finally(() => urls.forEach(u => URL.revokeObjectURL(u)));
   }
 
   // ── Ação ──────────────────────────────────────────────────────────────
@@ -673,17 +856,29 @@
   }
 
   // files: Map(título da página → questão do .h5p) ou null.
+  // statements: título → enunciado que vai para a página (questão com imagem
+  // cujo quiz foi criado agora, ou antes por aqui só com a frase fixa);
+  // withheld: questões com imagem cujo quiz já existia e não foi trocado.
   async function createQuizzes(folder, topics, folderLine, files) {
-    const made = [], existed = [], unused = [];
+    const made = [], existed = [], unused = [], withheld = [];
+    const statements = new Map();
+    const own = files ? await ownQuizzes() : {};
     let fromFile = 0;
     for (let i = 0; i < topics.length; i++) {
       const title = topics[i].title;
       const q = files?.get(title);
       toast(`${folderLine}\nCriando quizzes: ${i + 1} de ${topics.length}…`, 'busy');
       const r = await send({ action: 'h5p-create-quiz', title, parent: folder.id, ...(q ? { params: q.params } : {}) });
-      if (r?.status === 'created') { made.push(r.item); if (q) fromFile++; }
-      else if (r?.status === 'exists') { existed.push(r.item); if (q) unused.push(title); }
-      else {
+      if (r?.status === 'created') {
+        made.push(r.item);
+        if (q) fromFile++;
+        if (q?.statement) { statements.set(title, q.statement); await rememberOwn(r.item.id, title); }
+      } else if (r?.status === 'exists') {
+        existed.push(r.item);
+        // Criado antes por aqui, só com a frase fixa: o enunciado ainda vai.
+        if (q?.statement && own[r.item?.id]) statements.set(title, q.statement);
+        else if (q) { unused.push(title); if (q.statement) withheld.push(title); }
+      } else {
         problem(r, `${folderLine}\nQuizzes: ${made.length} criado(s), ${existed.length} já existia(m) — parou em "${title}".`);
         return null;
       }
@@ -697,16 +892,28 @@
       const ids = new Set((l?.items || []).filter(i => !i.folder).map(i => i.id));
       unseen = made.filter(m => !ids.has(m.id)).length;
     }
-    return { made, existed, unseen, fromFile, unused };
+    return { made, existed, unseen, fromFile, unused, statements, withheld };
   }
 
-  // Prévia de uma página: o que o h5p-insert.js faria com o quiz de mesmo título.
-  function planPage(body, quiz) {
+  // Prévia de uma página: o que o h5p-insert.js faria com o quiz de mesmo
+  // título (e, se houver, com o bloco do enunciado).
+  function planPage(body, quiz, statement = null) {
     if (!quiz) return { status: 'noquiz' };
     const I = window.__svcH5pInsert;
     const embed = I.embedHtml({ origin: location.origin, courseId: courseOf(), contentId: quiz.id, title: quiz.title });
-    return I.plan(body, { contentId: quiz.id, embed });
+    return I.plan(body, { contentId: quiz.id, embed, statement });
   }
+
+  // Bloco do enunciado com as imagens nos Arquivos do curso: id(imagem) → id do arquivo ou null.
+  const blockOf = (st, id) => window.__svcH5pInsert.statementBlock({
+    title: st.title, html: st.html, origin: location.origin, courseId: courseOf(),
+    fileId: path => { const im = st.images.find(i => i.path === path); return im ? id(im) : null; },
+  });
+
+  // Questões com imagem que ficaram sem o enunciado na página.
+  const missingNote = titles => titles.length
+    ? `⚠ Sem o enunciado na página (o quiz tem só "${ASK_TEXT}"): ${titles.join('; ')}. Para pôr, rode de novo com o mesmo .zip e "Inserir" marcado.`
+    : '';
 
   // Página com o lugar do quiz do outro tipo: insere do mesmo jeito (o lugar
   // vem da própria página, pelo h5p-insert.js), mas avisa na prévia.
@@ -716,27 +923,44 @@
   };
 
   // note: aviso dos quizzes, repetido no resultado final. kind: tipo da disciplina.
-  async function insertQuizzes(folder, topics, intro, note = '', kind = 'uda') {
+  // statements: título → enunciado que vai junto (createQuizzes); withheld:
+  // questões com imagem cujo quiz já existia e não foi trocado (só o aviso).
+  async function insertQuizzes(folder, topics, intro, note = '', kind = 'uda', statements = new Map(), withheld = []) {
     toast(`${intro}\nLendo a pasta e as páginas…`, 'busy');
     const l = await send({ action: 'h5p-list', parent: folder.id });
     if (l?.status !== 'ok') return problem(l, intro);
     const quizOf = new Map(l.items.filter(i => !i.folder).map(i => [norm(i.title), i]));
 
+    // Imagens que já estão em Arquivos › Atividades de Fixação: mesmo nome e
+    // mesmo tamanho são reaproveitadas (só leitura, antes da prévia).
+    let stored = new Map(), storedError = '';
+    if (statements.size) {
+      toast(`${intro}\nLendo os Arquivos do curso…`, 'busy');
+      try { stored = await storedImages(); } catch (e) { storedError = e.message; }
+    }
+    const storedId = im => { const f = stored.get(nfc(im.name)); return f && f.size === im.size ? f.id : null; };
+
     const rows = [];
     for (let i = 0; i < topics.length; i++) {
       toast(`${intro}\nLendo as páginas: ${i + 1} de ${topics.length}…`, 'busy');
       const t = topics[i];
-      const row = { ...t, quiz: quizOf.get(norm(t.title)) || null };
+      const row = { ...t, quiz: quizOf.get(norm(t.title)) || null, statement: statements.get(t.title) || null };
       try {
+        if (row.statement && storedError) throw new Error(`não consegui ler os Arquivos do curso para as imagens do enunciado (${storedError}) — nada muda nesta página`);
         const pg = await readPage(t.url);
-        Object.assign(row, planPage(pg.body, row.quiz));
+        // Imagem que ainda não está nos Arquivos fica com o caminho do .zip:
+        // só para a prévia (a gravação espera o envio).
+        Object.assign(row, planPage(pg.body, row.quiz, row.statement && blockOf(row.statement, storedId)));
+        row.images = row.statement ? row.statement.images.map(im => ({ name: im.name, size: im.size, reuse: !!storedId(im) })) : [];
         // Alguém pode estar com a página aberta no editor: se salvar depois,
         // a versão dessa pessoa sobrescreve o quiz inserido.
         const mins = pg.updatedAt ? (Date.now() - new Date(pg.updatedAt).getTime()) / 60000 : Infinity;
-        const writes = row.status === 'insert' || row.status === 'replace';
+        const writes = WRITES.has(row.status);
         row.note = [
           writes && row.layout && row.layout !== kind ? ODD_LAYOUT[kind] : '',
           writes && mins < RECENT_MIN ? `Editada há ${Math.max(1, Math.round(mins))} min${pg.editor ? ' por ' + pg.editor : ''}: se ainda estiver aberta no editor e for salva depois, o quiz some dela.` : '',
+          writes && row.stmt === 'keep' && row.status !== 'statement' ? 'O enunciado inserido antes fica como está, acima do quiz: confira se ele vale para o quiz novo.' : '',
+          withheld.includes(t.title) ? 'O quiz já existia na pasta e não foi trocado: o enunciado do .zip não vai para esta página (o quiz antigo tem a questão inteira).' : '',
         ].filter(Boolean).join(' ');
       } catch (e) {
         row.status = 'error';
@@ -745,35 +969,73 @@
       rows.push(row);
     }
     document.getElementById(TOAST_ID)?.remove();
+    // Páginas que já têm o quiz e este enunciado: nada a fazer, e nada faltando.
+    const delivered = new Set(rows.filter(r => r.statement && r.stmt === 'same').map(r => r.title));
+    const missing = () => [...statements.keys()].filter(t => !delivered.has(t));
 
     const chosen = await askInsert(rows);
-    if (!chosen) return toast(`${intro}\nNenhuma página foi alterada.`, 'info', { href: folder.url, label: 'Abrir pasta' });
+    if (!chosen) {
+      const extra = [missingNote(missing()), note].filter(Boolean).join('\n');
+      return toast(`${intro}\nNenhuma página foi alterada.${extra ? '\n' + extra : ''}`, extra ? 'warn' : 'info', { href: folder.url, label: 'Abrir pasta' });
+    }
 
+    // 1. Imagens dos enunciados (só depois do número do curso): as que ainda
+    // não estão nos Arquivos, uma por vez.
+    const need = new Map();
+    for (const r of chosen) for (const im of r.statement?.images || []) if (!storedId(im) && !need.has(nfc(im.name))) need.set(nfc(im.name), im);
+    const sent = new Map();   // nome → id do arquivo ou Error
+    let k = 0;
+    for (const [key, im] of need) {
+      toast(`Enviando as imagens dos enunciados para Arquivos › ${FILES_DIR}: ${++k} de ${need.size}… Mantenha esta aba aberta.`, 'busy');
+      try { sent.set(key, (await uploadImage(im)).id); } catch (e) { sent.set(key, e); }
+      await sleep(WRITE_MS);
+    }
+    const idOf = im => storedId(im) || (typeof sent.get(nfc(im.name)) === 'string' ? sent.get(nfc(im.name)) : null);
+
+    // 2. Páginas: o quiz e o enunciado numa gravação só.
     const done = { ok: [], same: [], warn: [], error: [] };
+    const failed = new Set(), todo = [];
     for (let i = 0; i < chosen.length; i++) {
       toast(`Inserindo os quizzes: ${i + 1} de ${chosen.length}…`, 'busy');
       const r = chosen[i];
       try {
+        let block = null;
+        if (r.statement) {
+          const lost = r.statement.images.find(im => !idOf(im));
+          if (lost) throw new Error(`a imagem "${lost.name}" não subiu (${sent.get(nfc(lost.name))?.message || 'sem resposta'}) — nada mudou nesta página`);
+          block = blockOf(r.statement, idOf);
+        }
         // Lê de novo: se alguém salvou depois da prévia, vale o conteúdo novo.
         const pg = await readPage(r.url);
-        const p = planPage(pg.body, r.quiz);
-        if (p.status === 'same') { done.same.push(r.title); continue; }
-        if (p.status !== 'insert' && p.status !== 'replace') { done.error.push(`${r.title}: ${p.error || 'mudou desde a prévia'}`); continue; }
+        const p = planPage(pg.body, r.quiz, block);
+        if (p.status === 'same') { done.same.push(r.title); if (block) delivered.add(r.title); continue; }
+        if (!WRITES.has(p.status)) { done.error.push(`${r.title}: ${p.error || 'mudou desde a prévia'}`); failed.add(r.title); continue; }
         const saved = await writePage(r.url, p.body);
-        // Confere o que o Canvas gravou.
-        const check = saved === null ? null : planPage(saved, r.quiz);
+        // Confere o que o Canvas gravou: o quiz e o enunciado no lugar.
+        const check = saved === null ? null : planPage(saved, r.quiz, block);
         if (check && check.status !== 'same') done.warn.push(r.title);
         else done.ok.push(r.title);
+        if (block) { delivered.add(r.title); if (r.statement.todo) todo.push(r.title); }
+        if (i < chosen.length - 1) await sleep(WRITE_MS);
       } catch (e) {
         done.error.push(`${r.title}: ${e.message}`);
+        failed.add(r.title);
       }
     }
-    const parts = [`✓ Quiz inserido em ${done.ok.length} página(s).`];
+    const withStmt = done.ok.filter(t => delivered.has(t)).length;
+    const parts = [`✓ Quiz inserido em ${done.ok.length} página(s)${withStmt ? ` (${withStmt} com o enunciado)` : ''}.`];
     if (done.same.length) parts.push(`${done.same.length} já tinha(m) o quiz.`);
-    if (done.warn.length) parts.push(`⚠ Gravado, mas o quiz não ficou na caixa em: ${done.warn.join('; ')} — confira no editor.`);
+    const upOk = [...sent.values()].filter(v => typeof v === 'string').length, reused = new Set();
+    for (const r of chosen) for (const im of r.statement?.images || []) if (storedId(im)) reused.add(nfc(im.name));
+    if (upOk || reused.size) parts.push(`🖼 Imagens dos enunciados em Arquivos › ${FILES_DIR}: ${upOk} enviada(s)${reused.size ? `, ${reused.size} reaproveitada(s)` : ''}.`);
+    if (done.warn.length) parts.push(`⚠ Gravado, mas a conferência não achou o quiz${statements.size ? ' (ou o enunciado)' : ''} no lugar em: ${done.warn.join('; ')} — confira no editor.`);
     if (done.error.length) parts.push(`✗ Não gravado: ${done.error.join('; ')}`);
+    if (todo.length) parts.push(`⚠ Copie a figura do documento original no lugar do aviso "[figura … copie do documento original]" em: ${todo.join('; ')}.`);
+    const pending = missing().filter(t => !failed.has(t));
+    if (pending.length) parts.push(missingNote(pending));
     if (note) parts.push(note);
-    toast(parts.join('\n'), done.error.length || done.warn.length || note ? 'warn' : 'ok');
+    const warn = done.error.length || done.warn.length || note || todo.length || pending.length;
+    toast(parts.join('\n'), warn ? 'warn' : 'ok');
     // Os selos "H5P" dos módulos (canvas-h5p-marks.js) leem as páginas de novo.
     if (done.ok.length || done.warn.length) window.__svcH5pMarks?.refresh();
   }
@@ -824,20 +1086,28 @@
         : `Pasta "${r.folder.title}" já existia no H5P.com (${dest.label}).`;
 
       let note = '';
+      let statements = new Map(), withheld = [];
       if (choice.quizzes) {
         const q = await createQuizzes(r.folder, topics, line, choice.files);
         if (!q) return;
+        ({ statements, withheld } = q);
         const parts = [`${q.made.length} quiz(zes) criado(s)${q.fromFile ? ` (${q.fromFile} com a questão do .h5p)` : ''}`];
         if (q.existed.length) parts.push(`${q.existed.length} já existia(m)`);
         line += `\n${parts.join(' · ')}.`;
         // Quiz que já existia não muda: a questão do arquivo ficou de fora.
-        if (q.unused.length) note = `⚠ Já existia(m) na pasta e não foi(ram) trocado(s) pelo .h5p: ${q.unused.join('; ')} — troque a questão no H5P.com.`;
+        const notes = [];
+        if (q.unused.length) notes.push(`⚠ Já existia(m) na pasta e não foi(ram) trocado(s) pelo .h5p: ${q.unused.join('; ')} — troque a questão no H5P.com.`);
+        // …e o enunciado também: o quiz antigo tem a questão inteira.
+        if (withheld.length) notes.push(`⚠ Enunciado (com imagem) não inserido, porque o quiz já existia e não foi trocado: ${withheld.join('; ')}.`);
+        note = notes.join('\n');
         if (q.unseen) {
           // Lista da pasta não confiável: inserir agora poderia apontar errado.
-          return toast(`${line}\n⚠ ${q.unseen} quiz(zes) novo(s) não apareceram na lista da pasta: confira no H5P.com antes de clicar de novo.${note ? '\n' + note : ''}`, 'warn', open);
+          return toast(`${line}\n⚠ ${q.unseen} quiz(zes) novo(s) não apareceram na lista da pasta: confira no H5P.com antes de clicar de novo.${[missingNote([...statements.keys()]), note].filter(Boolean).map(s => '\n' + s).join('')}`, 'warn', open);
         }
       }
-      if (choice.insert) return await insertQuizzes(r.folder, topics, line, note, kind);
+      if (choice.insert) return await insertQuizzes(r.folder, topics, line, note, kind, statements, withheld);
+      // Sem a inserção, o enunciado das questões com imagem não vai para a página.
+      note = [missingNote([...statements.keys()]), note].filter(Boolean).join('\n');
       toast(line + (!choice.quizzes && r.status === 'exists' ? ' Nada foi criado.' : '') + (note ? '\n' + note : ''),
         note ? 'warn' : r.status === 'created' || choice.quizzes ? 'ok' : 'info', open);
     } finally {
