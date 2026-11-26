@@ -4418,7 +4418,7 @@ async function doMatImport() {
 // consulta — só faz GET na API do Canvas, pela sessão da aba. Portado da
 // extensão Analisador de Disciplina (avaGraducao).
 
-const AN_MAX_PAGES = 50;   // segurança: até 5000 itens por listagem
+const AN_MAX_PAGES = 300;  // segurança: até 30 000 itens por listagem
 let _anBusy = false;
 
 // Roda na aba do Canvas: um GET same-origin. Em 403 de rate limit, espera e
@@ -4454,10 +4454,17 @@ async function anGet(tabId, url) {
 }
 
 // Todas as páginas de uma listagem, seguindo rel="next" do header Link.
+// Passou do limite: erro, nunca uma lista cortada — com metade dos alunos o
+// diagnóstico daria "tudo certo" sem ter olhado o resto.
 async function anGetAll(tabId, url, onProgress) {
   const all = [];
   let next = url;
-  for (let i = 0; next && i < AN_MAX_PAGES; i++) {
+  for (let i = 0; next; i++) {
+    if (i >= AN_MAX_PAGES) {
+      const err = new Error(`A listagem passou de ${all.length} itens e foi interrompida — o diagnóstico ficaria incompleto.`);
+      err.truncated = true;
+      throw err;
+    }
     const res = await anGet(tabId, next);
     all.push(...JSON.parse(res.text));
     if (onProgress) onProgress(all.length);
@@ -4488,7 +4495,8 @@ function anSisSync(assignments) {
   };
 }
 
-const anStudentName = s => s.user?.name ?? `Aluno #${s.user_id}`;
+// names: Map id → nome, da lista de alunos ativos.
+const anStudentName = (names, s) => names.get(s.user_id) ?? `Aluno #${s.user_id}`;
 
 // Agrupa por tarefa, com as de mais alunos primeiro.
 function anGroupByAssignment(byId, sortStudents) {
@@ -4504,7 +4512,7 @@ function anGroupByAssignment(byId, sortStudents) {
 
 // Nas tarefas com SIS, todo aluno precisa de nota (pode ser 0, não vazia).
 // Ficam de fora: reavaliação (nem todos fazem), colunas em % e sem pontuação.
-function anMissingGrades(subs, assignments) {
+function anMissingGrades(subs, assignments, names) {
   const ignored = [];
   const byId    = new Map();
   for (const a of assignments) {
@@ -4520,7 +4528,7 @@ function anMissingGrades(subs, assignments) {
   for (const s of subs) {
     const entry = byId.get(s.assignment_id);
     if (!entry || s.excused || s.score != null) continue;
-    entry.students.push(anStudentName(s));
+    entry.students.push(anStudentName(names, s));
   }
   const items = anGroupByAssignment(byId, (a, b) => a.localeCompare(b, 'pt-BR'));
   return { items, ignored, checked: byId.size, total: items.reduce((n, i) => n + i.students.length, 0) };
@@ -4528,7 +4536,7 @@ function anMissingGrades(subs, assignments) {
 
 // Zeros que não vieram de um lançamento manual publicado costumam ser
 // ignorados pelo SIS; redigitar o 0 no boletim regulariza.
-function anSuspiciousZeros(subs, assignments) {
+function anSuspiciousZeros(subs, assignments, names) {
   const byId = new Map(
     assignments
       .filter(a => a.workflow_state !== 'deleted' && a.published && a.post_to_sis === true
@@ -4544,13 +4552,13 @@ function anSuspiciousZeros(subs, assignments) {
     if (s.workflow_state !== 'graded')           signals.push('não marcada como avaliada');
     if (s.grader_id == null || s.grader_id < 0)  signals.push('sem avaliador humano (lançamento automático)');
     if (s.posted_at == null)                     signals.push('nota oculta (não publicada)');
-    if (signals.length) entry.students.push({ name: anStudentName(s), signals });
+    if (signals.length) entry.students.push({ name: anStudentName(names, s), signals });
   }
   const items = anGroupByAssignment(byId, (a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   return { items, zerosChecked, total: items.reduce((n, i) => n + i.students.length, 0) };
 }
 
-function anScoreOverMax(subs, assignments) {
+function anScoreOverMax(subs, assignments, names) {
   const byId = new Map(assignments.map(a => [a.id, a]));
   const over = [];
   let checked = 0;
@@ -4561,7 +4569,7 @@ function anScoreOverMax(subs, assignments) {
     const max = anPts(a);
     if (max <= 0) continue;   // sem máximo real (ex.: coluna calculada em %)
     checked++;
-    if (s.score > max) over.push({ student: anStudentName(s), name: a.name, url: a.html_url, score: s.score, max });
+    if (s.score > max) over.push({ student: anStudentName(names, s), name: a.name, url: a.html_url, score: s.score, max });
   }
   over.sort((x, y) => (y.score - y.max) - (x.score - x.max));
   return { over, checked };
@@ -4791,21 +4799,24 @@ function doAnaliseBoletim() {
     const students = await anGetAll(tabId,
       `${base}/users?enrollment_type[]=student&enrollment_state[]=active&per_page=100`);
 
+    // Os nomes saem da lista de alunos acima; sem include[]=user, cada nota
+    // não traz de novo o cadastro inteiro do aluno.
     anStatus('Carregando notas do boletim...');
     let subs;
     try {
       subs = await anGetAll(tabId,
-        `${base}/students/submissions?student_ids[]=all&include[]=user&enrollment_state=active&per_page=100`,
+        `${base}/students/submissions?student_ids[]=all&enrollment_state=active&per_page=100`,
         n => anStatus(`Carregando notas do boletim... ${n} notas`));
     } catch (err) {
+      if (err.truncated) throw err;
       throw new Error(`Não foi possível ler o boletim (é preciso estar como professor na disciplina). ${err.message}`);
     }
 
-    const activeIds  = new Set(students.map(s => s.id));
-    const activeSubs = subs.filter(s => activeIds.has(s.user_id));
-    anRenderMissing(anMissingGrades(activeSubs, assignments));
-    anRenderZeros(anSuspiciousZeros(activeSubs, assignments));
-    anRenderOverMax(anScoreOverMax(activeSubs, assignments));
+    const names      = new Map(students.map(s => [s.id, s.name]));
+    const activeSubs = subs.filter(s => names.has(s.user_id));
+    anRenderMissing(anMissingGrades(activeSubs, assignments, names));
+    anRenderZeros(anSuspiciousZeros(activeSubs, assignments, names));
+    anRenderOverMax(anScoreOverMax(activeSubs, assignments, names));
   });
 }
 
