@@ -671,23 +671,26 @@
     <span id="an-course-label" class="small muted" style="margin-left:auto"></span>
   </div>
 
-  <span class="small muted" style="display:block;opacity:.6">Diagnóstico da disciplina aberta na aba: sincronização das tarefas com o SIS e lançamento de notas no boletim. Somente consulta — nada é alterado no Canvas.</span>
+  <span class="small muted" style="display:block;opacity:.6">Diagnóstico da disciplina aberta na aba: sincronização das tarefas com o SIS, lançamento de notas no boletim e a fórmula que fecha o diário no SGA. Somente consulta — nada é alterado no Canvas.</span>
 
   <div class="row-btns mt6" style="gap:4px">
     <button id="btn-an-tarefas" class="btn btn-surface" style="flex:1">📝  Verificar tarefas</button>
     <button id="btn-an-boletim" class="btn btn-surface" style="flex:1">📊  Verificar boletim</button>
   </div>
+  <button id="btn-an-diario" class="btn btn-surface btn-full mt4">🧮  Fórmula do diário</button>
   <div id="an-status" class="small mt4" style="display:none"></div>
 
   <div id="an-results" class="cl-results mt6"></div>
 
   <details class="an-manual mt6">
     <summary>? Como funciona</summary>
-    <p><b>Verificar tarefas</b> — lista as tarefas com pontuação que estão sem "Sincronizar com o SIS" (essas notas não chegam ao SIS) e soma os pontos das sincronizadas, para conferir se o total fecha.</p>
+    <p>Ao rodar uma verificação, os cartões das outras recolhem; clique no título de um cartão para abrir ou recolher.</p>
+    <p><b>Verificar tarefas</b> — usa o mesmo critério da Sincronização SGA: tarefa publicada, com pontos, com "Sincronizar com o SIS", contando na nota final e com a nota exibida em Pontos vai para o SGA. Lista as que ficam de fora e o motivo, as de postagem manual (nota pode estar oculta) e soma os pontos das que vão, para conferir se o total fecha. Tarefa não publicada fica num grupo à parte.</p>
     <p><b>Verificar boletim</b> — exige estar como professor. Lê as notas dos alunos ativos (inativos e aluno teste ficam de fora) e roda três análises:</p>
     <p><b>Notas vazias</b> — nas tarefas com SIS, todo aluno precisa de nota; pode ser 0, não pode ficar vazia. Ficam de fora reavaliação, colunas em % e tarefas sem pontuação; dispensados não contam.</p>
     <p><b>Zeros suspeitos</b> — um 0 automático (entregas faltantes, autocorreção), não avaliado ou oculto costuma ser ignorado pelo SIS. Para corrigir, troque a nota por outro valor no boletim e volte para 0.</p>
     <p><b>Notas acima do máximo</b> — nota lançada maior que a pontuação da tarefa, dos maiores estouros para os menores.</p>
+    <p><b>Fórmula do diário</b> — monta a fórmula do SGA com as tarefas que vão ao SGA. Lê por trás a Sincronização SGA do curso (só leitura; nunca sincroniza) e mostra a situação do diário e a fórmula atual, comparando com a sugerida. Os números P vêm das siglas do SGA; quando ele não manda as siglas, seguem a ordem do Canvas e podem não bater (o P sai na ordem de sincronização) — corrija no campo ao lado da tarefa. Sem reavaliação, é a soma (fecha em 100). A reavaliação de 100 cobre tudo — <code>Reav(Preav;…)</code>, pesos 1 e 1; a menor cobre a avaliação de mesmo valor, pesos 0 e 0. Se sobram pontos de um grupo de mesmo valor (a substitutiva), entra um <code>Max</code> que descarta a menor nota. Se mesmo assim não fecha, mostra o que o professor pode fazer e quem perderia nota.</p>
   </details>
 </div>
 

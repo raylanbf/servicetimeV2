@@ -741,7 +741,11 @@ input[type=text]:focus { border-color: #60a5fa; }
   border-radius: 4px;
   padding: 7px 8px;
 }
-.an-card-title { font-size: 12px; font-weight: bold; color: #e2e8f0; }
+.an-card-title { font-size: 12px; font-weight: bold; color: #e2e8f0; cursor: pointer; user-select: none; }
+.an-card-title::before { content: '▾'; display: inline-block; width: 11px; color: #64748b; font-size: 10px; }
+.an-card-title:hover { color: #fff; }
+.an-card.collapsed .an-card-title::before { content: '▸'; }
+.an-card.collapsed > :not(.an-card-title) { display: none !important; }
 .an-card-sub   { font-size: 10px; color: #94a3b8; margin-top: 2px; line-height: 1.4; }
 .an-stats { display: flex; gap: 4px; margin-top: 6px; }
 .an-stat {
@@ -788,6 +792,7 @@ input[type=text]:focus { border-color: #60a5fa; }
 .an-badge { flex-shrink: 0; border-radius: 8px; padding: 0 6px; font-size: 10px; background: #3a3a4e; color: #cbd5e1; }
 .an-badge.green { background: #14532d; color: #4ade80; }
 .an-badge.red   { background: #7f1d1d; color: #fca5a5; }
+.an-badge.warn  { background: #713f12; color: #fde68a; }
 .an-section-body { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
 .an-item {
   background: #21212f;
@@ -816,6 +821,62 @@ input[type=text]:focus { border-color: #60a5fa; }
 .an-manual p { margin: 5px 0 0; line-height: 1.4; }
 .an-manual b { color: #cbd5e1; }
 #view-canvas-analise .spinner { border-color: rgba(255,255,255,0.2); border-top-color: #4ade80; }
+.an-msg.warn { color: #fbbf24; }
+.an-msg b    { color: #e2e8f0; }
+.an-manual code { font-family: 'Courier New', monospace; color: #cbd5e1; }
+/* Fórmula do diário */
+.fd-formula {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  background: #1a1a2a;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 6px 7px;
+  margin-top: 5px;
+}
+.fd-formula code {
+  flex: 1;
+  min-width: 0;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #e2e8f0;
+  word-break: break-all;
+}
+.fd-formula .btn-link-sm { flex-shrink: 0; }
+.fd-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: #21212f;
+  border: 1px solid #3a3a4e;
+  border-radius: 4px;
+  padding: 3px 5px;
+}
+.fd-p {
+  width: 36px;
+  flex-shrink: 0;
+  background: #2a2a3e;
+  color: #e2e8f0;
+  border: 1px solid #3a3a4e;
+  border-radius: 3px;
+  padding: 2px 3px;
+  font-size: 11px;
+  font-family: 'Courier New', monospace;
+  text-align: center;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.fd-p:focus { border-color: #60a5fa; }
+.fd-p::-webkit-inner-spin-button, .fd-p::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.fd-info { flex: 1; min-width: 0; font-size: 11px; }
+select.fd-role { width: auto; flex-shrink: 0; margin: 0; padding: 2px 4px; font-size: 10px; border: 1px solid #3a3a4e; }
+.fd-opts { flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 5px; font-size: 11px; color: #cbd5e1; }
+.fd-opts label { display: flex; align-items: center; gap: 4px; }
+.fd-redo { display: block; margin-top: 6px; }
+.fd-warn { color: #fbbf24; }
+.an-msg .green { color: #4ade80; }
+.fd-code { display: block; font-family: 'Courier New', monospace; font-size: 11px; color: #e2e8f0; word-break: break-all; margin: 2px 0; }
 
 /* ── Trocar banner ────────────────────────────────────────────────── */
 .ban-preview {

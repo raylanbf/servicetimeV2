@@ -4423,11 +4423,11 @@ let _anBusy = false;
 
 // Roda na aba do Canvas: um GET same-origin. Em 403 de rate limit, espera e
 // tenta de novo (as chamadas já são sequenciais, uma página por vez).
-function analiseFetchPage(url) {
+function analiseFetchPage(url, accept) {
   return (async () => {
     try {
       for (let attempt = 0; ; attempt++) {
-        const res  = await fetch(url, { credentials: 'include', headers: { Accept: 'application/json' } });
+        const res  = await fetch(url, { credentials: 'include', headers: { Accept: accept || 'application/json' } });
         const text = await res.text();
         if (res.status === 403 && /rate limit/i.test(text) && attempt < 2) {
           await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
@@ -4441,8 +4441,8 @@ function analiseFetchPage(url) {
   })();
 }
 
-async function anGet(tabId, url) {
-  const res = await chrome.scripting.executeScript({ target: { tabId }, func: analiseFetchPage, args: [url] });
+async function anGet(tabId, url, accept) {
+  const res = await chrome.scripting.executeScript({ target: { tabId }, func: analiseFetchPage, args: [url, accept || ''] });
   const out = res[0]?.result;
   if (!out) throw new Error('a aba do Canvas não respondeu');
   if (!out.ok) {
@@ -4478,17 +4478,34 @@ async function anGetAll(tabId, url, onProgress) {
 
 const anPts = a => a.points_possible ?? 0;
 
-// Toda tarefa com pontos deveria estar com "Sincronizar com o SIS" ligado.
+// Critério do sincronizador (Sincronização SGA) para a tarefa ir ao SGA:
+// publicada, com SIS, pontos > 0, conta na nota final e "Exibir nota como" =
+// Pontos. Com SIS e pontos, o motivo de ainda assim não ir (ou null).
+function anSisBlock(a) {
+  if (a.omit_from_final_grade) return 'não conta na nota final';
+  if (a.grading_type && a.grading_type !== 'points') return '"Exibir nota como" não está em Pontos';
+  return null;
+}
+
+// Toda tarefa publicada com pontos deveria ir para o SGA. Não publicada não
+// vai, com ou sem SIS ("Atividade não publicada" na Sincronização SGA), então
+// fica num grupo à parte, sem alarme. Postagem manual vai, mas a nota pode
+// ficar oculta ("Verificar política de postagem de notas").
 function anSisSync(assignments) {
   const active     = assignments.filter(a => a.workflow_state !== 'deleted');
-  const withPoints = active.filter(a => anPts(a) > 0);
-  const ok         = withPoints.filter(a => a.post_to_sis === true);
+  const published  = active.filter(a => a.published);
+  const withPoints = published.filter(a => anPts(a) > 0);
+  const withSis    = withPoints.filter(a => a.post_to_sis === true);
+  const ok         = withSis.filter(a => !anSisBlock(a));
   const missing    = withPoints.filter(a => a.post_to_sis !== true);
   const sum        = list => list.reduce((n, a) => n + anPts(a), 0);
   return {
     ok,
     missing,
-    zeroPoints:    active.filter(a => !(anPts(a) > 0)),
+    blocked:       withSis.filter(a => anSisBlock(a)),
+    manual:        ok.filter(a => a.post_manually),
+    zeroPoints:    published.filter(a => !(anPts(a) > 0)),
+    unpublished:   active.filter(a => !a.published),
     total:         active.length,
     okPoints:      sum(ok),
     missingPoints: sum(missing),
@@ -4608,6 +4625,11 @@ function anStatus(msg, color) {
 }
 
 // Cada análise tem um cartão fixo: rodar de novo troca o conteúdo no lugar.
+// O título abre e fecha o cartão. Os cartões desenhados numa verificação
+// ficam abertos e os das outras recolhem — o que não foi redesenhado nesta
+// rodada (_anRunId) é de outra verificação.
+let _anRunId = 0;
+
 function anCard(id, title, subtitle) {
   let card = document.getElementById(id);
   if (!card) {
@@ -4616,7 +4638,15 @@ function anCard(id, title, subtitle) {
     $('an-results').appendChild(card);
   }
   card.innerHTML = '';
-  card.appendChild(anEl('div', 'an-card-title', title));
+  card.dataset.run = _anRunId;
+  card.classList.remove('collapsed');
+  document.querySelectorAll('#an-results .an-card').forEach(c => {
+    if (c.dataset.run !== String(_anRunId)) c.classList.add('collapsed');
+  });
+  const head = anEl('div', 'an-card-title', title);
+  head.title = 'Abrir / recolher';
+  head.addEventListener('click', () => card.classList.toggle('collapsed'));
+  card.appendChild(head);
   card.appendChild(anEl('div', 'an-card-sub', subtitle));
   return card;
 }
@@ -4634,22 +4664,23 @@ function anSection(parent, title, count, tone, open) {
   return body;
 }
 
-function anAssignmentRow(a) {
+function anAssignmentRow(a, note) {
   const row = anEl('div', 'an-item');
   row.appendChild(anLink(a.name, a.html_url, 'an-item-name'));
   const due = a.due_at
     ? new Date(a.due_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
     : 'sem prazo';
   row.appendChild(anEl('div', 'an-item-sub',
-    `${anFmtPoints(a.points_possible)} pts · ${due}${a.published ? '' : ' · não publicada'}`));
+    `${anFmtPoints(a.points_possible)} pts · ${due}${a.published ? '' : ' · não publicada'}${note ? ' · ' + note : ''}`));
   return row;
 }
 
 function anRenderSis(r) {
   const card = anCard('an-card-sis', 'Sincronização com o SIS',
-    'Tarefas com pontuação devem estar com "Sincronizar com o SIS" habilitado.');
+    'Tarefas publicadas com pontos têm que ir para o SGA: "Sincronizar com o SIS" ligado, contando na nota final e com a nota exibida em Pontos.');
   const stats = anEl('div', 'an-stats');
-  for (const [n, label, tone] of [[r.total, 'tarefas', ''], [r.ok.length, 'com SIS', 'green'], [r.missing.length, 'sem SIS', 'red']]) {
+  const problems = r.missing.length + r.blocked.length;
+  for (const [n, label, tone] of [[r.total, 'tarefas', ''], [r.ok.length, 'vão ao SGA', 'green'], [problems, 'com problema', 'red']]) {
     const box = anEl('div', 'an-stat ' + tone);
     box.appendChild(anEl('b', '', String(n)));
     box.appendChild(anEl('span', '', label));
@@ -4657,18 +4688,31 @@ function anRenderSis(r) {
   }
   card.appendChild(stats);
   card.appendChild(anEl('div', 'an-msg',
-    `Pontos das tarefas sincronizadas: ${anFmtPoints(r.okPoints)}`
+    `Pontos das tarefas que vão ao SGA: ${anFmtPoints(r.okPoints)}`
     + (r.missingPoints > 0 ? ` · fora do SIS: ${anFmtPoints(r.missingPoints)} pts` : '')));
-  if (!r.missing.length) {
-    card.appendChild(anEl('div', 'an-msg green', '✓ Todas as tarefas com pontos estão sincronizadas com o SIS.'));
-  } else {
+  if (!problems) {
+    card.appendChild(anEl('div', 'an-msg green', '✓ Todas as tarefas publicadas com pontos vão para o SGA.'));
+  }
+  if (r.missing.length) {
     const body = anSection(card, 'Com pontos, sem SIS', r.missing.length, 'red', true);
     r.missing.forEach(a => body.appendChild(anAssignmentRow(a)));
   }
-  const okBody = anSection(card, 'Com pontos e SIS ok', r.ok.length, 'green');
+  if (r.blocked.length) {
+    const body = anSection(card, 'Com SIS, mas não vão para o SGA', r.blocked.length, 'red', true);
+    r.blocked.forEach(a => body.appendChild(anAssignmentRow(a, anSisBlock(a))));
+  }
+  if (r.manual.length) {
+    const body = anSection(card, 'Postagem de notas manual (conferir)', r.manual.length, 'warn', true);
+    r.manual.forEach(a => body.appendChild(anAssignmentRow(a, 'notas podem estar ocultas')));
+  }
+  const okBody = anSection(card, 'Vão para o SGA', r.ok.length, 'green');
   r.ok.forEach(a => okBody.appendChild(anAssignmentRow(a)));
   const zeroBody = anSection(card, 'Sem pontuação (SIS não se aplica)', r.zeroPoints.length, 'gray');
   r.zeroPoints.forEach(a => zeroBody.appendChild(anAssignmentRow(a)));
+  if (r.unpublished.length) {
+    const unpubBody = anSection(card, 'Não publicadas (não vão para o SGA)', r.unpublished.length, 'gray');
+    r.unpublished.forEach(a => unpubBody.appendChild(anAssignmentRow(a)));
+  }
 }
 
 // Uma seção por tarefa, com o link dela e a lista de alunos.
@@ -4745,10 +4789,17 @@ async function openAnalise() {
   // Mudou de disciplina: o diagnóstico exibido era da anterior.
   if (label.dataset.courseId !== (courseId || '')) {
     label.dataset.courseId = courseId || '';
-    $('an-results').innerHTML = '';
+    anClearResults();
     anStatus('');
   }
 }
+
+function anClearResults() {
+  $('an-results').innerHTML = '';
+  _fd = null;
+}
+
+const AN_BUTTONS = ['btn-an-tarefas', 'btn-an-boletim', 'btn-an-diario'];
 
 // Roda uma verificação com a aba e o curso atuais, travando os botões.
 async function anRun(btnId, work) {
@@ -4763,10 +4814,12 @@ async function anRun(btnId, work) {
       return;
     }
     _anBusy = true;
-    $('btn-an-tarefas').disabled = $('btn-an-boletim').disabled = true;
+    _anRunId++;
+    AN_BUTTONS.forEach(id => { $(id).disabled = true; });
+    btn.disabled  = true;
     btn.innerHTML = '<span class="spinner"></span>Verificando...';
     const elLabel = $('an-course-label');
-    if (elLabel.dataset.courseId !== courseId) $('an-results').innerHTML = '';
+    if (elLabel.dataset.courseId !== courseId) anClearResults();
     elLabel.dataset.courseId = courseId;
     elLabel.textContent      = `curso #${courseId}`;
 
@@ -4776,7 +4829,8 @@ async function anRun(btnId, work) {
     anStatus('✗ ' + err.message, '#f87171');
   } finally {
     _anBusy = false;
-    $('btn-an-tarefas').disabled = $('btn-an-boletim').disabled = false;
+    AN_BUTTONS.forEach(id => { $(id).disabled = false; });
+    btn.disabled    = false;
     btn.textContent = label;
   }
 }
@@ -4788,35 +4842,679 @@ function doAnaliseTarefas() {
   });
 }
 
+// Notas dos alunos ativos. enrollment_type=student tira o aluno teste e
+// active tira os inativos — igual ao boletim da tela. Os nomes saem da lista
+// de alunos; sem include[]=user, cada nota não traz o cadastro do aluno.
+async function anLoadGrades(tabId, base) {
+  anStatus('Carregando alunos ativos...');
+  const students = await anGetAll(tabId,
+    `${base}/users?enrollment_type[]=student&enrollment_state[]=active&per_page=100`);
+
+  anStatus('Carregando notas do boletim...');
+  let subs;
+  try {
+    subs = await anGetAll(tabId,
+      `${base}/students/submissions?student_ids[]=all&enrollment_state=active&per_page=100`,
+      n => anStatus(`Carregando notas do boletim... ${n} notas`));
+  } catch (err) {
+    if (err.truncated) throw err;
+    throw new Error(`Não foi possível ler o boletim (é preciso estar como professor na disciplina). ${err.message}`);
+  }
+  const names = new Map(students.map(s => [s.id, s.name]));
+  return { names, subs: subs.filter(s => names.has(s.user_id)) };
+}
+
 function doAnaliseBoletim() {
   return anRun('btn-an-boletim', async (tabId, base) => {
     anStatus('Carregando tarefas...');
     const assignments = await anGetAll(tabId, `${base}/assignments?per_page=100`);
+    const { names, subs } = await anLoadGrades(tabId, base);
+    anRenderMissing(anMissingGrades(subs, assignments, names));
+    anRenderZeros(anSuspiciousZeros(subs, assignments, names));
+    anRenderOverMax(anScoreOverMax(subs, assignments, names));
+  });
+}
 
-    // enrollment_type=student tira o aluno teste; active tira os inativos —
-    // igual ao boletim da tela.
-    anStatus('Carregando alunos ativos...');
-    const students = await anGetAll(tabId,
-      `${base}/users?enrollment_type[]=student&enrollment_state[]=active&per_page=100`);
+// ── Fórmula do diário (SGA) ──
+// Monta a fórmula que fecha o diário no SGA. Cada tarefa publicada com SIS
+// vira um P na sincronização, na ordem em que o Canvas lista as tarefas. O P
+// nunca é reaproveitado (tarefa apagada deixa o número vago), por isso os
+// números ficam editáveis — confira na Sincronização SGA. Regras do manual da
+// função reav do SGA e da equipe (PLANO-FORMULA-DIARIO.md):
+//  - Sem reavaliação: soma simples, fechando em 100.
+//  - Reav(Preav;Arg2): a reavaliação cobre o Arg2, que vale o mesmo que ela.
+//    Reavaliação de 100 sobre tudo → pesos 1 e 1 (média); reavaliação menor
+//    sobre uma avaliação ou grupo de mesmo valor → pesos 0 e 0 (substitui).
+//  - Max(n;Pa;Pb;…) = as n maiores notas; no fechamento vale a soma dos n
+//    maiores valores. Fecha a sobra de uma substitutiva: pega k−1 de k.
 
-    // Os nomes saem da lista de alunos acima; sem include[]=user, cada nota
-    // não traz de novo o cadastro inteiro do aluno.
-    anStatus('Carregando notas do boletim...');
-    let subs;
-    try {
-      subs = await anGetAll(tabId,
-        `${base}/students/submissions?student_ids[]=all&enrollment_state=active&per_page=100`,
-        n => anStatus(`Carregando notas do boletim... ${n} notas`));
-    } catch (err) {
-      if (err.truncated) throw err;
-      throw new Error(`Não foi possível ler o boletim (é preciso estar como professor na disciplina). ${err.message}`);
+const FD_ROLES = [
+  ['soma', 'Soma'],
+  ['alvo', 'Coberta pela reav.'],
+  ['reav', 'Reavaliação'],
+  ['max',  'Grupo MAX'],
+  ['fora', 'Fora da fórmula'],
+];
+
+// { base, items, state: { rows, maxN, maxInReav }, grades, gradesError }
+let _fd = null;
+
+const fdPlain   = s => (s || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+const fdRound   = n => Math.round(n * 100) / 100;
+const fdEq      = (a, b) => Math.abs(a - b) < 0.005;
+const fdSum     = list => fdRound(list.reduce((n, r) => n + r.value, 0));
+const fdIsReav  = name => /reavalia|\breav\b/.test(fdPlain(name)) && !/substitut/.test(fdPlain(name));
+const fdIsSubst = name => /substitut/.test(fdPlain(name));
+const fdPts     = n => anFmtPoints(n) + (fdEq(n, 1) ? ' pt' : ' pts');
+
+// Tarefas que viram P: as que o sincronizador manda ao SGA (publicadas, com
+// SIS, pontos > 0, contam na nota, nota em Pontos), na ordem do Canvas (grupo
+// de tarefas, depois a posição no grupo). Sem as siglas do SGA, essa ordem é
+// só um palpite: o P sai na ordem de sincronização, que o Canvas não guarda.
+function fdItems(assignments, groups) {
+  const gpos = new Map(groups.map(g => [g.id, g.position ?? 0]));
+  return assignments
+    .filter(a => a.workflow_state !== 'deleted' && a.published && a.post_to_sis === true
+      && anPts(a) > 0 && !anSisBlock(a))
+    .sort((a, b) => (gpos.get(a.assignment_group_id) ?? 0) - (gpos.get(b.assignment_group_id) ?? 0)
+      || (a.position ?? 0) - (b.position ?? 0) || a.id - b.id)
+    .map((a, i) => ({ id: a.id, p: i + 1, name: a.name, url: a.html_url, value: anPts(a) }));
+}
+
+// Grupo de mesmo valor cujo descarte fecha a sobra exata. Prefere o grupo da
+// substitutiva (é ela que sobra), depois o que descarta menos notas.
+function fdMaxGroup(rows, excess) {
+  const groups = new Map();
+  for (const r of rows) {
+    const key = r.value.toFixed(2);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  const options = [];
+  for (const members of groups.values()) {
+    const drop = excess / members[0].value;
+    if (members.length < 2 || !fdEq(drop, Math.round(drop)) || Math.round(drop) > members.length - 1) continue;
+    options.push({ members, drop: Math.round(drop), subst: members.some(r => fdIsSubst(r.name)) });
+  }
+  options.sort((a, b) => b.subst - a.subst || a.drop - b.drop || b.members.length - a.members.length);
+  return options[0] || null;
+}
+
+// Sugestão inicial (tudo editável depois): acha a reavaliação, fecha a sobra
+// com MAX e marca o que a reavaliação cobre.
+function fdSuggest(items) {
+  const rows  = items.map(r => ({ ...r, role: r.value > 0 ? 'soma' : 'fora' }));
+  const state = { rows, maxN: null, maxInReav: false };
+
+  // Reavaliação pelo nome; se houver mais de uma, a de maior valor.
+  const reav = rows.filter(r => r.role === 'soma' && fdIsReav(r.name)).sort((a, b) => b.value - a.value)[0];
+  if (reav) reav.role = 'reav';
+
+  const others = rows.filter(r => r.role === 'soma');
+  const excess = fdRound(fdSum(others) - 100);
+  if (excess > 0) {
+    const g = fdMaxGroup(others, excess);
+    if (g) {
+      g.members.forEach(r => { r.role = 'max'; });
+      state.maxN = g.members.length - g.drop;
     }
+  }
 
-    const names      = new Map(students.map(s => [s.id, s.name]));
-    const activeSubs = subs.filter(s => names.has(s.user_id));
-    anRenderMissing(anMissingGrades(activeSubs, assignments, names));
-    anRenderZeros(anSuspiciousZeros(activeSubs, assignments, names));
-    anRenderOverMax(anScoreOverMax(activeSubs, assignments, names));
+  // A de 100 (ou a que vale o mesmo que o resto) cobre tudo; a menor cobre a
+  // avaliação de mesmo valor — de preferência prova/avaliação, a última.
+  if (reav) {
+    if (fdEq(reav.value, 100) || fdEq(reav.value, fdBuild(state).total)) {
+      rows.forEach(r => { if (r.role === 'soma') r.role = 'alvo'; });
+      state.maxInReav = true;
+    } else {
+      const same = rows.filter(r => r.role === 'soma' && fdEq(r.value, reav.value));
+      const pick = same.filter(r => /prova|avalia|global/.test(fdPlain(r.name))).pop() || same.pop();
+      if (pick) pick.role = 'alvo';
+    }
+  }
+  return state;
+}
+
+// Fórmula + a conta com a nota máxima de cada P, como o "Executar" do SGA.
+function fdBuild(state) {
+  const rows  = state.rows;
+  const byP   = list => [...list].sort((a, b) => a.p - b.p);
+  const P     = r => 'P' + r.p;
+  const reav  = rows.find(r => r.role === 'reav') || null;
+  const maxs  = byP(rows.filter(r => r.role === 'max'));
+  const n     = Math.min(maxs.length, Math.max(1, state.maxN ?? maxs.length - 1));
+  // Sem reavaliação, "coberta pela reav." conta como soma comum.
+  const alvos = reav ? byP(rows.filter(r => r.role === 'alvo')) : [];
+  const somas = byP(rows.filter(r => r.role === 'soma' || (!reav && r.role === 'alvo')));
+  const maxInReav = !!reav && maxs.length > 0 && state.maxInReav;
+
+  const maxExpr = maxs.length ? `Max(${n};${maxs.map(P).join(';')})` : '';
+  const inside  = [...alvos.map(P), ...(maxInReav ? [maxExpr] : [])];
+  const outside = [...somas.map(P), ...(maxExpr && !maxInReav ? [maxExpr] : [])];
+  const formula = reav
+    ? `Reav(${P(reav)};${inside.join('+')})${outside.length ? '+' + outside.join('+') : ''}`
+    : outside.join('+');
+
+  const maxVal  = fdSum([...maxs].sort((a, b) => b.value - a.value).slice(0, n));
+  const covered = fdRound(fdSum(alvos) + (maxInReav ? maxVal : 0));
+  const outer   = fdRound(fdSum(somas) + (maxs.length && !maxInReav ? maxVal : 0));
+  const total   = fdRound(covered + outer);
+  const diff    = fdRound(total - 100);
+  const pesos   = !reav ? null : fdEq(outer, 0) ? 1 : 0;
+
+  const warnings = [];
+  const used = rows.filter(r => r.role !== 'fora').map(r => r.p);
+  const dup  = [...new Set(used.filter((p, i) => used.indexOf(p) !== i))];
+  if (dup.length) warnings.push(`P repetido: ${dup.map(p => 'P' + p).join(', ')} — cada atividade tem um P só.`);
+  if (reav && !inside.length) {
+    warnings.push(`Marque o que a reavaliação cobre ("Coberta pela reav."): atividades que somem ${anFmtPoints(reav.value)} pts.`);
+  } else if (reav && !fdEq(reav.value, covered)) {
+    warnings.push(`A reavaliação vale ${anFmtPoints(reav.value)} pts, mas o que ela cobre soma ${anFmtPoints(covered)} — os dois têm que valer o mesmo.`);
+  }
+  if (maxs.length === 1) {
+    warnings.push('O grupo MAX tem uma atividade só — não há o que descartar.');
+  } else if (maxs.length) {
+    if (n >= maxs.length) warnings.push('O MAX pega todas as notas do grupo — não descarta nenhuma.');
+    if (new Set(maxs.map(r => r.value)).size > 1) {
+      warnings.push('O grupo MAX mistura valores: fecha, mas o MAX descarta a menor nota, que pode ser de uma atividade que vale mais.');
+    }
+  }
+  const closes = fdEq(diff, 0) && (!reav || (inside.length > 0 && fdEq(reav.value, covered)));
+  return { formula, reav, maxs, n, maxVal, covered, outer, total, diff, pesos, warnings, closes };
+}
+
+// Sobra sem MAX que resolva: simula tirar a sobra de cada atividade e lista
+// quem perderia nota (nota acima do novo máximo). Sem prejuízo primeiro.
+function fdImpact(state, diff, grades, coversAll) {
+  return state.rows
+    .filter(r => (r.role === 'soma' || (coversAll && r.role === 'alvo')) && r.value > diff + 0.005)
+    .map(r => {
+      const newMax = fdRound(r.value - diff);
+      const hurt = grades.subs
+        .filter(s => s.assignment_id === r.id && !s.excused && s.score != null && s.score > newMax + 0.005)
+        .map(s => ({ name: anStudentName(grades.names, s), score: s.score }))
+        .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name, 'pt-BR'));
+      return { row: r, newMax, hurt };
+    })
+    .sort((a, b) => a.hurt.length - b.hurt.length || b.row.value - a.row.value || a.row.p - b.row.p);
+}
+
+// Forma canônica para comparar duas fórmulas: sem espaços, maiúsculas, sem
+// parênteses que embrulham uma soma inteira e com os termos em ordem — assim
+// reav(P17;(P2+P1))+P3 e Reav(P17;P1+P2)+P3 são iguais. Só +, Reav e Max.
+function fdCanon(formula) {
+  const f = String(formula || '').toUpperCase().replace(/\s+/g, '');
+  const close = (s, open) => {   // índice do ")" que fecha o "(" em open
+    for (let i = open, depth = 0; i < s.length; i++) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')' && --depth === 0) return i;
+    }
+    return -1;
+  };
+  const split = (s, sep) => {    // separa no nível de fora dos parênteses
+    const out = [];
+    let depth = 0, from = 0;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')') depth--;
+      else if (s[i] === sep && depth === 0) { out.push(s.slice(from, i)); from = i + 1; }
+    }
+    out.push(s.slice(from));
+    return out;
+  };
+  const terms = s => {
+    while (s.startsWith('(') && close(s, 0) === s.length - 1) s = s.slice(1, -1);
+    return split(s, '+').filter(Boolean).map(t => {
+      const m = /^MAX\((.*)\)$/.exec(t);
+      if (!m) return t;
+      const [n, ...ps] = split(m[1], ';');
+      return `MAX(${n};${ps.sort().join(';')})`;
+    }).sort().join('+');
+  };
+  if (!f.startsWith('REAV(')) return terms(f);
+  const end = close(f, 4);
+  if (end < 0) return f;
+  const [reav, ...rest] = split(f.slice(5, end), ';');
+  return `REAV(${reav};${rest.map(terms).join(';')})+${terms(f.slice(end + 1).replace(/^\+/, ''))}`;
+}
+
+// Lê um literal do Python (dict/list/tuple com aspas simples, None/True/False,
+// Decimal('5.00')) ou JSON a partir de src[start] — é como a Sincronização
+// SGA embute os dados no HTML.
+function sgaLiteral(src, start) {
+  let i = start;
+  const fail = () => { throw new Error('a Sincronização SGA mandou os dados num formato inesperado'); };
+  const ws = () => { while (i < src.length && /\s/.test(src[i])) i++; };
+  const str = q => {
+    let out = '';
+    i++;
+    while (i < src.length && src[i] !== q) {
+      if (src[i] !== '\\') { out += src[i++]; continue; }
+      const c = src[++i];
+      if (c === 'u') { out += String.fromCharCode(parseInt(src.substr(i + 1, 4), 16)); i += 5; continue; }
+      if (c === 'x') { out += String.fromCharCode(parseInt(src.substr(i + 1, 2), 16)); i += 3; continue; }
+      out += { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f' }[c] ?? c;
+      i++;
+    }
+    if (src[i] !== q) fail();
+    i++;
+    return out;
+  };
+  const seq = (close, add) => {
+    i++;
+    ws();
+    if (src[i] === close) { i++; return; }
+    for (;;) {
+      add();
+      ws();
+      const sep = src[i++];
+      if (sep === close) return;
+      if (sep !== ',') fail();
+      ws();
+      if (src[i] === close) { i++; return; }
+    }
+  };
+  const val = () => {
+    ws();
+    const c = src[i];
+    if (c === '{') {
+      const o = {};
+      seq('}', () => { const k = val(); ws(); if (src[i++] !== ':') fail(); o[k] = val(); });
+      return o;
+    }
+    if (c === '[' || c === '(') {
+      const a = [];
+      seq(c === '[' ? ']' : ')', () => a.push(val()));
+      return a;
+    }
+    if (c === '"' || c === "'") return str(c);
+    const num = /^-?\d+(\.\d+)?([eE][-+]?\d+)?/.exec(src.slice(i, i + 40));
+    if (num) { i += num[0].length; return Number(num[0]); }
+    const id = /^[A-Za-z_][\w.]*/.exec(src.slice(i, i + 80));
+    if (!id) fail();
+    i += id[0].length;
+    const consts = { None: null, null: null, True: true, true: true, False: false, false: false };
+    if (id[0] in consts) return consts[id[0]];
+    if (/^[ubrUBR]{1,2}$/.test(id[0]) && (src[i] === "'" || src[i] === '"')) return str(src[i]);
+    ws();
+    if (src[i] !== '(') fail();
+    const args = val();                 // Decimal('5.00') → '5.00'
+    return args.length === 1 ? args[0] : args;
+  };
+  return val();
+}
+
+// Os dados que a página da Sincronização SGA embute para o Vue.
+function sgaParse(html) {
+  const grab = key => {
+    const m = new RegExp(`\\b${key}\\s*:\\s*[\\[{]`).exec(html);
+    return m ? sgaLiteral(html, m.index + m[0].length - 1) : undefined;
+  };
+  const disciplina = grab('disciplina');
+  if (!disciplina || typeof disciplina !== 'object') throw new Error('a página da Sincronização SGA veio sem os dados da disciplina');
+  return { disciplina, task: grab('task') || {}, assignments: grab('assignments') || [], avaliacoes: grab('avaliacoes') || [] };
+}
+
+// Liga cada tarefa à sigla do SGA: nome (o SGA corta a descrição) e valor;
+// sem par pelo valor, só pelo nome, se for único. Tarefa sem sigla ganha um
+// número depois do último P do SGA. Devolve as siglas que sobraram.
+function sgaApplySiglas(items, avaliacoes) {
+  const norm = s => fdPlain(s).replace(/\s+/g, ' ').trim();
+  const list = avaliacoes.map(a => ({
+    sigla: String(a.sigla_avaliacao ?? '').trim(),
+    p:     parseInt(String(a.sigla_avaliacao ?? '').replace(/\D/g, ''), 10),
+    name:  String(a.dsc_avaliacao ?? '').trim(),
+    value: Number(a.val_avaliacao),
+    lancamentos: a.lancamentos,
+    canvas:  !!a.consta_canvas,
+    formula: !!a.consta_formula,
+  })).filter(a => a.p > 0).sort((a, b) => b.canvas - a.canvas || a.p - b.p);
+  const used = new Set();
+  const sameName = (it, a) => {
+    const x = norm(it.name), y = norm(a.name);
+    return !!y && (x === y || (y.length >= 20 && x.startsWith(y)));
+  };
+  for (const pass of ['nome e valor', 'nome']) {
+    for (const it of items) {
+      if (it.sigla) continue;
+      const cands = list.filter(a => !used.has(a) && sameName(it, a) && (pass === 'nome' || fdEq(a.value, it.value)));
+      if (!cands.length || (pass === 'nome' && cands.length > 1)) continue;
+      used.add(cands[0]);
+      it.p     = cands[0].p;
+      it.sigla = cands[0].sigla;
+      if (!fdEq(cands[0].value, it.value)) it.sgaValue = cands[0].value;
+    }
+  }
+  let next = Math.max(0, ...list.map(a => a.p));
+  for (const it of items) if (!it.sigla) { it.p = ++next; it.sigla = ''; }
+  return list.filter(a => !used.has(a)).sort((a, b) => a.p - b.p);
+}
+
+function fdRow(id) {
+  return _fd.state.rows.find(r => String(r.id) === String(id));
+}
+
+function fdSetRole(row, role) {
+  if (role === 'reav') _fd.state.rows.forEach(r => { if (r.role === 'reav' && r !== row) r.role = 'soma'; });
+  // Mudou o grupo do MAX: volta ao automático (descarta uma).
+  if (role === 'max' || row.role === 'max') _fd.state.maxN = null;
+  row.role = role;
+  document.querySelectorAll('#an-card-diario .fd-role').forEach(sel => { sel.value = fdRow(sel.dataset.id).role; });
+  fdRenderOut();
+}
+
+function fdRowEl(r) {
+  const row = anEl('div', 'fd-row');
+  const p = anEl('input', 'fd-p');
+  p.type  = 'number';
+  p.min   = '1';
+  p.value = r.p;
+  p.title = 'Número P no SGA (confira na Sincronização SGA)';
+  p.addEventListener('input', () => {
+    const v = parseInt(p.value, 10);
+    if (v >= 1) { r.p = v; fdRenderOut(); }
+  });
+  const info = anEl('div', 'fd-info');
+  info.appendChild(anLink(r.name, r.url, 'an-item-name'));
+  const notes = [`${anFmtPoints(r.value)} pts`];
+  if (r.sigla) notes.push(`${r.sigla} no SGA`);
+  if (r.sgaValue != null) notes.push(`no SGA vale ${anFmtPoints(r.sgaValue)}`);
+  const sub = anEl('div', 'an-item-sub', notes.join(' · '));
+  if (r.sigla === '') sub.appendChild(anEl('span', 'fd-warn', ' · sem sigla no SGA'));
+  info.appendChild(sub);
+  const sel = anEl('select', 'fd-role');
+  sel.dataset.id = r.id;
+  for (const [value, label] of FD_ROLES) {
+    const o = anEl('option', '', label);
+    o.value = value;
+    sel.appendChild(o);
+  }
+  sel.value = r.role;
+  sel.addEventListener('change', () => fdSetRole(r, sel.value));
+  row.append(p, info, sel);
+  return row;
+}
+
+// Quadro do que veio da Sincronização SGA: situação do diário e de onde
+// saíram os números P.
+function fdRenderSga(card) {
+  const box = anEl('div', 'an-msg');
+  if (!_fd.sga) {
+    box.classList.add('warn');
+    box.textContent = `⚠ Não deu para ler a Sincronização SGA (${_fd.sgaError}). Os P seguem a ordem do Canvas e podem não bater com o SGA — confira antes de lançar.`;
+    card.appendChild(box);
+    return;
+  }
+  const d = _fd.sga.disciplina;
+  const t = _fd.sga.task || {};
+  box.appendChild(anEl('b', '', 'Sincronização SGA'));
+  box.appendChild(anEl('div', '', [d.seq_turma, d.nom_disciplina].filter(Boolean).join(' - ')));
+  box.appendChild(anEl('div', '', `Diário ${d.ind_diario_fechado ? 'fechado' : 'aberto'} · fechamento por grupo: ${d.ind_formula_grupo ? 'sim' : 'não'}`
+    + (t.processed && t.done_at ? ` · última sincronização: ${t.done_at}` : '')));
+  const rows = _fd.state.rows;
+  if (!_fd.sga.avaliacoes.length) {
+    box.appendChild(anEl('div', 'fd-warn', '⚠ O SGA não mandou as siglas: os P seguem a ordem do Canvas e podem não bater (o P sai na ordem de sincronização). Confira antes de lançar.'));
+  } else {
+    const found = rows.filter(r => r.sigla).length;
+    box.appendChild(anEl('div', found === rows.length ? 'green' : 'fd-warn',
+      found === rows.length ? `✓ P lidos do SGA para as ${rows.length} tarefas.`
+        : `⚠ P lidos do SGA para ${found} de ${rows.length} tarefas — as outras estão sem sigla (sincronizou depois de criar?).`));
+  }
+  card.appendChild(box);
+  if (_fd.leftover.length) {
+    const body = anSection(card, 'Siglas do SGA sem tarefa no Canvas', _fd.leftover.length, 'gray');
+    _fd.leftover.forEach(a => body.appendChild(anEl('div', 'an-item',
+      `${a.sigla} · ${a.name} · ${anFmtPoints(a.value)} pts · `
+      + (a.canvas ? 'consta no Canvas' : 'pendente de exclusão') + (a.formula ? ' · consta na fórmula' : ''))));
+  }
+}
+
+function fdRenderCard() {
+  const card = anCard('an-card-diario', 'Fórmula do diário (SGA)',
+    'Tarefas que vão ao SGA. O P vem da sincronização e nunca é reaproveitado: com as siglas da Sincronização SGA, a numeração sai de lá; sem elas, segue a ordem do Canvas e pode ser corrigida no campo de cada tarefa.');
+  fdRenderSga(card);
+  const rows = _fd.state.rows;
+  if (!rows.length) {
+    card.appendChild(anEl('div', 'an-msg red', 'Nenhuma tarefa vai para o SGA (publicada, com SIS e com pontos).'));
+    return;
+  }
+  const out = anEl('div');
+  out.id = 'fd-out';
+  card.appendChild(out);
+
+  const body = anSection(card, 'Atividades (P)', rows.length, 'gray', true);
+  rows.forEach(r => body.appendChild(fdRowEl(r)));
+
+  // Opções do MAX: fora do #fd-out para não perder o foco ao digitar.
+  const opts = anEl('div', 'fd-opts');
+  opts.id = 'fd-max-opts';
+  const nLabel = anEl('label');
+  const nInput = anEl('input', 'fd-p');
+  nInput.id   = 'fd-max-n';
+  nInput.type = 'number';
+  nInput.min  = '1';
+  nInput.addEventListener('input', () => {
+    const v = parseInt(nInput.value, 10);
+    _fd.state.maxN = v >= 1 ? v : null;
+    fdRenderOut();
+  });
+  nLabel.append('MAX pega as ', nInput, ' maiores');
+  const inLabel = anEl('label');
+  inLabel.id = 'fd-max-in-wrap';
+  const inBox = anEl('input');
+  inBox.id   = 'fd-max-in';
+  inBox.type = 'checkbox';
+  inBox.addEventListener('change', () => { _fd.state.maxInReav = inBox.checked; fdRenderOut(); });
+  inLabel.append(inBox, ' dentro da reavaliação');
+  opts.append(nLabel, inLabel);
+  card.appendChild(opts);
+
+  const redo = anEl('button', 'btn-link-sm fd-redo', '↺ Refazer a sugestão');
+  redo.addEventListener('click', () => {
+    _fd.state = fdSuggest(_fd.items);
+    fdRenderCard();
+  });
+  card.appendChild(redo);
+  fdRenderOut();
+}
+
+// Parte que muda a cada edição: situação, fórmula, conta, cadastro da
+// reavaliação, avisos e o levantamento para o professor.
+function fdRenderOut() {
+  const out = $('fd-out');
+  if (!out || !_fd) return;
+  const b = fdBuild(_fd.state);
+  out.innerHTML = '';
+
+  const opts = $('fd-max-opts');
+  opts.style.display = b.maxs.length ? 'flex' : 'none';
+  $('fd-max-in-wrap').style.display = b.reav ? '' : 'none';
+  if (document.activeElement !== $('fd-max-n')) $('fd-max-n').value = b.maxs.length ? b.n : '';
+  $('fd-max-in').checked = !!_fd.state.maxInReav;
+
+  if (b.closes) {
+    out.appendChild(anEl('div', 'an-msg green', '✓ Fecha em 100.'));
+  } else if (b.diff > 0) {
+    out.appendChild(anEl('div', 'an-msg red',
+      `⚠ ${fdEq(b.diff, 1) ? 'Sobra' : 'Sobram'} ${fdPts(b.diff)}: a nota máxima fica em ${anFmtPoints(b.total)}.`));
+  } else if (b.diff < 0) {
+    out.appendChild(anEl('div', 'an-msg red',
+      `⚠ ${fdEq(b.diff, -1) ? 'Falta' : 'Faltam'} ${fdPts(-b.diff)}: a nota máxima fica em ${anFmtPoints(b.total)}.`));
+  }
+
+  const box  = anEl('div', 'fd-formula');
+  box.appendChild(anEl('code', '', b.formula || '—'));
+  const copy = anEl('button', 'btn-link-sm', '📋 copiar');
+  copy.disabled = !b.formula;
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(b.formula);
+      copy.textContent = '✓ copiada';
+    } catch {
+      copy.textContent = 'não deu para copiar';
+    }
+    setTimeout(() => { copy.textContent = '📋 copiar'; }, 1600);
+  });
+  box.appendChild(copy);
+  out.appendChild(box);
+
+  if (_fd.sga) {
+    const cur = String(_fd.sga.disciplina.dsc_formula ?? '').trim();
+    const line = anEl('div', 'an-msg');
+    if (!cur || /^n[aã]o h[aá] f[oó]rmula/i.test(cur)) {
+      line.textContent = 'No SGA ainda não há fórmula cadastrada.';
+    } else {
+      const same = !!b.formula && fdCanon(cur) === fdCanon(b.formula);
+      line.appendChild(anEl('div', '', 'Fórmula atual no SGA:'));
+      line.appendChild(anEl('code', 'fd-code', cur));
+      line.appendChild(anEl('div', same ? 'green' : 'fd-warn',
+        same ? '✓ Igual à sugerida (mesmos termos).' : '≠ Diferente da sugerida.'));
+    }
+    out.appendChild(line);
+  }
+
+  const conta = anEl('div', 'an-msg');
+  if (b.maxs.length) {
+    conta.appendChild(anEl('div', '', `Max(${b.n}; ${b.maxs.length} atividades) = ${anFmtPoints(b.maxVal)} de ${anFmtPoints(fdSum(b.maxs))} pts`
+      + (b.maxs.length > b.n ? ` (descarta ${b.maxs.length - b.n})` : '')));
+  }
+  if (b.reav) {
+    conta.appendChild(anEl('div', '', `Coberto pela reavaliação (P${b.reav.p}, ${anFmtPoints(b.reav.value)} pts): ${anFmtPoints(b.covered)} pts`));
+    conta.appendChild(anEl('div', '', `Somado por fora: ${anFmtPoints(b.outer)} pts`));
+  }
+  conta.appendChild(anEl('b', '', `Nota máxima: ${anFmtPoints(b.total)}`));
+  out.appendChild(conta);
+
+  const sga = anEl('div', 'an-msg');
+  if (b.reav) {
+    sga.appendChild(anEl('b', '', `No SGA, a reavaliação (P${b.reav.p}) fica assim:`));
+    sga.appendChild(anEl('div', '', '• Tipo: Reavaliação (não "Trabalho")'));
+    sga.appendChild(anEl('div', '', `• Peso Nota Parcial: ${b.pesos} · Peso Reavaliação: ${b.pesos}`
+      + (b.pesos ? ' (média: a reavaliação cobre tudo)' : ' (substitui o que ela cobre)')));
+    sga.appendChild(anEl('div', '', '• "Não substituir reavaliação se o total for menor": marcado'));
+    sga.appendChild(anEl('div', '', '• "Reavaliação por módulo": desmarcado'));
+  } else {
+    sga.appendChild(anEl('div', '', 'Sem reavaliação: a fórmula é a soma das atividades (pesos 0 e 0).'));
+  }
+  out.appendChild(sga);
+
+  b.warnings.forEach(w => out.appendChild(anEl('div', 'an-msg warn', '⚠ ' + w)));
+
+  if (b.diff < 0) {
+    const pts = fdPts(-b.diff);
+    const body = anSection(out, 'O que o professor pode fazer', 1, 'gray', true);
+    body.appendChild(anEl('div', 'an-item', `Criar uma tarefa de ${pts}, com SIS, e lançar ${pts} para todos os alunos — ninguém perde nota.`));
+  } else if (b.diff > 0) {
+    fdRenderImpact(out, b);
+  }
+}
+
+function fdRenderImpact(out, b) {
+  const pts = fdPts(b.diff);
+  out.appendChild(anEl('div', 'an-msg', `O professor pode tirar ${pts} de uma atividade. Quem tem nota acima do novo máximo perde nota — as opções sem prejuízo vêm primeiro.`));
+  if (!_fd.grades) {
+    if (_fd.gradesError) out.appendChild(anEl('div', 'an-msg warn', '⚠ ' + _fd.gradesError));
+    const btn = anEl('button', 'btn btn-surface btn-full mt4', '📊  Ver quem perderia nota');
+    btn.id = 'btn-fd-impact';
+    btn.addEventListener('click', () => anRun('btn-fd-impact', async (tabId, base) => {
+      if (base !== _fd.base) throw new Error('A aba mudou de disciplina — rode a "Fórmula do diário" de novo.');
+      _fd.grades = await anLoadGrades(tabId, base);
+      _fd.gradesError = '';
+      fdRenderOut();
+    }));
+    out.appendChild(btn);
+    return;
+  }
+  const list = fdImpact(_fd.state, b.diff, _fd.grades, b.pesos === 1);
+  if (!list.length) {
+    out.appendChild(anEl('div', 'an-msg warn', `⚠ Nenhuma atividade vale mais de ${pts} — combine com o professor como redistribuir.`));
+    return;
+  }
+  for (const it of list) {
+    const title = `P${it.row.p} · ${it.row.name}: ${anFmtPoints(it.row.value)} → ${anFmtPoints(it.newMax)} pts`;
+    const body  = anSection(out, title, it.hurt.length, it.hurt.length ? 'red' : 'green');
+    if (!it.hurt.length) {
+      body.appendChild(anEl('div', 'an-item', `Nenhum aluno tem nota acima de ${anFmtPoints(it.newMax)} — ninguém perde nota.`));
+      continue;
+    }
+    const box = anEl('div', 'an-item');
+    box.appendChild(anLink('Abrir tarefa no Canvas ↗', it.row.url, 'an-open'));
+    it.hurt.forEach(h => box.appendChild(anEl('div', 'an-student', `• ${h.name} — nota ${anFmtPoints(h.score)}`)));
+    body.appendChild(box);
+  }
+}
+
+// ── Sincronização SGA (ferramenta LTI ead05.virtual.pucminas.br/sga_sync) ──
+// Só leitura, por trás e só no clique: pega no Canvas a página da ferramenta
+// (que traz o formulário de acesso assinado), faz o mesmo POST que o iframe
+// faria e lê os dados embutidos no HTML. Nunca chama /sga_sync/sync — é o
+// botão "Sincronizar" da página.
+const SGA_HOST = 'ead05.virtual.pucminas.br';
+const SGA_TOOL_ID = 1187;   // id da ferramenta na conta, se a aba não for achada
+
+async function sgaLoad(tabId, base) {
+  const origin   = base.replace(/\/api\/v1\/courses\/\d+$/, '');
+  const courseId = base.match(/\/courses\/(\d+)$/)[1];
+
+  // A aba "Sincronização SGA" do curso diz qual ferramenta abrir.
+  let toolPath = `/courses/${courseId}/external_tools/${SGA_TOOL_ID}`;
+  try {
+    const tabs = JSON.parse((await anGet(tabId, `${base}/tabs`)).text);
+    const tab  = tabs.find(t => /sincronizac/.test(fdPlain(t.label)) && /sga/i.test(t.label || ''));
+    if (tab?.html_url) toolPath = tab.html_url;
+  } catch { /* sem a lista de abas: fica com o id conhecido */ }
+
+  const page = await anGet(tabId, new URL(toolPath, origin).href, 'text/html');
+  const doc  = new DOMParser().parseFromString(page.text, 'text/html');
+  const form = [...doc.querySelectorAll('form[action]')].find(f => {
+    try { return new URL(f.getAttribute('action'), origin).host === SGA_HOST; } catch { return false; }
+  });
+  if (!form) throw new Error('a página da ferramenta no Canvas veio sem o acesso à Sincronização SGA');
+  const action = new URL(form.getAttribute('action'), origin);
+  if (action.protocol !== 'https:' || !action.pathname.startsWith('/sga_sync/') || /\/sync\b/.test(action.pathname)) {
+    throw new Error('endereço inesperado da Sincronização SGA: ' + action.pathname);
+  }
+  const body = new URLSearchParams();
+  form.querySelectorAll('input[name]').forEach(input => body.append(input.name, input.value));
+
+  let res  = await fetch(action.href, { method: 'POST', body, credentials: 'include' });
+  let html = await res.text();
+  if (!/vue_diario/.test(html)) {
+    // Não caiu direto na página dos dados: abre o index com a sessão do acesso.
+    const userId = body.get('custom_canvas_user_id') || '';
+    res  = await fetch(`https://${SGA_HOST}/sga_sync/index?course_id=${courseId}&user_id=${encodeURIComponent(userId)}`, { credentials: 'include' });
+    html = await res.text();
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status} na Sincronização SGA`);
+  return sgaParse(html);
+}
+
+function doAnaliseDiario() {
+  return anRun('btn-an-diario', async (tabId, base) => {
+    anStatus('Carregando tarefas...');
+    const groups      = await anGetAll(tabId, `${base}/assignment_groups?per_page=100`);
+    const assignments = await anGetAll(tabId, `${base}/assignments?per_page=100`);
+    const items = fdItems(assignments, groups);
+
+    anStatus('Lendo a Sincronização SGA...');
+    let sga = null, sgaError = '', leftover = [];
+    try {
+      sga = await sgaLoad(tabId, base);
+    } catch (err) {
+      sgaError = err.message;
+    }
+    if (sga?.avaliacoes?.length) leftover = sgaApplySiglas(items, sga.avaliacoes);
+
+    _fd = { base, items, state: fdSuggest(items), sga, sgaError, leftover, grades: null, gradesError: '' };
+    // Sobra sem MAX que resolva: já lê as notas para o levantamento.
+    if (fdBuild(_fd.state).diff > 0) {
+      try {
+        _fd.grades = await anLoadGrades(tabId, base);
+      } catch (err) {
+        _fd.gradesError = err.message;
+      }
+    }
+    fdRenderCard();
   });
 }
 
@@ -6236,6 +6934,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btn-back-canvas-analise').addEventListener('click', () => show('canvas'));
   $('btn-an-tarefas').addEventListener('click', doAnaliseTarefas);
   $('btn-an-boletim').addEventListener('click', doAnaliseBoletim);
+  $('btn-an-diario').addEventListener('click', doAnaliseDiario);
 
   // ── Trocar banner ─────────────────────────────────────────────────
   $('btn-canvas-banner').addEventListener('click', openBanner);
