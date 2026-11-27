@@ -5,7 +5,8 @@
 // 2) Painel real (popup.html) com chrome.* falso e um Canvas falso: a
 //    Contabilidade Gerencial (17101, reavaliação de 100 + substitutiva → MAX),
 //    edição de papel e de P, cópia, sobra sem MAX (impacto nos alunos), falta,
-//    e o "Verificar tarefas" sem alarme para tarefa não publicada.
+//    o "Verificar tarefas" sem alarme para tarefa não publicada e o
+//    "Verificar boletim" com notas (vazias, zeros suspeitos, acima do máximo).
 // Rodar com o playwright-core instalado numa pasta qualquer:
 //   NODE_PATH=<pasta>/node_modules node .claude/skills/h5p-quiz/scripts/test-formula.js
 // Usa o Chrome do sistema (CHROME_PATH). Não precisa de rede.
@@ -355,6 +356,30 @@ const COURSES = {
         dsc_formula: 'Não há fórmula cadastrada', ind_diario_fechado: 0, ind_formula_grupo: 1 }, avaliacoes },
     };
   })(),
+  // Verificar boletim: um caso de cada (nota vazia, zero automático, zero
+  // oculto, zero legítimo, dispensado, aluno inativo, nota acima do máximo) e
+  // tarefas que não vão ao SGA (não devem acusar nota vazia).
+  606: {
+    groups: [{ id: 60, position: 1, name: 'Tarefas' }],
+    assignments: [A(606, 801, 60, 1, 'Fórum 1', 10), A(606, 802, 60, 2, 'Prova', 40), A(606, 803, 60, 3, 'Reavaliação', 100),
+      A(606, 804, 60, 4, 'Autoavaliação', 10, { grading: 'percent' }), A(606, 805, 60, 5, 'Leitura', 0),
+      A(606, 806, 60, 6, 'Bônus de participação', 5, { omit: true }), A(606, 807, 60, 7, 'Extra sem SIS', 10, { sis: false }),
+      A(606, 808, 60, 8, 'Prova Substitutiva', 40), A(606, 809, 60, 9, 'Conceito', 10, { grading: 'letter_grade' }),
+      A(606, 810, 60, 10, 'REAV - Prova final', 40)],
+    users: [{ id: 1, name: 'Ana' }, { id: 2, name: 'Bruno' }, { id: 3, name: 'Carla' }],
+    subs: [
+      [801, 1, 10], [801, 2, null], [801, 3, 0, { late: 'missing', grader: null }], [801, 4, null],   // 4: inativo
+      [802, 1, 42], [802, 2, 0], [802, 3, 0, { posted: null }],
+      [803, 1, null], [803, 2, null], [803, 3, 0, { late: 'missing', grader: null }],   // reavaliação: zero automático não conta
+      [804, 2, null], [806, 1, null, { excused: true }], [806, 2, null], [807, 1, 12],
+      [808, 1, null], [808, 2, null], [808, 3, 30], [809, 2, null], [810, 1, null],
+    ].map(([assignment_id, user_id, score, o = {}]) => ({
+      assignment_id, user_id, score, excused: !!o.excused, late_policy_status: o.late || null,
+      workflow_state: score == null ? 'unsubmitted' : 'graded',
+      grader_id: score == null ? null : ('grader' in o ? o.grader : 50),
+      posted_at: score == null ? null : ('posted' in o ? o.posted : '2026-11-20T10:00:00Z'),
+    })),
+  },
   // Fecha em 100 no Canvas, mas não confere com o SGA: o Fórum foi renomeado
   // depois da sincronização e a Prova mudou de valor (85 → 90).
   505: {
@@ -668,6 +693,36 @@ const FAKE_CHROME = `(() => {
   check((await formula()).includes('Max(2;P3;P12;P13)') && await maxOpts() === '1.00=2 5.00=6 25.00=2',
     'tirar uma atividade do grupo: só ele volta ao automático (k−1)');
   await shot('formula-3max.png');
+
+  console.log('\nPainel — Verificar boletim com notas');
+  await setTab(606);
+  await run('#btn-an-boletim');
+  const status = await text('#an-status');
+  check(!/✗/.test(status), 'roda sem erro' + (status ? ': ' + status : ''));
+  const missing = await text('#an-card-missing');
+  check(/⚠ 1 nota vazia em 1 tarefa com SIS\./.test(missing), 'notas vazias: 1 em 1 tarefa — ' + (missing.match(/[✓⚠][^\n]*/) || [''])[0]);
+  const sections = id => panel.$$eval(`#${id} details.an-section`, els => els.map(d => d.querySelector('.an-section-title').textContent
+    + ' [' + d.querySelector('.an-badge').textContent + ']: ' + [...d.querySelectorAll('.an-student')].map(s => s.textContent.replace(/^• /, '')).join(', ')));
+  const miss = await sections('an-card-missing');
+  check(miss.join(' | ') === 'Fórum 1 [1]: Bruno',
+    'quem está sem nota (dispensado e aluno inativo não contam) — ' + miss.join(' | '));
+  check(/Fora da verificação:/.test(missing) && /• Reavaliação \(reavaliação/.test(missing) && /• REAV - Prova final \(reavaliação/.test(missing)
+    && /• Prova Substitutiva \(substitutiva — nem todos fazem\)/.test(missing)
+    && /• Autoavaliação \(coluna calculada em %\)/.test(missing) && /• Leitura \(sem pontuação máxima\)/.test(missing),
+    'fora da verificação: reavaliações (inclusive "REAV") e substitutiva — não impactam quem não faz —, % e sem pontos');
+  check(/Bônus de participação \(não conta na nota final\)/.test(missing) && /Conceito \("Exibir nota como" não está em Pontos\)/.test(missing),
+    'tarefas com SIS que não vão ao SGA ficam fora (não acusam nota vazia)');
+  const zeros = await text('#an-card-zeros');
+  check(/⚠ 2 zeros suspeitos em 2 tarefas \(3 zeros verificados\)\./.test(zeros), 'zeros suspeitos: 2 de 3 (o 0 lançado à mão não conta) — ' + (zeros.match(/[✓⚠][^\n]*/) || [''])[0]);
+  const zs = await sections('an-card-zeros');
+  check(zs.some(s => /^Fórum 1 \[1\]: Carla/.test(s)) && zs.some(s => /^Prova \[1\]: Carla/.test(s)) && !zs.some(s => /Reavaliação/.test(s)),
+    'zeros: Carla no Fórum 1 e na Prova; o zero automático da reavaliação não conta — ' + zs.join(' | '));
+  const zerosAll = await panel.$eval('#an-card-zeros', e => e.textContent);   // inclui as seções fechadas
+  check(/zero automático da política de entregas faltantes · sem avaliador humano/.test(zerosAll) && /nota oculta \(não publicada\)/.test(zerosAll), 'motivo de cada zero suspeito');
+  const over = await text('#an-card-over');
+  check(/⚠ 2 notas acima do máximo \(8 verificadas\)\./.test(over) && /Ana[\s\S]*Prova[\s\S]*nota 42 de no máximo 40/.test(over)
+    && /Extra sem SIS[\s\S]*nota 12 de no máximo 10/.test(over), 'notas acima do máximo: Prova 42/40 e Extra 12/10 — ' + (over.match(/[✓⚠][^\n]*/) || [''])[0]);
+  await shot('boletim.png');
 
   console.log('\nPainel — fecha no Canvas, mas não confere com o SGA');
   await setTab(505);

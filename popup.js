@@ -4527,18 +4527,25 @@ function anGroupByAssignment(byId, sortStudents) {
     .sort((a, b) => b.students.length - a.students.length);
 }
 
-// Nas tarefas com SIS, todo aluno precisa de nota (pode ser 0, não vazia).
-// Ficam de fora: reavaliação (nem todos fazem), colunas em % e sem pontuação.
+// Nas tarefas que vão ao SGA, todo aluno precisa de nota (pode ser 0, não
+// vazia). Ficam de fora: reavaliação e substitutiva — a nota delas não
+// impacta quem não faz (a reavaliação nunca rebaixa; a substitutiva fica num
+// MAX com as de mesmo valor), mesmo critério da fórmula — e o que o
+// sincronizador não manda: % ou outro "Exibir nota como", sem pontuação,
+// fora da nota final.
+const anOptional = name => fdIsReav(name) || fdIsSubst(name);
+
 function anMissingGrades(subs, assignments, names) {
   const ignored = [];
   const byId    = new Map();
   for (const a of assignments) {
     if (a.workflow_state === 'deleted' || !a.published || a.post_to_sis !== true) continue;
-    const plain = a.name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
     const reason =
-      plain.includes('reavaliacao')  ? 'reavaliação — nem todos fazem' :
-      a.grading_type === 'percent'   ? 'coluna calculada em %' :
-      anPts(a) <= 0                  ? 'sem pontuação máxima' : null;
+      fdIsReav(a.name)             ? 'reavaliação — nem todos fazem' :
+      fdIsSubst(a.name)            ? 'substitutiva — nem todos fazem' :
+      a.grading_type === 'percent' ? 'coluna calculada em %' :
+      anPts(a) <= 0                ? 'sem pontuação máxima' :
+      anSisBlock(a);
     if (reason) ignored.push({ name: a.name, reason });
     else byId.set(a.id, { assignment: a, students: [] });
   }
@@ -4552,12 +4559,14 @@ function anMissingGrades(subs, assignments, names) {
 }
 
 // Zeros que não vieram de um lançamento manual publicado costumam ser
-// ignorados pelo SIS; redigitar o 0 no boletim regulariza.
+// ignorados pelo SIS; redigitar o 0 no boletim regulariza. Reavaliação e
+// substitutiva ficam de fora: zero ignorado vira nota vazia, e nelas a nota
+// vazia não impacta o aluno.
 function anSuspiciousZeros(subs, assignments, names) {
   const byId = new Map(
     assignments
       .filter(a => a.workflow_state !== 'deleted' && a.published && a.post_to_sis === true
-        && a.grading_type !== 'percent' && anPts(a) > 0)
+        && anPts(a) > 0 && !anSisBlock(a) && !anOptional(a.name))
       .map(a => [a.id, { assignment: a, students: [] }]));
   let zerosChecked = 0;
   for (const s of subs) {
