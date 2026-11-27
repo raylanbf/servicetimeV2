@@ -4886,7 +4886,8 @@ function doAnaliseBoletim() {
 //    Reavaliação de 100 sobre tudo → pesos 1 e 1 (média); reavaliação menor
 //    sobre uma avaliação ou grupo de mesmo valor → pesos 0 e 0 (substitui).
 //  - Max(n;Pa;Pb;…) = as n maiores notas; no fechamento vale a soma dos n
-//    maiores valores. Fecha a sobra de uma substitutiva: pega k−1 de k.
+//    maiores valores. Um Max por grupo de mesmo valor: o da substitutiva
+//    (pega k−1 de k) e os que fecham o resto da sobra.
 
 const FD_ROLES = [
   ['soma', 'Soma'],
@@ -4896,7 +4897,7 @@ const FD_ROLES = [
   ['fora', 'Fora da fórmula'],
 ];
 
-// { base, items, state: { rows, maxN, maxInReav }, grades, gradesError }
+// { base, items, state: { rows, maxN: { valor → n do Max }, maxInReav }, grades, gradesError }
 let _fd = null;
 
 const fdPlain   = s => (s || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
@@ -4906,6 +4907,7 @@ const fdSum     = list => fdRound(list.reduce((n, r) => n + r.value, 0));
 const fdIsReav  = name => /reavalia|\breav\b/.test(fdPlain(name)) && !/substitut/.test(fdPlain(name));
 const fdIsSubst = name => /substitut/.test(fdPlain(name));
 const fdPts     = n => anFmtPoints(n) + (fdEq(n, 1) ? ' pt' : ' pts');
+const fdKey     = v => v.toFixed(2);   // grupo de mesmo valor
 
 // Tarefas que viram P: as que o sincronizador manda ao SGA (publicadas, com
 // SIS, pontos > 0, contam na nota, nota em Pontos), na ordem do Canvas (grupo
@@ -4921,43 +4923,91 @@ function fdItems(assignments, groups) {
     .map((a, i) => ({ id: a.id, p: i + 1, name: a.name, url: a.html_url, value: anPts(a) }));
 }
 
-// Grupo de mesmo valor cujo descarte fecha a sobra exata. Prefere o grupo da
-// substitutiva (é ela que sobra), depois o que descarta menos notas.
-function fdMaxGroup(rows, excess) {
-  const groups = new Map();
+// Quantas notas cada grupo de mesmo valor descarta (chave → descartes):
+//  1. A substitutiva nunca soma: o grupo dela descarta uma por substitutiva
+//     (a nota menor fica de fora). Se isso tirar mais do que sobrava, falta
+//     ponto — é o professor que distribuiu de menos.
+//  2. O que ainda sobra fecha com MAX em grupos de mesmo valor, na combinação
+//     que descarta menos notas e, empatando, usa menos grupos (ex.: sobra 7 =
+//     uma de 5 pts + duas de 1 pt). Sem combinação exata, a sobra fica para o
+//     levantamento com o professor.
+function fdMaxPlan(rows, excess) {
+  const byValue = new Map();
   for (const r of rows) {
-    const key = r.value.toFixed(2);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
+    const key = fdKey(r.value);
+    if (!byValue.has(key)) byValue.set(key, []);
+    byValue.get(key).push(r);
   }
-  const options = [];
-  for (const members of groups.values()) {
-    const drop = excess / members[0].value;
-    if (members.length < 2 || !fdEq(drop, Math.round(drop)) || Math.round(drop) > members.length - 1) continue;
-    options.push({ members, drop: Math.round(drop), subst: members.some(r => fdIsSubst(r.name)) });
+  const groups = [...byValue].filter(([, m]) => m.length >= 2).map(([key, members]) => {
+    const subst = Math.min(members.filter(r => fdIsSubst(r.name)).length, members.length - 1);
+    return { key, cents: Math.round(members[0].value * 100), subst, room: members.length - 1 - subst };
+  });
+  const plan = new Map(groups.filter(g => g.subst).map(g => [g.key, g.subst]));
+
+  const rest = Math.round(excess * 100) - groups.reduce((n, g) => n + g.subst * g.cents, 0);
+  const usable = groups.filter(g => g.room > 0 && g.cents <= rest);
+  if (rest <= 0 || !usable.length) return plan;
+
+  // Mochila limitada em "unidades" (centavos divididos pelo mdc dos valores):
+  // best[u] = o jeito de descartar exatamente u unidades com menos notas.
+  const gcd  = (a, b) => (b ? gcd(b, a % b) : a);
+  const unit = usable.reduce((g, x) => gcd(g, x.cents), rest);
+  const goal = rest / unit;
+  let best = new Array(goal + 1).fill(null);
+  best[0] = { drops: 0, groups: 0, pick: [] };
+  for (const g of usable) {
+    const size = g.cents / unit;
+    const next = best.slice();
+    for (let u = 0; u < goal; u++) {
+      const b = best[u];
+      if (!b) continue;
+      for (let d = 1; d <= g.room && u + d * size <= goal; d++) {
+        const cand = { drops: b.drops + d, groups: b.groups + (g.subst ? 0 : 1), pick: [...b.pick, [g.key, d]] };
+        const cur  = next[u + d * size];
+        if (!cur || cand.drops < cur.drops || (cand.drops === cur.drops && cand.groups < cur.groups)) next[u + d * size] = cand;
+      }
+    }
+    best = next;
   }
-  options.sort((a, b) => b.subst - a.subst || a.drop - b.drop || b.members.length - a.members.length);
-  return options[0] || null;
+  if (best[goal]) for (const [key, d] of best[goal].pick) plan.set(key, (plan.get(key) || 0) + d);
+  return plan;
+}
+
+// Grupos MAX: as atividades marcadas "Grupo MAX" de mesmo valor formam um
+// Max(n;…) cada, em ordem de P. Sem n escolhido, descarta uma (k−1).
+function fdMaxGroups(state) {
+  const byValue = new Map();
+  for (const r of state.rows) {
+    if (r.role !== 'max') continue;
+    const key = fdKey(r.value);
+    if (!byValue.has(key)) byValue.set(key, []);
+    byValue.get(key).push(r);
+  }
+  return [...byValue].map(([key, rows]) => {
+    const members = [...rows].sort((a, b) => a.p - b.p);
+    const n = Math.min(members.length, Math.max(1, state.maxN[key] ?? members.length - 1));
+    return { key, value: members[0].value, members, n, val: fdRound(n * members[0].value), sum: fdSum(members) };
+  }).sort((a, b) => a.members[0].p - b.members[0].p);
 }
 
 // Sugestão inicial (tudo editável depois): acha a reavaliação, fecha a sobra
 // com MAX e marca o que a reavaliação cobre.
 function fdSuggest(items) {
   const rows  = items.map(r => ({ ...r, role: r.value > 0 ? 'soma' : 'fora' }));
-  const state = { rows, maxN: null, maxInReav: false };
+  const state = { rows, maxN: {}, maxInReav: false };
 
-  // Reavaliação pelo nome; se houver mais de uma, a de maior valor.
-  const reav = rows.filter(r => r.role === 'soma' && fdIsReav(r.name)).sort((a, b) => b.value - a.value)[0];
+  // Reavaliação pelo nome; se houver mais de uma, a de maior valor. As outras
+  // ficam fora da fórmula (com aviso), para não entrarem num MAX com as provas.
+  const reavs = rows.filter(r => r.role === 'soma' && fdIsReav(r.name)).sort((a, b) => b.value - a.value);
+  const reav  = reavs[0];
   if (reav) reav.role = 'reav';
+  reavs.slice(1).forEach(r => { r.role = 'fora'; });
 
   const others = rows.filter(r => r.role === 'soma');
-  const excess = fdRound(fdSum(others) - 100);
-  if (excess > 0) {
-    const g = fdMaxGroup(others, excess);
-    if (g) {
-      g.members.forEach(r => { r.role = 'max'; });
-      state.maxN = g.members.length - g.drop;
-    }
+  for (const [key, drops] of fdMaxPlan(others, fdRound(fdSum(others) - 100))) {
+    const members = others.filter(r => fdKey(r.value) === key);
+    members.forEach(r => { r.role = 'max'; });
+    state.maxN[key] = members.length - drops;
   }
 
   // A de 100 (ou a que vale o mesmo que o resto) cobre tudo; a menor cobre a
@@ -4981,23 +5031,22 @@ function fdBuild(state) {
   const byP   = list => [...list].sort((a, b) => a.p - b.p);
   const P     = r => 'P' + r.p;
   const reav  = rows.find(r => r.role === 'reav') || null;
-  const maxs  = byP(rows.filter(r => r.role === 'max'));
-  const n     = Math.min(maxs.length, Math.max(1, state.maxN ?? maxs.length - 1));
+  const maxGroups = fdMaxGroups(state);
   // Sem reavaliação, "coberta pela reav." conta como soma comum.
   const alvos = reav ? byP(rows.filter(r => r.role === 'alvo')) : [];
   const somas = byP(rows.filter(r => r.role === 'soma' || (!reav && r.role === 'alvo')));
-  const maxInReav = !!reav && maxs.length > 0 && state.maxInReav;
+  const maxInReav = !!reav && maxGroups.length > 0 && state.maxInReav;
 
-  const maxExpr = maxs.length ? `Max(${n};${maxs.map(P).join(';')})` : '';
-  const inside  = [...alvos.map(P), ...(maxInReav ? [maxExpr] : [])];
-  const outside = [...somas.map(P), ...(maxExpr && !maxInReav ? [maxExpr] : [])];
-  const formula = reav
+  const maxExprs = maxGroups.map(g => `Max(${g.n};${g.members.map(P).join(';')})`);
+  const inside   = [...alvos.map(P), ...(maxInReav ? maxExprs : [])];
+  const outside  = [...somas.map(P), ...(maxInReav ? [] : maxExprs)];
+  const formula  = reav
     ? `Reav(${P(reav)};${inside.join('+')})${outside.length ? '+' + outside.join('+') : ''}`
     : outside.join('+');
 
-  const maxVal  = fdSum([...maxs].sort((a, b) => b.value - a.value).slice(0, n));
+  const maxVal  = fdRound(maxGroups.reduce((n, g) => n + g.val, 0));
   const covered = fdRound(fdSum(alvos) + (maxInReav ? maxVal : 0));
-  const outer   = fdRound(fdSum(somas) + (maxs.length && !maxInReav ? maxVal : 0));
+  const outer   = fdRound(fdSum(somas) + (maxInReav ? 0 : maxVal));
   const total   = fdRound(covered + outer);
   const diff    = fdRound(total - 100);
   const pesos   = !reav ? null : fdEq(outer, 0) ? 1 : 0;
@@ -5011,16 +5060,17 @@ function fdBuild(state) {
   } else if (reav && !fdEq(reav.value, covered)) {
     warnings.push(`A reavaliação vale ${anFmtPoints(reav.value)} pts, mas o que ela cobre soma ${anFmtPoints(covered)} — os dois têm que valer o mesmo.`);
   }
-  if (maxs.length === 1) {
-    warnings.push('O grupo MAX tem uma atividade só — não há o que descartar.');
-  } else if (maxs.length) {
-    if (n >= maxs.length) warnings.push('O MAX pega todas as notas do grupo — não descarta nenhuma.');
-    if (new Set(maxs.map(r => r.value)).size > 1) {
-      warnings.push('O grupo MAX mistura valores: fecha, mas o MAX descarta a menor nota, que pode ser de uma atividade que vale mais.');
-    }
+  for (const g of maxGroups) {
+    if (g.members.length === 1) warnings.push(`O grupo MAX de ${fdPts(g.value)} tem uma atividade só — não há o que descartar.`);
+    else if (g.n >= g.members.length) warnings.push(`O MAX de ${fdPts(g.value)} pega todas as notas do grupo — não descarta nenhuma.`);
+  }
+  const otherReav = reav ? rows.filter(r => r !== reav && fdIsReav(r.name)) : [];
+  if (otherReav.length) {
+    warnings.push(`${otherReav.map(r => `P${r.p} (${r.name})`).join(', ')} também parece reavaliação, mas a fórmula tem uma só. `
+      + 'Se ela também vale, precisa de outro Reav — combine com o professor; se é cópia, deixe "Fora da fórmula".');
   }
   const closes = fdEq(diff, 0) && (!reav || (inside.length > 0 && fdEq(reav.value, covered)));
-  return { formula, reav, maxs, n, maxVal, covered, outer, total, diff, pesos, warnings, closes };
+  return { formula, reav, maxGroups, maxVal, covered, outer, total, diff, pesos, warnings, closes };
 }
 
 // Sobra sem MAX que resolva: simula tirar a sobra de cada atividade e lista
@@ -5040,8 +5090,8 @@ function fdImpact(state, diff, grades, coversAll) {
 }
 
 // Forma canônica para comparar duas fórmulas: sem espaços, maiúsculas, sem
-// parênteses que embrulham uma soma inteira e com os termos em ordem — assim
-// reav(P17;(P2+P1))+P3 e Reav(P17;P1+P2)+P3 são iguais. Só +, Reav e Max.
+// parênteses só de agrupar soma e com os termos em ordem — assim
+// P3+reav(P17;(P2+P1)) e Reav(P17;P1+P2)+P3 são iguais. Só +, Reav e Max.
 function fdCanon(formula) {
   const f = String(formula || '').toUpperCase().replace(/\s+/g, '');
   const close = (s, open) => {   // índice do ")" que fecha o "(" em open
@@ -5062,20 +5112,17 @@ function fdCanon(formula) {
     out.push(s.slice(from));
     return out;
   };
-  const terms = s => {
-    while (s.startsWith('(') && close(s, 0) === s.length - 1) s = s.slice(1, -1);
-    return split(s, '+').filter(Boolean).map(t => {
-      const m = /^MAX\((.*)\)$/.exec(t);
-      if (!m) return t;
-      const [n, ...ps] = split(m[1], ';');
-      return `MAX(${n};${ps.sort().join(';')})`;
-    }).sort().join('+');
+  const sum  = s => split(s, '+').filter(Boolean).flatMap(term).sort().join('+');
+  const term = t => {
+    if (t.startsWith('(') && close(t, 0) === t.length - 1) return split(t.slice(1, -1), '+').filter(Boolean).flatMap(term);
+    const m = /^(MAX|REAV)\((.*)\)$/.exec(t);
+    if (!m || close(t, m[1].length) !== t.length - 1) return [t];
+    const args = split(m[2], ';').map(sum);
+    if (m[1] === 'REAV') return [`REAV(${args.join(';')})`];
+    const [n, ...ps] = args;
+    return [`MAX(${n};${ps.sort().join(';')})`];
   };
-  if (!f.startsWith('REAV(')) return terms(f);
-  const end = close(f, 4);
-  if (end < 0) return f;
-  const [reav, ...rest] = split(f.slice(5, end), ';');
-  return `REAV(${reav};${rest.map(terms).join(';')})+${terms(f.slice(end + 1).replace(/^\+/, ''))}`;
+  return sum(f);
 }
 
 // Lê um literal do Python (dict/list/tuple com aspas simples, None/True/False,
@@ -5196,11 +5243,43 @@ function fdRow(id) {
 
 function fdSetRole(row, role) {
   if (role === 'reav') _fd.state.rows.forEach(r => { if (r.role === 'reav' && r !== row) r.role = 'soma'; });
-  // Mudou o grupo do MAX: volta ao automático (descarta uma).
-  if (role === 'max' || row.role === 'max') _fd.state.maxN = null;
+  // Mudou um grupo MAX: ele volta ao automático (descarta uma).
+  if (role === 'max' || row.role === 'max') delete _fd.state.maxN[fdKey(row.value)];
   row.role = role;
   document.querySelectorAll('#an-card-diario .fd-role').forEach(sel => { sel.value = fdRow(sel.dataset.id).role; });
+  fdRenderMaxOpts();
   fdRenderOut();
+}
+
+// Opções dos MAX, uma linha por grupo de mesmo valor. Ficam fora do #fd-out
+// para não perder o foco ao digitar; só são refeitas quando um grupo muda.
+function fdRenderMaxOpts() {
+  const opts = $('fd-max-opts');
+  if (!opts) return;
+  opts.innerHTML = '';
+  for (const g of fdMaxGroups(_fd.state)) {
+    const label = anEl('label');
+    const input = anEl('input', 'fd-p');
+    input.type  = 'number';
+    input.min   = '1';
+    input.dataset.key = g.key;
+    input.addEventListener('input', () => {
+      const v = parseInt(input.value, 10);
+      if (v >= 1) _fd.state.maxN[g.key] = v;
+      else delete _fd.state.maxN[g.key];
+      fdRenderOut();
+    });
+    label.append(`MAX das ${g.members.length} de ${fdPts(g.value)}: pega as `, input, ' maiores');
+    opts.appendChild(label);
+  }
+  const inLabel = anEl('label');
+  inLabel.id = 'fd-max-in-wrap';
+  const inBox = anEl('input');
+  inBox.id   = 'fd-max-in';
+  inBox.type = 'checkbox';
+  inBox.addEventListener('change', () => { _fd.state.maxInReav = inBox.checked; fdRenderOut(); });
+  inLabel.append(inBox, ' MAX dentro da reavaliação');
+  opts.appendChild(inLabel);
 }
 
 function fdRowEl(r) {
@@ -5216,7 +5295,7 @@ function fdRowEl(r) {
   });
   const info = anEl('div', 'fd-info');
   info.appendChild(anLink(r.name, r.url, 'an-item-name'));
-  const notes = [`${anFmtPoints(r.value)} pts`];
+  const notes = [fdPts(r.value)];
   if (r.sigla) notes.push(`${r.sigla} no SGA`);
   if (r.sgaValue != null) notes.push(`no SGA vale ${anFmtPoints(r.sgaValue)}`);
   const sub = anEl('div', 'an-item-sub', notes.join(' · '));
@@ -5285,28 +5364,8 @@ function fdRenderCard() {
   const body = anSection(card, 'Atividades (P)', rows.length, 'gray', true);
   rows.forEach(r => body.appendChild(fdRowEl(r)));
 
-  // Opções do MAX: fora do #fd-out para não perder o foco ao digitar.
   const opts = anEl('div', 'fd-opts');
   opts.id = 'fd-max-opts';
-  const nLabel = anEl('label');
-  const nInput = anEl('input', 'fd-p');
-  nInput.id   = 'fd-max-n';
-  nInput.type = 'number';
-  nInput.min  = '1';
-  nInput.addEventListener('input', () => {
-    const v = parseInt(nInput.value, 10);
-    _fd.state.maxN = v >= 1 ? v : null;
-    fdRenderOut();
-  });
-  nLabel.append('MAX pega as ', nInput, ' maiores');
-  const inLabel = anEl('label');
-  inLabel.id = 'fd-max-in-wrap';
-  const inBox = anEl('input');
-  inBox.id   = 'fd-max-in';
-  inBox.type = 'checkbox';
-  inBox.addEventListener('change', () => { _fd.state.maxInReav = inBox.checked; fdRenderOut(); });
-  inLabel.append(inBox, ' dentro da reavaliação');
-  opts.append(nLabel, inLabel);
   card.appendChild(opts);
 
   const redo = anEl('button', 'btn-link-sm fd-redo', '↺ Refazer a sugestão');
@@ -5315,7 +5374,38 @@ function fdRenderCard() {
     fdRenderCard();
   });
   card.appendChild(redo);
+  fdRenderMaxOpts();
   fdRenderOut();
+}
+
+// O que falta conferir para a fórmula ir ao professor: P que não vieram do
+// SGA (ou foram mudados à mão) e valores que o SGA ainda não tem — o
+// "Executar" do SGA calcula com os valores dele, não com os do Canvas.
+function fdReview() {
+  const out  = [];
+  const rows = _fd.state.rows.filter(r => r.role !== 'fora');
+  const Ps   = list => list.map(r => 'P' + r.p).join(', ');
+  if (!_fd.sga) {
+    out.push('os P seguem a ordem do Canvas (não deu para ler a Sincronização SGA) — confira cada um lá.');
+  } else if (!_fd.sga.avaliacoes.length) {
+    out.push('o SGA não mandou as siglas: os P seguem a ordem do Canvas — confira cada um na Sincronização SGA.');
+  } else {
+    const noSigla = rows.filter(r => !r.sigla);
+    if (noSigla.length) out.push(`${Ps(noSigla)} sem sigla no SGA (criada ou renomeada depois da sincronização) — sincronize e rode de novo.`);
+    const edited = rows.filter(r => r.sigla && r.sigla.toUpperCase() !== 'P' + r.p);
+    if (edited.length) out.push(`${edited.map(r => `P${r.p} (no SGA é ${r.sigla})`).join(', ')} — número mudado à mão.`);
+    const lost = _fd.leftover.filter(a => a.canvas);
+    if (lost.length) {
+      out.push(`${lost.map(a => `${a.sigla} (${a.name})`).join(', ')} está no SGA, mas não casou com nenhuma tarefa que vai ao SGA `
+        + '(renomeada, despublicada ou sem SIS?) — confira na Sincronização SGA.');
+    }
+  }
+  const value = rows.filter(r => r.sgaValue != null);
+  if (value.length) {
+    out.push(`${value.map(r => `P${r.p} vale ${anFmtPoints(r.value)} no Canvas e ${anFmtPoints(r.sgaValue)} no SGA`).join('; ')}`
+      + ' — sincronize antes: o SGA calcula com o valor dele.');
+  }
+  return out;
 }
 
 // Parte que muda a cada edição: situação, fórmula, conta, cadastro da
@@ -5327,25 +5417,41 @@ function fdRenderOut() {
   out.innerHTML = '';
 
   const opts = $('fd-max-opts');
-  opts.style.display = b.maxs.length ? 'flex' : 'none';
+  opts.style.display = b.maxGroups.length ? 'flex' : 'none';
   $('fd-max-in-wrap').style.display = b.reav ? '' : 'none';
-  if (document.activeElement !== $('fd-max-n')) $('fd-max-n').value = b.maxs.length ? b.n : '';
+  opts.querySelectorAll('input[data-key]').forEach(input => {
+    const g = b.maxGroups.find(x => x.key === input.dataset.key);
+    if (g && document.activeElement !== input) input.value = g.n;
+  });
   $('fd-max-in').checked = !!_fd.state.maxInReav;
 
-  if (b.closes) {
-    out.appendChild(anEl('div', 'an-msg green', '✓ Fecha em 100.'));
+  // "Pronta para o professor" só quando fecha, sem aviso e com P e valores
+  // conferidos no SGA — a fórmula vai direto para o diário.
+  const review = fdReview();
+  if (b.closes && !review.length && !b.warnings.length) {
+    out.appendChild(anEl('div', 'an-msg green', '✓ Fecha em 100 — fórmula pronta para o professor.'));
+  } else if (b.closes) {
+    const msg = anEl('div', 'an-msg warn');
+    msg.appendChild(anEl('b', '', '⚠ Fecha em 100, mas confira antes de passar ao professor:'));
+    [...review, ...(b.warnings.length ? ['os avisos mais abaixo.'] : [])]
+      .forEach(t => msg.appendChild(anEl('div', '', '• ' + t)));
+    out.appendChild(msg);
   } else if (b.diff > 0) {
     out.appendChild(anEl('div', 'an-msg red',
       `⚠ ${fdEq(b.diff, 1) ? 'Sobra' : 'Sobram'} ${fdPts(b.diff)}: a nota máxima fica em ${anFmtPoints(b.total)}.`));
   } else if (b.diff < 0) {
     out.appendChild(anEl('div', 'an-msg red',
       `⚠ ${fdEq(b.diff, -1) ? 'Falta' : 'Faltam'} ${fdPts(-b.diff)}: a nota máxima fica em ${anFmtPoints(b.total)}.`));
+  } else {
+    out.appendChild(anEl('div', 'an-msg red', '⚠ Ainda não fecha: falta acertar a reavaliação (veja o aviso abaixo).'));
   }
 
   const box  = anEl('div', 'fd-formula');
   box.appendChild(anEl('code', '', b.formula || '—'));
   const copy = anEl('button', 'btn-link-sm', '📋 copiar');
-  copy.disabled = !b.formula;
+  // Fórmula que não fecha não vai para o professor.
+  copy.disabled = !b.formula || !b.closes;
+  if (!b.closes) copy.title = 'A fórmula ainda não fecha em 100';
   copy.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(b.formula);
@@ -5374,9 +5480,9 @@ function fdRenderOut() {
   }
 
   const conta = anEl('div', 'an-msg');
-  if (b.maxs.length) {
-    conta.appendChild(anEl('div', '', `Max(${b.n}; ${b.maxs.length} atividades) = ${anFmtPoints(b.maxVal)} de ${anFmtPoints(fdSum(b.maxs))} pts`
-      + (b.maxs.length > b.n ? ` (descarta ${b.maxs.length - b.n})` : '')));
+  for (const g of b.maxGroups) {
+    conta.appendChild(anEl('div', '', `Max(${g.n}; ${g.members.length} atividades) = ${anFmtPoints(g.val)} de ${anFmtPoints(g.sum)} pts`
+      + (g.members.length > g.n ? ` (descarta ${g.members.length - g.n})` : '')));
   }
   if (b.reav) {
     conta.appendChild(anEl('div', '', `Coberto pela reavaliação (P${b.reav.p}, ${anFmtPoints(b.reav.value)} pts): ${anFmtPoints(b.covered)} pts`));
@@ -5403,7 +5509,8 @@ function fdRenderOut() {
   if (b.diff < 0) {
     const pts = fdPts(-b.diff);
     const body = anSection(out, 'O que o professor pode fazer', 1, 'gray', true);
-    body.appendChild(anEl('div', 'an-item', `Criar uma tarefa de ${pts}, com SIS, e lançar ${pts} para todos os alunos — ninguém perde nota.`));
+    body.appendChild(anEl('div', 'an-item', `Criar uma tarefa de ${pts}, com SIS, e lançar ${pts} para todos os alunos — ninguém perde nota.`
+      + (b.reav && b.pesos === 1 ? ' Depois de sincronizar, ela entra dentro do Reav (marque "Coberta pela reav.").' : '')));
   } else if (b.diff > 0) {
     fdRenderImpact(out, b);
   }

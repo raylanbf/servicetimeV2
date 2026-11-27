@@ -89,10 +89,38 @@ console.log('Lógica — MAX');
   const s = fdSuggest(items([['Q1', 5], ['Q2', 5], ['Q3', 5], ['Q4', 5], ['Q5', 5], ['Q6', 5], ['Prova 1', 35], ['Prova 2', 45]]));
   const b = fdBuild(s);
   check(b.formula === 'P7+P8+Max(4;P1;P2;P3;P4;P5;P6)' && b.closes, 'sobra 10 em grupo de 5: ' + b.formula);
-  s.maxN = 5;
+  s.maxN['5.00'] = 5;
   check(fdBuild(s).diff === 5, 'MAX editado para 5: sobra 5');
-  s.maxN = null;
-  check(fdBuild(s).n === 5, 'MAX em automático: k−1');
+  delete s.maxN['5.00'];
+  check(fdBuild(s).maxGroups[0].n === 5, 'MAX em automático: k−1');
+}
+{
+  // 4433101 Tecnologias Digitais (curso 294073, 26/11/2026), P do SGA: sem a
+  // reavaliação soma 132. A substitutiva descarta uma prova de 25 e os 7 que
+  // ainda sobram fecham com uma de 5 pts + duas de 1 pt — três MAX.
+  const s = fdSuggest(items([['ATIVIDADE SEMANAL 1', 1], ['ATIVIDADE SEMANAL 2, 3 e 4', 10], ['ATIVIDADE SEMANAL 5', 1],
+    ['ATIVIDADES SEMANAIS 6 e 7', 5], ['ATIVIDADE SEMANAL 8', 4], ['ATIVIDADE SEMANAL 9', 5], ['ATIVIDADE SEMANAL 11', 4],
+    ['ATIVIDADE SEMANAL 12', 5], ['ATIVIDADE SEMANAL 13', 5], ['ATIVIDADE SEMANAL 14', 5], ['ATIVIDADE SEMANAL 15', 5],
+    ['ATIVIDADE SEMANAL 16', 1], ['ATIVIDADE SEMANAL 18', 1], ['REAVALIAÇÃO', 100], ['Os nativos digitais', 5],
+    ['PRIMEIRA PROVA ONLINE', 25], ['SEGUNDA PROVA ONLINE', 25], ['SUBSTITUTIVA', 25]]));
+  const b = fdBuild(s);
+  check(b.formula === 'Reav(P14;P2+P5+P7+Max(2;P1;P3;P12;P13)+Max(6;P4;P6;P8;P9;P10;P11;P15)+Max(2;P16;P17;P18))',
+    '4433101: substitutiva + resto da sobra em MAX de mesmo valor — ' + b.formula);
+  check(b.closes && b.total === 100 && b.pesos === 1 && b.maxGroups.map(g => `${g.n}/${g.members.length}`).join(' ') === '2/4 6/7 2/3',
+    '4433101: fecha em 100, pesos 1 e 1, MAX 2 de 4, 6 de 7 e 2 de 3');
+}
+{
+  // A substitutiva nunca soma, mesmo quando tira mais do que sobrava: aí
+  // falta ponto (o professor distribuiu de menos).
+  let b = fdBuild(fdSuggest(items([['Prova 1', 25], ['Prova 2', 25], ['Substitutiva', 25], ['Trabalho', 35]])));
+  check(b.formula === 'P4+Max(2;P1;P2;P3)' && b.diff === -15, 'substitutiva maior que a sobra (10): MAX mesmo assim, faltam 15 — ' + b.formula);
+  b = fdBuild(fdSuggest(items([['Prova 1', 25], ['Prova 2', 25], ['Prova substitutiva', 25], ['Trabalho', 20], ['Lista', 5]])));
+  check(b.formula === 'P4+P5+Max(2;P1;P2;P3)' && b.diff === -25, 'soma 100 contando a substitutiva: na verdade faltam 25 — ' + b.formula);
+}
+{
+  // Sobra sem combinação exata de MAX: nenhum MAX, fica para o professor.
+  const b = fdBuild(fdSuggest(items([['A', 3], ['B', 3], ['Prova', 98]])));
+  check(!b.maxGroups.length && b.diff === 4, 'sobra 4 com grupo de 3: sem MAX, sobram 4');
 }
 {
   // Dois grupos possíveis (sobra 6: 1 de 6 pts ou 2 de 3 pts): prefere o da
@@ -108,11 +136,13 @@ console.log('Lógica — MAX');
   role(s, 1, 'max');
   check(fdBuild(s).warnings.some(w => /uma atividade só/.test(w)), 'aviso: MAX com uma atividade só');
   role(s, 2, 'max');
-  s.maxN = 2;
+  s.maxN['50.00'] = 2;
   check(fdBuild(s).warnings.some(w => /não descarta nenhuma/.test(w)), 'aviso: MAX que pega todas');
   const m = fdSuggest(items([['A', 1], ['B', 2], ['C', 97]]));
   role(m, 1, 'max'); role(m, 2, 'max');
-  check(fdBuild(m).warnings.some(w => /mistura valores/.test(w)), 'aviso: MAX com valores diferentes');
+  const bm = fdBuild(m);
+  check(bm.formula === 'P3+Max(1;P1)+Max(1;P2)' && bm.warnings.filter(w => /uma atividade só/.test(w)).length === 2,
+    'valores diferentes no MAX viram grupos separados (nunca um MAX misturado) — ' + bm.formula);
 }
 
 console.log('Lógica — avisos, sobra e falta');
@@ -126,7 +156,7 @@ console.log('Lógica — avisos, sobra e falta');
 {
   const s = fdSuggest(items([['Lista 1', 10], ['Lista 2', 20], ['Trabalho', 30], ['Prova', 41]]));
   const b = fdBuild(s);
-  check(b.diff === 1 && !b.closes && !b.maxs.length, 'sobra 1 sem grupo de mesmo valor: não fecha, sem MAX');
+  check(b.diff === 1 && !b.closes && !b.maxGroups.length, 'sobra 1 sem grupo de mesmo valor: não fecha, sem MAX');
   const grades = {
     names: new Map([[1, 'Ana'], [2, 'Bruno'], [3, 'Carla']]),
     subs: [
@@ -150,6 +180,14 @@ console.log('Lógica — avisos, sobra e falta');
   const s = fdSuggest(items([['Avaliação', 30], ['Trabalho', 70], ['Reavaliação', 30]]));
   role(s, 1, 'soma'); role(s, 2, 'alvo');
   check(fdBuild(s).warnings.some(w => /vale 30 pts, mas o que ela cobre soma 70/.test(w)), 'aviso: reavaliação e o que ela cobre com valores diferentes');
+}
+{
+  // Duas reavaliações: a fórmula usa uma; a outra fica fora (não entra num
+  // MAX com as provas) e há aviso.
+  const s = fdSuggest(items([['Prova 1', 30], ['Prova 2', 30], ['Trabalho', 40], ['Reavaliação 1', 30], ['Reavaliação 2', 30]]));
+  const b = fdBuild(s);
+  check(b.formula === 'Reav(P4;P2)+P1+P3' && b.closes && s.rows[4].role === 'fora', 'duas reavaliações: usa uma, a outra fora — ' + b.formula);
+  check(b.warnings.some(w => /P5 \(Reavaliação 2\) também parece reavaliação/.test(w)), 'aviso: a outra também parece reavaliação');
 }
 {
   // fdItems: só publicadas com SIS, na ordem grupo → posição.
@@ -179,6 +217,10 @@ console.log('Lógica — Sincronização SGA');
   check(fdCanon('reav(P15;P13+P7+max(5;P2;P1))') === fdCanon('Reav(P15;Max(5;P1;P2)+P7+P13)'), 'compara o MAX pelo conteúdo');
   check(fdCanon('reav(P15;P1+P2)+P3') !== fdCanon('Reav(P15;P1+P3)+P2'), 'termo dentro x fora do reav conta como diferente');
   check(fdCanon('Max(5;P1;P2)') !== fdCanon('Max(4;P1;P2)'), 'n do MAX conta como diferente');
+  check(fdCanon('P1+P2+reav(P3;P4)') === fdCanon('Reav(P3;P4)+P1+P2'), 'reav no fim da fórmula: igual');
+  check(fdCanon('Reav(P8;(P1+P2)+P3)') === fdCanon('Reav(P8;P1+P2+P3)'), 'parênteses só em parte da soma: igual');
+  check(fdCanon('reav(P14;P2+max(2;P13;P1)+(max(1;P5;P7)))') === fdCanon('Reav(P14;Max(1;P7;P5)+P2+Max(2;P1;P13))'), 'vários MAX, em qualquer ordem: igual');
+  check(fdCanon('Reav(P3;P1)+P2') !== fdCanon('Reav(P1;P3)+P2'), 'troca da reavaliação com o que ela cobre: diferente');
 }
 {
   const sgaLiteral = fn('sgaLiteral'), sgaParse = fn('sgaParse');
@@ -291,6 +333,36 @@ const COURSES = {
       disciplina: { seq_turma: 404101, nom_disciplina: 'DISCIPLINA ABERTA', dsc_formula: 'Não há fórmula cadastrada', ind_diario_fechado: 0, ind_formula_grupo: 1 },
       avaliacoes: [AV('P1', 'Fórum', 10), AV('P2', 'Lista antiga', 5, { canvas: false, formula: true }),
         AV('P3', 'AVALIAÇÃO DOS MICROFUNDAMENTOS - ETAPA 1 (20 PONT', 20), AV('P4', 'Prova', 40), AV('P5', 'Trabalho', 30), AV('P6', 'Reavaliação', 100)],
+    },
+  },
+  // 4433101 Tecnologias Digitais (curso real 294073, 26/11/2026): a tabela
+  // "Canvas" da Sincronização SGA, com as não publicadas no meio, e a tabela
+  // "SGA" com P1–P18 na ordem das linhas "OK".
+  294: (() => {
+    const rows = [['ATIVIDADE SEMANAL 1', 1], ['ATIVIDADE SEMANAL 2, 3 e 4', 10], ['ATIVIDADE SEMANAL 5', 1], ['ATIVIDADES SEMANAIS 6 e 7', 5],
+      ['ATIVIDADE SEMANAL 8', 4], ['ATIVIDADE SEMANAL 9', 5], ['ATIVIDADE SEMANAL 11', 4], ['ATIVIDADE SEMANAL 12', 5],
+      ['ATIVIDADE SEMANAL 13', 5], ['ATIVIDADE SEMANAL 14', 5], ['ATIVIDADE SEMANAL 15', 5], ['ATIVIDADE SEMANAL 16', 1],
+      ['ATIVIDADE SEMANAL 18', 1], ['SEGUNDA PROVA ONLINE', 25, false], ['Atividade Avaliativa 04', 10, false],
+      ['Atividade Avaliativa 03', 10, false], ['Reavaliação', 100, false], ['REAVALIAÇÃO', 100], ['Questões sobre PLAc', 15, false],
+      ['Os nativos digitais', 5], ['PRIMEIRA PROVA ONLINE', 25], ['SEGUNDA PROVA ONLINE', 25], ['SUBSTITUTIVA', 25]];
+    const assignments = rows.map(([name, pts, pub = true], i) => A(294, 2940 + i, 29, i + 1, name, pts, { published: pub }));
+    const avaliacoes = assignments.filter(a => a.published)
+      .map((a, i) => AV('P' + (i + 1), a.name, a.points_possible));
+    return {
+      groups: [{ id: 29, position: 1, name: 'Tarefas' }],
+      assignments,
+      sga: { disciplina: { seq_turma: 4433101, nom_disciplina: 'TECNOLOGIAS DIGITAIS APLICADAS AO ENSINO DE LÍNGUAS ESTRANGEIRAS',
+        dsc_formula: 'Não há fórmula cadastrada', ind_diario_fechado: 0, ind_formula_grupo: 1 }, avaliacoes },
+    };
+  })(),
+  // Fecha em 100 no Canvas, mas não confere com o SGA: o Fórum foi renomeado
+  // depois da sincronização e a Prova mudou de valor (85 → 90).
+  505: {
+    groups: [{ id: 50, position: 1, name: 'Tarefas' }],
+    assignments: [A(505, 951, 50, 1, 'Fórum 1 - novo nome', 10), A(505, 952, 50, 2, 'Prova', 90)],
+    sga: {
+      disciplina: { seq_turma: 505101, nom_disciplina: 'DISCIPLINA CONFERIR', dsc_formula: 'Não há fórmula cadastrada', ind_diario_fechado: 0, ind_formula_grupo: 1 },
+      avaliacoes: [AV('P1', 'Fórum 1', 10), AV('P2', 'Prova', 85)],
     },
   },
   // Sobra de 1 sem grupo de mesmo valor: levantamento com as notas.
@@ -442,7 +514,8 @@ const FAKE_CHROME = `(() => {
   check(f1 === 'Reav(P15;P8+P9+P10+P11+P12+P13+P14+Max(6;P1;P2;P3;P4;P5;P6;P7))',
     'fórmula com MAX das 7 de 5 pts (inclui a substitutiva) dentro do Reav: ' + f1);
   let out = await outText();
-  check(/✓ Fecha em 100\./.test(out), 'fecha em 100');
+  check(/⚠ Fecha em 100, mas confira antes de passar ao professor:\s*• o SGA não mandou as siglas/.test(out) && !/✓ Fecha/.test(out),
+    'fecha em 100, mas sem as siglas do SGA não diz "pronta": manda conferir os P');
   check(/Peso Nota Parcial: 1 · Peso Reavaliação: 1/.test(out) && /Não substituir reavaliação se o total for menor/.test(out), 'cadastro da reavaliação: pesos 1 e 1, "não substituir" marcado');
   check(/Max\(6; 7 atividades\) = 30 de 35 pts \(descarta 1\)/.test(out), 'conta do MAX: 30 de 35, descarta 1');
   const rows = await panel.$$eval('#an-card-diario .fd-row', els => els.map(e => e.querySelector('.fd-p').value + '=' + e.querySelector('.an-item-name').textContent));
@@ -472,16 +545,18 @@ const FAKE_CHROME = `(() => {
   await panel.selectOption('#an-card-diario select[data-id="504"]', 'soma');
   check(await formula() === 'Reav(P15;P8+P9+P10+P11+P12+P13+P14+Max(5;P1;P2;P3;P4;P5;P6))+P7', 'substitutiva como soma: ' + await formula());
   out = await outText();
-  check(/vale 100 pts, mas o que ela cobre soma 95/.test(out) && !/✓ Fecha/.test(out), 'avisa: reavaliação vale 100 e cobre 95');
+  check(/vale 100 pts, mas o que ela cobre soma 95/.test(out) && /⚠ Ainda não fecha: falta acertar a reavaliação/.test(out),
+    'avisa: reavaliação vale 100 e cobre 95 — total 100, mas "ainda não fecha"');
+  check(await panel.$eval('#fd-out .fd-formula .btn-link-sm', b => b.disabled), 'fórmula que não fecha não pode ser copiada');
   await panel.selectOption('#an-card-diario select[data-id="504"]', 'alvo');
-  check(await formula() === 'Reav(P15;P7+P8+P9+P10+P11+P12+P13+P14+Max(5;P1;P2;P3;P4;P5;P6))' && /✓ Fecha em 100\./.test(await outText()),
+  check(await formula() === 'Reav(P15;P7+P8+P9+P10+P11+P12+P13+P14+Max(5;P1;P2;P3;P4;P5;P6))' && /Fecha em 100/.test(await outText()),
     'substitutiva dentro do Reav (a fórmula que a equipe usou no 17101): ' + await formula());
   check(/✓ Igual à sugerida \(mesmos termos\)/.test(await outText()), 'agora é igual à fórmula atual do SGA (outra ordem, mesmos termos)');
 
   // MAX editado à mão e "dentro da reavaliação" desmarcado.
-  await panel.fill('#fd-max-n', '4');
+  await panel.fill('#fd-max-opts input[data-key="5.00"]', '4');
   check(/Faltam 5 pts: a nota máxima fica em 95/.test(await outText()), 'MAX pega 4: faltam 5 pts');
-  await panel.fill('#fd-max-n', '5');
+  await panel.fill('#fd-max-opts input[data-key="5.00"]', '5');
   await panel.uncheck('#fd-max-in');
   check(await formula() === 'Reav(P15;P7+P8+P9+P10+P11+P12+P13+P14)+Max(5;P1;P2;P3;P4;P5;P6)', 'MAX fora da reavaliação: ' + await formula());
   check(/Peso Nota Parcial: 0 · Peso Reavaliação: 0/.test(await outText()), 'com algo por fora, pesos 0 e 0');
@@ -561,7 +636,7 @@ const FAKE_CHROME = `(() => {
   await setTab(404);
   await run('#btn-an-diario');
   out = await outText();
-  check(await formula() === 'Reav(P6;P1+P3+P4+P5)' && /✓ Fecha em 100\./.test(out),
+  check(await formula() === 'Reav(P6;P1+P3+P4+P5)' && /✓ Fecha em 100 — fórmula pronta para o professor\./.test(out),
     'P pelas siglas do SGA (P2 vago, Prova e Trabalho fora da ordem do Canvas): ' + await formula());
   const card404 = await text('#an-card-diario');
   check(/Diário aberto/.test(card404) && /✓ P lidos do SGA para as 5 tarefas\./.test(card404), 'diário aberto, P lidos do SGA para todas as tarefas');
@@ -573,6 +648,40 @@ const FAKE_CHROME = `(() => {
   check(rows404.join(' | ') === '1 10 pts · P1 no SGA | 3 20 pts · P3 no SGA | 5 30 pts · P5 no SGA | 4 40 pts · P4 no SGA | 6 100 pts · P6 no SGA',
     'cada tarefa mostra a sigla do SGA — ' + rows404.join(' | '));
   await shot('formula-siglas.png');
+
+  console.log('\nPainel — 4433101: substitutiva + MAX do resto da sobra');
+  await setTab(294);
+  await run('#btn-an-diario');
+  const f294 = 'Reav(P14;P2+P5+P7+Max(2;P1;P3;P12;P13)+Max(6;P4;P6;P8;P9;P10;P11;P15)+Max(2;P16;P17;P18))';
+  out = await outText();
+  check(await formula() === f294 && /✓ Fecha em 100 — fórmula pronta para o professor\./.test(out), 'três MAX, fecha em 100, pronta: ' + await formula());
+  check(/✓ P lidos do SGA para as 18 tarefas\./.test(await text('#an-card-diario')), 'P lidos do SGA para as 18 tarefas (não publicadas de fora)');
+  check(/Max\(2; 4 atividades\) = 2 de 4 pts \(descarta 2\)[\s\S]*Max\(6; 7 atividades\) = 30 de 35 pts \(descarta 1\)[\s\S]*Max\(2; 3 atividades\) = 50 de 75 pts \(descarta 1\)/.test(out),
+    'conta de cada MAX');
+  const maxOpts = () => panel.$$eval('#fd-max-opts input[data-key]', els => els.map(e => `${e.dataset.key}=${e.value}`).join(' '));
+  check(await maxOpts() === '1.00=2 5.00=6 25.00=2', 'um campo "pega as N maiores" por grupo: ' + await maxOpts());
+  check(/ATIVIDADE SEMANAL 1\s*1 pt · P1 no SGA/.test(await text('#an-card-diario')), '"1 pt" no singular');
+  await panel.fill('#fd-max-opts input[data-key="1.00"]', '3');
+  check((await formula()).includes('Max(3;P1;P3;P12;P13)') && /Sobra 1 pt: a nota máxima fica em 101/.test(await outText())
+    && await maxOpts() === '1.00=3 5.00=6 25.00=2', 'editar um MAX não mexe nos outros: sobra 1 pt');
+  await panel.selectOption('#an-card-diario select[data-id="2940"]', 'alvo');
+  check((await formula()).includes('Max(2;P3;P12;P13)') && await maxOpts() === '1.00=2 5.00=6 25.00=2',
+    'tirar uma atividade do grupo: só ele volta ao automático (k−1)');
+  await shot('formula-3max.png');
+
+  console.log('\nPainel — fecha no Canvas, mas não confere com o SGA');
+  await setTab(505);
+  await run('#btn-an-diario');
+  out = await outText();
+  check(await formula() === 'P2+P3' && !/✓ Fecha/.test(out) && /⚠ Fecha em 100, mas confira antes de passar ao professor:/.test(out),
+    'não diz "pronta": ' + await formula());
+  check(/• P3 sem sigla no SGA \(criada ou renomeada/.test(out), 'tarefa sem sigla (renomeada): P3 não confere');
+  check(/• P1 \(Fórum 1\) está no SGA, mas não casou com nenhuma tarefa/.test(out), 'sigla do SGA que não casou (consta no Canvas)');
+  check(/• P2 vale 90 no Canvas e 85 no SGA — sincronize antes/.test(out), 'valor diferente no SGA');
+  check(!await panel.$eval('#fd-out .fd-formula .btn-link-sm', b => b.disabled), 'fecha: dá para copiar (com o aviso de conferir)');
+  await panel.fill('#an-card-diario .fd-row:has(select[data-id="952"]) .fd-p', '7');
+  check(/• P7 \(no SGA é P2\) — número mudado à mão\./.test(await outText()), 'P mudado à mão contra a sigla do SGA');
+  await shot('formula-conferir.png');
 
   check(!sgaRequests.some(r => /\/sync\b/.test(r.path)), 'nunca chamou o "Sincronizar" (/sga_sync/sync)');
   check(sgaRequests.every(r => r.path === '/sga_sync/launch' || r.path.startsWith('/sga_sync/index?')), 'na Sincronização SGA, só o acesso e o index: ' + [...new Set(sgaRequests.map(r => r.path.split('?')[0]))].join(', '));
